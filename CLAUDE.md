@@ -53,6 +53,8 @@ Env var: `NEXT_PUBLIC_API_URL=https://api.sgraal.com` (set in Vercel project set
 - `SUPABASE_KEY` — Supabase anon key (optional, enables logging)
 - `SUPABASE_SERVICE_KEY` — Supabase service role key (required for signup, bypasses RLS for api_keys inserts)
 - `STRIPE_SECRET_KEY` — Stripe secret key (optional, enables billing and signup)
+- `UPSTASH_REDIS_URL` — Upstash Redis REST URL (optional, enables Global State Vector)
+- `UPSTASH_REDIS_TOKEN` — Upstash Redis auth token (optional, enables GSV)
 
 ## Database Setup
 
@@ -66,7 +68,7 @@ The `/v1/preflight` endpoint requires a Bearer token in the `Authorization` head
 
 `POST /v1/signup` — accepts `{ "email": "..." }`. Creates a Stripe customer, subscribes to the free tier, generates a secure API key (`sg_live_` prefix), stores the SHA-256 hash in Supabase `api_keys`, and returns the plaintext key once.
 
-`POST /v1/preflight` — requires `Authorization: Bearer <api_key>`. Accepts `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), and `domain` (general/customer_support/coding/legal/fintech/medical). The Stripe customer ID is resolved automatically from the API key. Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, and `component_breakdown`.
+`POST /v1/preflight` — requires `Authorization: Bearer <api_key>`. Accepts `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), `domain` (general/customer_support/coding/legal/fintech/medical), and optional `client_gsv` (integer). The Stripe customer ID is resolved automatically from the API key. Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, `component_breakdown`, `repair_plan`, `healing_counter`, and `gsv`. If `client_gsv` is provided and server GSV < client_gsv, returns `stale_state_warning: STALE_STATE_DETECTED`. GSV increments monotonically via Upstash Redis INCR (falls back to 0 if Redis unavailable).
 
 ## Rate Limiting
 
