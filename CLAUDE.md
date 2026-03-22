@@ -11,6 +11,8 @@ Sgraal is a memory governance protocol for AI agents. It provides a preflight sc
 - **`scoring_engine/`** — Core Ω_MEM computation engine (pure Python, no dependencies). `omega_mem.py` contains the weighted scoring formula using 8 risk components (freshness, drift, provenance, propagation, recall, encode, interference, recovery), scaled by action-type and domain criticality multipliers.
 - **`api/`** — FastAPI REST API exposing `POST /v1/preflight` as the single scoring endpoint. Optionally logs results to Supabase (`memory_ledger` table) when `SUPABASE_URL` and `SUPABASE_KEY` env vars are set.
 - **`examples/`** — Usage examples for the scoring engine.
+- **`web/`** — Next.js landing page deployed to Vercel at [sgraal.com](https://www.sgraal.com). Sections: hero, how it works, API demo, pricing, signup form. Includes `/privacy` and `/terms` pages. Uses `NEXT_PUBLIC_API_URL` env var to point at the API.
+- **`scripts/`** — Stripe setup, Supabase migrations, and pg_cron monthly reset.
 
 ## Commands
 
@@ -27,10 +29,16 @@ python examples/basic_usage.py
 
 ## Deployment
 
-Deployed on Railway via `Procfile`:
+**API** — Deployed on Railway via `Procfile`:
 ```
 web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
 ```
+
+**Landing page** — Deployed on Vercel from `web/`:
+```bash
+cd web && vercel --prod
+```
+Env var: `NEXT_PUBLIC_API_URL=https://api.sgraal.com` (set in Vercel project settings).
 
 ## Environment Variables
 
