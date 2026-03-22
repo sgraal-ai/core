@@ -744,3 +744,93 @@ class TestHealingPolicy:
         assert by_id["HP-001"].tier == 1  # auto-heal
         assert by_id["HP-002"].tier == 1  # auto-heal
         assert by_id["HP-003"].tier == 2  # suggest
+
+
+class TestGSV:
+    def test_gsv_in_api_response(self):
+        """API response should include gsv field."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "action_type": "informational",
+            "domain": "general",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "gsv" in data
+        assert isinstance(data["gsv"], int)
+
+    def test_gsv_fallback_without_redis(self):
+        """Without Redis configured, gsv should be 0."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert resp.json()["gsv"] == 0
+
+    def test_no_stale_warning_without_client_gsv(self):
+        """No stale_state_warning when client_gsv is not provided."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "stale_state_warning" not in resp.json()
+
+    def test_no_stale_warning_when_redis_unavailable(self):
+        """No stale warning when Redis is down (gsv=0) even if client_gsv is set."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "client_gsv": 100,
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        # gsv=0 means Redis unavailable, so no stale warning
+        assert "stale_state_warning" not in resp.json()
+
+    def test_stale_state_detected_with_mock(self):
+        """When server GSV < client GSV, return STALE_STATE_DETECTED warning."""
+        with patch("api.main._increment_gsv", return_value=5):
+            resp = client.post("/v1/preflight", json={
+                "memory_state": [_fresh_entry()],
+                "client_gsv": 10,
+            }, headers=AUTH)
+
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "stale_state_warning" in data
+            assert "STALE_STATE_DETECTED" in data["stale_state_warning"]
+            assert data["gsv"] == 5
+
+    def test_no_stale_warning_when_gsv_ahead(self):
+        """When server GSV >= client GSV, no stale warning."""
+        with patch("api.main._increment_gsv", return_value=15):
+            resp = client.post("/v1/preflight", json={
+                "memory_state": [_fresh_entry()],
+                "client_gsv": 10,
+            }, headers=AUTH)
+
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "stale_state_warning" not in data
+            assert data["gsv"] == 15
+
+    def test_gsv_monotonically_increasing_with_mock(self):
+        """Consecutive calls should return increasing GSV values."""
+        call_count = 0
+
+        def mock_incr():
+            nonlocal call_count
+            call_count += 1
+            return call_count
+
+        with patch("api.main._increment_gsv", side_effect=mock_incr):
+            r1 = client.post("/v1/preflight", json={
+                "memory_state": [_fresh_entry()],
+            }, headers=AUTH)
+            r2 = client.post("/v1/preflight", json={
+                "memory_state": [_fresh_entry()],
+            }, headers=AUTH)
+
+            assert r2.json()["gsv"] > r1.json()["gsv"]

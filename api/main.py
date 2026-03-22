@@ -8,6 +8,7 @@ import secrets
 import hashlib
 from datetime import datetime, timezone
 import stripe
+import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scoring_engine import compute, MemoryEntry
@@ -19,6 +20,9 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
+UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_URL")
+UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN")
+
 supabase_client = None
 if SUPABASE_URL and SUPABASE_KEY:
     from supabase import create_client
@@ -28,6 +32,23 @@ supabase_service_client = None
 if SUPABASE_URL and SUPABASE_SERVICE_KEY:
     from supabase import create_client as _create_client
     supabase_service_client = _create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+def _increment_gsv() -> int:
+    """Increment Global State Vector via Upstash Redis INCR. Returns 0 if unavailable."""
+    if not UPSTASH_REDIS_URL or not UPSTASH_REDIS_TOKEN:
+        return 0
+    try:
+        resp = http_requests.post(
+            f"{UPSTASH_REDIS_URL}/INCR/sgraal:gsv",
+            headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+            timeout=2,
+        )
+        if resp.ok:
+            return resp.json().get("result", 0)
+    except Exception:
+        pass
+    return 0
+
 
 app = FastAPI(title="Sgraal API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -84,6 +105,7 @@ class PreflightRequest(BaseModel):
     domain: Literal["general","customer_support","coding","legal","fintech","medical"] = "general"
     current_goal: Optional[str] = None
     current_goal_embedding: Optional[list[float]] = None
+    client_gsv: Optional[int] = None
 
 class SignupRequest(BaseModel):
     email: str
@@ -177,6 +199,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
 
+    # Increment Global State Vector
+    gsv = _increment_gsv()
+
+    # Stale state detection: client's GSV is ahead of server's
+    stale_state_warning = None
+    if req.client_gsv is not None and gsv > 0 and gsv < req.client_gsv:
+        stale_state_warning = (
+            f"STALE_STATE_DETECTED: server GSV ({gsv}) < client GSV ({req.client_gsv}). "
+            f"Memory state may be outdated."
+        )
+
     # Increment calls_this_month and update last_used_at
     key_hash = key_record.get("key_hash")
     if supabase_service_client and key_hash:
@@ -213,11 +246,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "explainability_note": result.explainability_note,
                 "component_breakdown": result.component_breakdown,
                 "healing_counter": result.healing_counter,
+                "gsv": gsv,
             }).execute()
         except Exception as e:
             pass
 
-    return {
+    response = {
         "omega_mem_final": result.omega_mem_final,
         "recommended_action": result.recommended_action,
         "assurance_score": result.assurance_score,
@@ -234,4 +268,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             for h in result.repair_plan
         ],
         "healing_counter": result.healing_counter,
+        "gsv": gsv,
     }
+    if stale_state_warning:
+        response["stale_state_warning"] = stale_state_warning
+
+    return response
