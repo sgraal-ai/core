@@ -45,3 +45,8 @@ web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
 ## Billing
 
 Usage-based billing via Stripe Meters. Every `/v1/preflight` call emits an `omega_mem_preflight` meter event attributed to the request's `stripe_customer_id`. Free tier: first 10,000 calls per customer are free (configured in Stripe pricing).
+
+One-time Stripe setup (creates meter, product, and graduated pricing):
+```bash
+STRIPE_SECRET_KEY=sk_test_... python scripts/setup_stripe.py
+```
