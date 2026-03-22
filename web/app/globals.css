@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0B0F14;
+  --foreground: #E8E8E8;
+  --gold: #C9A962;
+  --gold-dim: #A08840;
+  --surface: #141A22;
+  --surface-light: #1C2430;
+  --muted: #6B7280;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-gold: var(--gold);
+  --color-gold-dim: var(--gold-dim);
+  --color-surface: var(--surface);
+  --color-surface-light: var(--surface-light);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
