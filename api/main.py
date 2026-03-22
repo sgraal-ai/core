@@ -72,6 +72,7 @@ class MemoryEntryRequest(BaseModel):
     source_trust: float = 0.9
     source_conflict: float = 0.1
     downstream_count: int = 1
+    r_belief: float = 0.5
 
 class PreflightRequest(BaseModel):
     agent_id: Optional[str] = "anonymous"
@@ -164,7 +165,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         timestamp_age_days=e.timestamp_age_days,
         source_trust=e.source_trust,
         source_conflict=e.source_conflict,
-        downstream_count=e.downstream_count)
+        downstream_count=e.downstream_count,
+        r_belief=e.r_belief)
         for e in req.memory_state]
 
     result = compute(entries, req.action_type, req.domain)

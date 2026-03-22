@@ -11,6 +11,7 @@ class MemoryEntry:
     source_trust: float        # 0.0 – 1.0
     source_conflict: float     # 0.0 – 1.0  (Dempster-Shafer K)
     downstream_count: int      # blast radius
+    r_belief: float = 0.5      # 0.0 – 1.0  (model belief divergence)
 
 @dataclass
 class PreflightResult:
@@ -30,6 +31,7 @@ WEIGHTS = {
     "r_encode":       0.12,
     "s_interference": 0.10,
     "s_recovery":    -0.10,
+    "r_belief":       0.05,
 }
 
 C_ACTION = {
@@ -67,6 +69,10 @@ def compute(
     s_drift       = min(100, s_freshness * 0.4 + s_interference * 0.6)
     s_recovery    = max(0, 100 - s_freshness * 0.5)
 
+    # R_belief: inverse of model belief — low belief = high risk
+    # r_belief 0.0–1.0 maps to risk 100–0 (inverted)
+    r_belief_score = min(100, sum((1 - e.r_belief) * 100 for e in entries) / len(entries))
+
     components = {
         "s_freshness":    s_freshness,
         "s_drift":        s_drift,
@@ -76,6 +82,7 @@ def compute(
         "r_encode":       r_encode,
         "s_interference": s_interference,
         "s_recovery":     s_recovery,
+        "r_belief":       r_belief_score,
     }
 
     omega = sum(WEIGHTS[k] * v for k, v in components.items())
@@ -100,6 +107,13 @@ def compute(
     # Explainability
     worst = max(components, key=components.get)
     note = f"Highest risk: {worst} ({components[worst]:.1f}/100). Action: {action}."
+
+    # R_belief advisory: low belief suggests external storage
+    avg_belief = sum(e.r_belief for e in entries) / len(entries)
+    if avg_belief < 0.2:
+        note += " Low model belief — consider saving to external memory."
+    elif avg_belief < 0.4:
+        note += " Weak model belief — verify with user before relying on this memory."
 
     return PreflightResult(
         omega_mem_final=round(omega_final, 1),
