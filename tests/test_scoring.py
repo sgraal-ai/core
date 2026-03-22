@@ -53,6 +53,76 @@ class TestScoringEngine:
         assert result.omega_mem_final < 25
         assert result.assurance_score > 0
 
+    def test_tool_state_decays_faster_than_identity(self):
+        """tool_state (lambda=0.15) should score higher freshness risk than identity (lambda=0.002) at same age."""
+        age = 30  # 30 days old
+        tool = compute([MemoryEntry(
+            id="t1", content="API token", type="tool_state",
+            timestamp_age_days=age, source_trust=0.9,
+            source_conflict=0.1, downstream_count=1,
+        )])
+        identity = compute([MemoryEntry(
+            id="t2", content="Company name", type="identity",
+            timestamp_age_days=age, source_trust=0.9,
+            source_conflict=0.1, downstream_count=1,
+        )])
+        assert tool.component_breakdown["s_freshness"] > identity.component_breakdown["s_freshness"]
+
+    def test_policy_decays_slower_than_episodic(self):
+        """policy (lambda=0.005) should score lower freshness risk than episodic (lambda=0.05)."""
+        age = 60
+        policy = compute([MemoryEntry(
+            id="t3", content="No emails after 10pm", type="policy",
+            timestamp_age_days=age, source_trust=0.9,
+            source_conflict=0.1, downstream_count=1,
+        )])
+        episodic = compute([MemoryEntry(
+            id="t4", content="User called March 10", type="episodic",
+            timestamp_age_days=age, source_trust=0.9,
+            source_conflict=0.1, downstream_count=1,
+        )])
+        assert episodic.component_breakdown["s_freshness"] > policy.component_breakdown["s_freshness"]
+
+    def test_weibull_decay_ordering(self):
+        """All memory types at 30 days should follow decay ordering: tool_state > shared_workflow > episodic > preference > semantic > policy > identity."""
+        age = 30
+        types_ordered = ["tool_state", "shared_workflow", "episodic", "preference", "semantic", "policy", "identity"]
+        scores = []
+        for t in types_ordered:
+            result = compute([MemoryEntry(
+                id=f"ord_{t}", content="Test", type=t,
+                timestamp_age_days=age, source_trust=0.9,
+                source_conflict=0.1, downstream_count=1,
+            )])
+            scores.append(result.component_breakdown["s_freshness"])
+        for i in range(len(scores) - 1):
+            assert scores[i] > scores[i + 1], f"{types_ordered[i]} should decay faster than {types_ordered[i+1]}"
+
+    def test_fresh_memory_low_decay_all_types(self):
+        """At age 0, all memory types should have ~0 freshness risk."""
+        for t in ["tool_state", "preference", "episodic", "semantic", "policy", "identity", "shared_workflow"]:
+            result = compute([MemoryEntry(
+                id=f"fresh_{t}", content="Fresh", type=t,
+                timestamp_age_days=0, source_trust=0.9,
+                source_conflict=0.1, downstream_count=1,
+            )])
+            assert result.component_breakdown["s_freshness"] == 0.0, f"{t} should have 0 freshness at age 0"
+
+    def test_unknown_type_uses_default_decay(self):
+        """Unknown memory types should use default lambda (0.05, same as episodic)."""
+        age = 30
+        unknown = compute([MemoryEntry(
+            id="unk", content="Test", type="custom_type",
+            timestamp_age_days=age, source_trust=0.9,
+            source_conflict=0.1, downstream_count=1,
+        )])
+        episodic = compute([MemoryEntry(
+            id="epi", content="Test", type="episodic",
+            timestamp_age_days=age, source_trust=0.9,
+            source_conflict=0.1, downstream_count=1,
+        )])
+        assert unknown.component_breakdown["s_freshness"] == episodic.component_breakdown["s_freshness"]
+
     def test_stale_data_irreversible_fintech_returns_block(self):
         entries = [
             MemoryEntry(

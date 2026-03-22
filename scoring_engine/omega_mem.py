@@ -38,6 +38,31 @@ WEIGHTS = {
     "s_relevance":    0.06,
 }
 
+# Weibull decay parameters per memory type (lambda, k=1 for exponential)
+# Higher lambda = faster decay = memory becomes stale sooner
+WEIBULL_LAMBDA = {
+    "tool_state":       0.15,   # fast decay — tool outputs change frequently
+    "shared_workflow":  0.08,   # moderate-fast — workflow state evolves
+    "episodic":         0.05,   # moderate — events fade over weeks
+    "preference":       0.03,   # slow — preferences are relatively stable
+    "semantic":         0.01,   # very slow — general knowledge persists
+    "policy":           0.005,  # near-permanent — rules rarely change
+    "identity":         0.002,  # almost never — core identity facts
+}
+WEIBULL_K = 1.0  # shape parameter (k=1 = exponential decay)
+WEIBULL_LAMBDA_DEFAULT = 0.05  # fallback for unknown types
+
+
+def _weibull_decay(age_days: float, memory_type: str) -> float:
+    """Weibull decay score (0–100). Higher = more decayed = higher risk.
+
+    Uses 1 - exp(-(age/lambda)^k) scaled to 0–100.
+    """
+    lam = WEIBULL_LAMBDA.get(memory_type, WEIBULL_LAMBDA_DEFAULT)
+    decay = 1.0 - math.exp(-((age_days * lam) ** WEIBULL_K))
+    return min(100.0, decay * 100.0)
+
+
 C_ACTION = {
     "informational": 1.0,
     "reversible":    1.3,
@@ -75,7 +100,8 @@ def compute(
         return PreflightResult(0, "USE_MEMORY", 100, "No memory entries.", {})
 
     # Component scores (0–100, higher = more risk)
-    s_freshness   = min(100, sum(e.timestamp_age_days * 1.2 for e in entries) / len(entries))
+    # s_freshness uses Weibull decay — memory type determines how fast it goes stale
+    s_freshness   = sum(_weibull_decay(e.timestamp_age_days, e.type) for e in entries) / len(entries)
     s_provenance  = min(100, sum((1 - e.source_trust) * 100 for e in entries) / len(entries))
     s_interference= min(100, sum(e.source_conflict * 100 for e in entries) / len(entries))
     s_propagation = min(100, sum(e.downstream_count * 8 for e in entries) / len(entries))
