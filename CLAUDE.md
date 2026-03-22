@@ -13,6 +13,7 @@ Sgraal is a memory governance protocol for AI agents. It provides a preflight sc
 - **`examples/`** — Usage examples for the scoring engine.
 - **`web/`** — Next.js landing page deployed to Vercel at [sgraal.com](https://www.sgraal.com). Sections: hero, how it works, API demo, pricing, signup form. Includes `/privacy` and `/terms` pages. Uses `NEXT_PUBLIC_API_URL` env var to point at the API.
 - **`mcp/`** — `@sgraal/mcp` npm package. MCP server (`sgraal_preflight` tool) for Claude Desktop, plus `createGuard()` and `withPreflight()` middleware for LangGraph/Node.js. Reads `SGRAAL_API_KEY` from env. Blocks on BLOCK, warns on WARN, passes through on USE_MEMORY.
+- **`spec/`** — MemCube specification. `memcube.schema.json` defines the standardized memory entry format (JSON Schema draft 2020-12). 7 required fields (id, content, type, timestamp_age_days, source_trust, source_conflict, downstream_count) and 6 optional fields (goal_id, source, provenance, gsv, context_tags, geo_tag). Memory types: episodic, semantic, preference, tool_state, shared_workflow, policy, identity. See `MEMCUBE.md` for field documentation and examples.
 - **`scripts/`** — Stripe setup, Supabase migrations, and pg_cron monthly reset.
 
 ## Commands
