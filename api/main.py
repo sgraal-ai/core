@@ -74,6 +74,7 @@ class MemoryEntryRequest(BaseModel):
     downstream_count: int = 1
     r_belief: float = 0.5
     prompt_embedding: Optional[list[float]] = None
+    healing_counter: int = 0
 
 class PreflightRequest(BaseModel):
     agent_id: Optional[str] = "anonymous"
@@ -170,7 +171,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         source_conflict=e.source_conflict,
         downstream_count=e.downstream_count,
         r_belief=e.r_belief,
-        prompt_embedding=e.prompt_embedding)
+        prompt_embedding=e.prompt_embedding,
+        healing_counter=e.healing_counter)
         for e in req.memory_state]
 
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
@@ -220,4 +222,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "assurance_score": result.assurance_score,
         "explainability_note": result.explainability_note,
         "component_breakdown": result.component_breakdown,
+        "repair_plan": [
+            {
+                "action": h.action,
+                "entry_id": h.entry_id,
+                "reason": h.reason,
+                "projected_improvement": h.projected_improvement,
+                "priority": h.priority,
+            }
+            for h in result.repair_plan
+        ],
     }

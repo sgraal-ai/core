@@ -15,6 +15,17 @@ class MemoryEntry:
     downstream_count: int      # blast radius
     r_belief: float = 0.5      # 0.0 – 1.0  (model belief divergence)
     prompt_embedding: Optional[list[float]] = field(default=None, repr=False)  # embedding of memory content
+    healing_counter: int = 0   # number of times this entry has been healed
+
+
+@dataclass
+class HealingAction:
+    action: Literal["REFETCH", "VERIFY_WITH_SOURCE", "REBUILD_WORKING_SET"]
+    entry_id: str
+    reason: str
+    projected_improvement: float  # expected Ω_MEM reduction
+    priority: int                 # 1 (highest) to 3 (lowest)
+
 
 @dataclass
 class PreflightResult:
@@ -23,6 +34,7 @@ class PreflightResult:
     assurance_score: float
     explainability_note: str
     component_breakdown: dict
+    repair_plan: list[HealingAction] = field(default_factory=list)
 
 # Default beta weights — v1.0
 WEIGHTS = {
@@ -97,7 +109,7 @@ def compute(
 ) -> PreflightResult:
 
     if not entries:
-        return PreflightResult(0, "USE_MEMORY", 100, "No memory entries.", {})
+        return PreflightResult(0, "USE_MEMORY", 100, "No memory entries.", {}, [])
 
     # Component scores (0–100, higher = more risk)
     # s_freshness uses Weibull decay — memory type determines how fast it goes stale
@@ -175,10 +187,51 @@ def compute(
     elif avg_belief < 0.4:
         note += " Weak model belief — verify with user before relying on this memory."
 
+    # Tier 1 self-healing: generate repair plan
+    repair_plan: list[HealingAction] = []
+    for e in entries:
+        entry_freshness = _weibull_decay(e.timestamp_age_days, e.type)
+        entry_interference = e.source_conflict * 100
+
+        if entry_freshness > 60:
+            improvement = round(entry_freshness * WEIGHTS["s_freshness"] * c / len(entries), 1)
+            repair_plan.append(HealingAction(
+                action="REFETCH",
+                entry_id=e.id,
+                reason=f"Memory is stale (freshness={entry_freshness:.0f}/100, type={e.type})",
+                projected_improvement=improvement,
+                priority=1 if entry_freshness > 80 else 2,
+            ))
+
+        if entry_interference > 50:
+            improvement = round(entry_interference * WEIGHTS["s_interference"] * c / len(entries), 1)
+            repair_plan.append(HealingAction(
+                action="VERIFY_WITH_SOURCE",
+                entry_id=e.id,
+                reason=f"High source conflict (K={e.source_conflict:.2f})",
+                projected_improvement=improvement,
+                priority=1 if entry_interference > 75 else 2,
+            ))
+
+        if e.r_belief < 0.3:
+            belief_risk = (1 - e.r_belief) * 100
+            improvement = round(belief_risk * WEIGHTS["r_belief"] * c / len(entries), 1)
+            repair_plan.append(HealingAction(
+                action="REBUILD_WORKING_SET",
+                entry_id=e.id,
+                reason=f"Low model belief (r_belief={e.r_belief:.2f})",
+                projected_improvement=improvement,
+                priority=2 if e.r_belief > 0.15 else 1,
+            ))
+
+    # Sort by priority (1 first), then by projected improvement (highest first)
+    repair_plan.sort(key=lambda h: (h.priority, -h.projected_improvement))
+
     return PreflightResult(
         omega_mem_final=round(omega_final, 1),
         recommended_action=action,
         assurance_score=assurance,
         explainability_note=note,
         component_breakdown={k: round(v, 1) for k, v in components.items()},
+        repair_plan=repair_plan,
     )

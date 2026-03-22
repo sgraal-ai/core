@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry
+from scoring_engine import compute, MemoryEntry, HealingAction
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -495,3 +495,151 @@ class TestRateLimiting:
             assert resp.status_code == 200
         finally:
             app.dependency_overrides.clear()
+
+
+class TestSelfHealing:
+    def test_no_repair_plan_for_healthy_memory(self):
+        """Fresh, trusted, high-belief memory should have empty repair plan."""
+        entries = [
+            MemoryEntry(
+                id="healthy_001",
+                content="Fresh data",
+                type="semantic",
+                timestamp_age_days=1,
+                source_trust=0.95,
+                source_conflict=0.05,
+                downstream_count=1,
+                r_belief=0.9,
+            )
+        ]
+        result = compute(entries)
+        assert result.repair_plan == []
+
+    def test_stale_entry_suggests_refetch(self):
+        """Stale tool_state memory should trigger REFETCH."""
+        entries = [
+            MemoryEntry(
+                id="stale_001",
+                content="Old API response",
+                type="tool_state",
+                timestamp_age_days=30,
+                source_trust=0.9,
+                source_conflict=0.1,
+                downstream_count=1,
+            )
+        ]
+        result = compute(entries)
+        refetch_actions = [h for h in result.repair_plan if h.action == "REFETCH"]
+        assert len(refetch_actions) == 1
+        assert refetch_actions[0].entry_id == "stale_001"
+        assert refetch_actions[0].projected_improvement > 0
+
+    def test_high_conflict_suggests_verify(self):
+        """High source conflict should trigger VERIFY_WITH_SOURCE."""
+        entries = [
+            MemoryEntry(
+                id="conflict_001",
+                content="Contradicted data",
+                type="semantic",
+                timestamp_age_days=1,
+                source_trust=0.9,
+                source_conflict=0.7,
+                downstream_count=1,
+            )
+        ]
+        result = compute(entries)
+        verify_actions = [h for h in result.repair_plan if h.action == "VERIFY_WITH_SOURCE"]
+        assert len(verify_actions) == 1
+        assert verify_actions[0].entry_id == "conflict_001"
+        assert "conflict" in verify_actions[0].reason.lower()
+
+    def test_low_belief_suggests_rebuild(self):
+        """Low r_belief should trigger REBUILD_WORKING_SET."""
+        entries = [
+            MemoryEntry(
+                id="lowbelief_001",
+                content="Uncertain memory",
+                type="semantic",
+                timestamp_age_days=1,
+                source_trust=0.9,
+                source_conflict=0.1,
+                downstream_count=1,
+                r_belief=0.1,
+            )
+        ]
+        result = compute(entries)
+        rebuild_actions = [h for h in result.repair_plan if h.action == "REBUILD_WORKING_SET"]
+        assert len(rebuild_actions) == 1
+        assert rebuild_actions[0].entry_id == "lowbelief_001"
+
+    def test_multiple_issues_generate_multiple_actions(self):
+        """An entry with multiple issues should generate multiple healing actions."""
+        entries = [
+            MemoryEntry(
+                id="multi_001",
+                content="Stale, conflicted, low belief",
+                type="tool_state",
+                timestamp_age_days=30,
+                source_trust=0.5,
+                source_conflict=0.8,
+                downstream_count=5,
+                r_belief=0.1,
+            )
+        ]
+        result = compute(entries)
+        actions = {h.action for h in result.repair_plan}
+        assert "REFETCH" in actions
+        assert "VERIFY_WITH_SOURCE" in actions
+        assert "REBUILD_WORKING_SET" in actions
+
+    def test_repair_plan_sorted_by_priority(self):
+        """Repair plan should be sorted by priority (1 first)."""
+        entries = [
+            MemoryEntry(
+                id="sort_001",
+                content="Multiple issues",
+                type="tool_state",
+                timestamp_age_days=30,
+                source_trust=0.5,
+                source_conflict=0.8,
+                downstream_count=5,
+                r_belief=0.1,
+            )
+        ]
+        result = compute(entries)
+        priorities = [h.priority for h in result.repair_plan]
+        assert priorities == sorted(priorities)
+
+    def test_repair_plan_in_api_response(self):
+        """API response should include repair_plan."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(
+                type="tool_state",
+                timestamp_age_days=30,
+                source_conflict=0.8,
+                r_belief=0.1,
+            )],
+            "action_type": "reversible",
+            "domain": "general",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "repair_plan" in data
+        assert len(data["repair_plan"]) > 0
+        action = data["repair_plan"][0]
+        assert "action" in action
+        assert "entry_id" in action
+        assert "reason" in action
+        assert "projected_improvement" in action
+        assert "priority" in action
+
+    def test_healing_counter_passed_through_api(self):
+        """healing_counter should be accepted in API request."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(healing_counter=3)],
+            "action_type": "informational",
+            "domain": "general",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
