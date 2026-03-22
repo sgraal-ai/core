@@ -74,7 +74,7 @@ https://api.sgraal.com/health
 https://api.sgraal.com/docs
 ```
 
-## Get started
+## Quickstart
 
 Sign up for a free API key (10,000 calls/month):
 ```bash
@@ -86,28 +86,58 @@ curl -X POST https://api.sgraal.com/v1/signup \
 ---
 
 ## Install
+
+### REST API
+
+No SDK needed — call directly from any language:
+```bash
+curl -X POST https://api.sgraal.com/v1/preflight \
+  -H "Authorization: Bearer sg_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"memory_state": [...], "action_type": "reversible", "domain": "general"}'
+```
+
+### Python
+
+```bash
+pip install sgraal
+```
+
+```python
+from sgraal import SgraalClient
+
+client = SgraalClient(api_key="sg_live_...")
+
+result = client.preflight(
+    memory_state=[{
+        "id": "mem_001",
+        "content": "User prefers metric units",
+        "type": "preference",
+        "timestamp_age_days": 45,
+        "source_trust": 0.9,
+        "source_conflict": 0.2,
+        "downstream_count": 3,
+    }],
+    action_type="irreversible",
+    domain="fintech",
+)
+print(result.recommended_action)  # USE_MEMORY, WARN, ASK_USER, or BLOCK
+```
+
+Guard decorator:
+```python
+from sgraal import guard
+
+@guard(memory_state=[...], action_type="irreversible", domain="fintech", block_on="BLOCK")
+def charge_customer(customer_id, amount):
+    process_payment(customer_id, amount)
+```
+
+### Node.js / LangGraph
+
 ```bash
 npm install @sgraal/mcp
 ```
-
-### Claude Desktop
-
-Add to your `claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "sgraal": {
-      "command": "npx",
-      "args": ["@sgraal/mcp"],
-      "env": { "SGRAAL_API_KEY": "sg_live_..." }
-    }
-  }
-}
-```
-
-Claude will automatically have access to the `sgraal_preflight` tool to check memory reliability before acting.
-
-### LangGraph / Node.js
 
 ```typescript
 import { createGuard } from "@sgraal/mcp";
@@ -118,7 +148,7 @@ const result = await guard({
   memory_state: [{
     id: "mem_001",
     content: "User prefers metric units",
-    type: "preference_memory",
+    type: "preference",
     timestamp_age_days: 45,
     source_trust: 0.9,
     source_conflict: 0.2,
@@ -132,33 +162,33 @@ const result = await guard({
 // Passes through on USE_MEMORY
 ```
 
-### Wrap any function
-
-```typescript
-import { withPreflight } from "@sgraal/mcp";
-
-const safeSendEmail = withPreflight(
-  sendEmail,
-  (to, subject, body, memories) => ({
-    memory_state: memories,
-    action_type: "irreversible",
-    domain: "customer_support",
-  }),
-);
-```
-
-### Python
+### Claude Desktop (MCP)
 
 ```bash
-pip install sgraal
+npm install @sgraal/mcp
+```
+
+Add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "sgraal": {
+      "command": "npx",
+      "args": ["@sgraal/mcp"],
+      "env": { "SGRAAL_API_KEY": "sg_live_..." }
+    }
+  }
+}
 ```
 
 ## Integrations
 
-- LangGraph — `createGuard()` middleware
-- Claude Desktop — MCP server (`npx @sgraal/mcp`)
-- AutoGen — preflight middleware
-- CrewAI — tool guard decorator
+- **REST API** — any language, no SDK required
+- **Python** — `pip install sgraal` with `SgraalClient` and `@guard` decorator
+- **Node.js / LangGraph** — `npm install @sgraal/mcp` with `createGuard()` and `withPreflight()`
+- **Claude Desktop** — MCP server via `npx @sgraal/mcp`
+- **AutoGen** — preflight middleware
+- **CrewAI** — tool guard decorator
 
 ---
 

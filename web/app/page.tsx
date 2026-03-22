@@ -76,6 +76,116 @@ function HowItWorks() {
   );
 }
 
+function Quickstart() {
+  const [active, setActive] = useState<"curl" | "python" | "node">("curl");
+
+  const examples = {
+    curl: `curl -X POST https://api.sgraal.com/v1/preflight \\
+  -H "Authorization: Bearer sg_live_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "memory_state": [{
+      "id": "mem_001",
+      "content": "User prefers metric units",
+      "type": "preference",
+      "timestamp_age_days": 45,
+      "source_trust": 0.9,
+      "source_conflict": 0.2,
+      "downstream_count": 3
+    }],
+    "action_type": "irreversible",
+    "domain": "fintech"
+  }'`,
+    python: `pip install sgraal
+
+from sgraal import SgraalClient
+
+client = SgraalClient(api_key="sg_live_...")
+
+result = client.preflight(
+    memory_state=[{
+        "id": "mem_001",
+        "content": "User prefers metric units",
+        "type": "preference",
+        "timestamp_age_days": 45,
+        "source_trust": 0.9,
+        "source_conflict": 0.2,
+        "downstream_count": 3,
+    }],
+    action_type="irreversible",
+    domain="fintech",
+)
+print(result.recommended_action)  # USE_MEMORY / WARN / BLOCK`,
+    node: `npm install @sgraal/mcp
+
+import { createGuard } from "@sgraal/mcp";
+
+const guard = createGuard(); // reads SGRAAL_API_KEY from env
+
+const result = await guard({
+  memory_state: [{
+    id: "mem_001",
+    content: "User prefers metric units",
+    type: "preference",
+    timestamp_age_days: 45,
+    source_trust: 0.9,
+    source_conflict: 0.2,
+    downstream_count: 3,
+  }],
+  action_type: "irreversible",
+  domain: "fintech",
+});
+// Throws SgraalBlockedError on BLOCK`,
+  };
+
+  const tabs = [
+    { key: "curl" as const, label: "REST API" },
+    { key: "python" as const, label: "Python" },
+    { key: "node" as const, label: "Node.js" },
+  ];
+
+  const installs = {
+    curl: "No SDK needed — works with any language",
+    python: "pip install sgraal",
+    node: "npm install @sgraal/mcp",
+  };
+
+  return (
+    <section id="quickstart" className="px-6 py-20 max-w-4xl mx-auto">
+      <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
+        Quickstart — <span className="text-gold">three ways</span>
+      </h2>
+      <p className="text-muted text-center max-w-2xl mx-auto mb-10">
+        REST API, Python SDK, or Node.js — pick your stack.
+      </p>
+
+      <div className="flex justify-center gap-2 mb-2">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setActive(t.key)}
+            className={`font-mono text-sm px-5 py-2 rounded-lg transition ${
+              active === t.key
+                ? "bg-gold text-background"
+                : "bg-surface text-muted hover:text-foreground"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <p className="text-center text-muted text-xs mb-6 font-mono">
+        {installs[active]}
+      </p>
+
+      <pre className="bg-surface border border-surface-light rounded-xl p-5 text-sm overflow-x-auto leading-relaxed text-foreground/80">
+        {examples[active]}
+      </pre>
+    </section>
+  );
+}
+
 function ApiDemo() {
   const curlExample = `curl -X POST ${API_BASE}/v1/preflight \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
@@ -287,6 +397,7 @@ export default function Home() {
     <main className="flex-1">
       <Hero />
       <HowItWorks />
+      <Quickstart />
       <ApiDemo />
       <Pricing />
       <Signup />
