@@ -39,6 +39,10 @@ web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
 - `SUPABASE_SERVICE_KEY` — Supabase service role key (required for signup, bypasses RLS for api_keys inserts)
 - `STRIPE_SECRET_KEY` — Stripe secret key (optional, enables billing and signup)
 
+## Database Setup
+
+The `api_keys` table migration is at `scripts/create_api_keys_table.sql`. Run it in the Supabase SQL Editor or via CLI. Schema: `id` (uuid), `created_at`, `key_hash` (unique, indexed), `customer_id` (Stripe, indexed), `email`, `tier` (free/starter/growth), `calls_this_month`, `last_used_at`. RLS enabled: users see only their own keys by email; only service role can insert/delete.
+
 ## Authentication
 
 The `/v1/preflight` endpoint requires a Bearer token in the `Authorization` header. API keys are validated against the in-memory `API_KEYS` dict first, then fall back to a SHA-256 hash lookup in the Supabase `api_keys` table. Returns 401 for invalid keys, 403 if the header is missing.
