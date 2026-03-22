@@ -6,6 +6,7 @@ from typing import Literal, Optional
 import sys, os
 import secrets
 import hashlib
+from datetime import datetime, timezone
 import stripe
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -41,20 +42,25 @@ bearer_scheme = HTTPBearer()
 
 def verify_api_key(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-) -> str:
-    """Validate Bearer token against in-memory store or Supabase api_keys table."""
+) -> dict:
+    """Validate Bearer token and return the key record with tier/usage info."""
     api_key = credentials.credentials
 
-    # Check in-memory store first
+    # Check in-memory store first (test keys skip rate limiting)
     if api_key in API_KEYS:
-        return api_key
+        return {"customer_id": API_KEYS[api_key], "tier": "free", "calls_this_month": 0, "key_hash": None}
 
     # Fall back to Supabase hash lookup
     if supabase_service_client:
         key_hash = _hash_key(api_key)
-        result = supabase_service_client.table("api_keys").select("customer_id").eq("key_hash", key_hash).execute()
+        result = (
+            supabase_service_client.table("api_keys")
+            .select("key_hash, customer_id, tier, calls_this_month")
+            .eq("key_hash", key_hash)
+            .execute()
+        )
         if result.data:
-            return api_key
+            return result.data[0]
 
     raise HTTPException(status_code=401, detail="Invalid API key")
 
@@ -77,6 +83,13 @@ class PreflightRequest(BaseModel):
 
 class SignupRequest(BaseModel):
     email: str
+
+
+TIER_LIMITS = {
+    "free": 10_000,
+    "starter": 100_000,
+    "growth": 1_000_000,
+}
 
 
 def _generate_api_key() -> str:
@@ -132,9 +145,20 @@ def signup(req: SignupRequest):
 
 
 @app.post("/v1/preflight")
-def preflight(req: PreflightRequest, api_key: str = Depends(verify_api_key)):
+def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
+
+    # Rate limit check
+    tier = key_record.get("tier", "free")
+    calls = key_record.get("calls_this_month", 0)
+    limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    if calls >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Monthly limit of {limit:,} calls exceeded for {tier} tier. "
+                   f"Upgrade your plan or wait until the next billing cycle.",
+        )
 
     entries = [MemoryEntry(
         id=e.id, content=e.content, type=e.type,
@@ -145,6 +169,17 @@ def preflight(req: PreflightRequest, api_key: str = Depends(verify_api_key)):
         for e in req.memory_state]
 
     result = compute(entries, req.action_type, req.domain)
+
+    # Increment calls_this_month and update last_used_at
+    key_hash = key_record.get("key_hash")
+    if supabase_service_client and key_hash:
+        try:
+            supabase_service_client.table("api_keys").update({
+                "calls_this_month": calls + 1,
+                "last_used_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("key_hash", key_hash).execute()
+        except Exception:
+            pass
 
     if stripe.api_key:
         try:
