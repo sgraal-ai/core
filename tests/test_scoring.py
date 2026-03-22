@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -635,7 +635,7 @@ class TestSelfHealing:
         assert "priority" in action
 
     def test_healing_counter_passed_through_api(self):
-        """healing_counter should be accepted in API request."""
+        """healing_counter should be accepted in API request and returned in response."""
         resp = client.post("/v1/preflight", json={
             "memory_state": [_fresh_entry(healing_counter=3)],
             "action_type": "informational",
@@ -643,3 +643,104 @@ class TestSelfHealing:
         }, headers=AUTH)
 
         assert resp.status_code == 200
+        data = resp.json()
+        assert "healing_counter" in data
+        assert data["healing_counter"] == 3
+
+
+class TestDeterminism:
+    """A2 axiom: identical memory state + identical healing_counter = identical Ω_MEM score."""
+
+    def test_identical_inputs_produce_identical_outputs(self):
+        """Same entries called twice must produce identical results."""
+        entries = [
+            MemoryEntry(
+                id="det_001", content="Deterministic test", type="tool_state",
+                timestamp_age_days=30, source_trust=0.7,
+                source_conflict=0.4, downstream_count=5,
+                r_belief=0.6, healing_counter=2,
+            )
+        ]
+        r1 = compute(entries, action_type="irreversible", domain="fintech")
+        r2 = compute(entries, action_type="irreversible", domain="fintech")
+
+        assert r1.omega_mem_final == r2.omega_mem_final
+        assert r1.recommended_action == r2.recommended_action
+        assert r1.assurance_score == r2.assurance_score
+        assert r1.component_breakdown == r2.component_breakdown
+        assert r1.healing_counter == r2.healing_counter
+        assert len(r1.repair_plan) == len(r2.repair_plan)
+
+    def test_identical_inputs_100_runs(self):
+        """A2 axiom stress test: 100 identical calls must produce identical omega."""
+        entries = [
+            MemoryEntry(
+                id="det_stress", content="Stress test", type="episodic",
+                timestamp_age_days=50, source_trust=0.6,
+                source_conflict=0.5, downstream_count=3,
+                r_belief=0.4, healing_counter=1,
+            )
+        ]
+        baseline = compute(entries, action_type="reversible", domain="general")
+        for _ in range(100):
+            result = compute(entries, action_type="reversible", domain="general")
+            assert result.omega_mem_final == baseline.omega_mem_final
+            assert result.healing_counter == baseline.healing_counter
+
+    def test_different_healing_counter_same_omega(self):
+        """healing_counter tracks heals but does not affect the score itself."""
+        base = dict(
+            id="det_hc", content="Test", type="semantic",
+            timestamp_age_days=10, source_trust=0.8,
+            source_conflict=0.2, downstream_count=3,
+            r_belief=0.7,
+        )
+        r0 = compute([MemoryEntry(**base, healing_counter=0)])
+        r5 = compute([MemoryEntry(**base, healing_counter=5)])
+
+        assert r0.omega_mem_final == r5.omega_mem_final
+        assert r0.healing_counter == 0
+        assert r5.healing_counter == 5
+
+    def test_healing_counter_sums_across_entries(self):
+        """healing_counter in result should be sum of all entry counters."""
+        entries = [
+            MemoryEntry(
+                id="hc_a", content="A", type="semantic",
+                timestamp_age_days=1, source_trust=0.9,
+                source_conflict=0.1, downstream_count=1,
+                healing_counter=3,
+            ),
+            MemoryEntry(
+                id="hc_b", content="B", type="semantic",
+                timestamp_age_days=1, source_trust=0.9,
+                source_conflict=0.1, downstream_count=1,
+                healing_counter=7,
+            ),
+        ]
+        result = compute(entries)
+        assert result.healing_counter == 10
+
+    def test_empty_entries_healing_counter_zero(self):
+        result = compute([])
+        assert result.healing_counter == 0
+
+
+class TestHealingPolicy:
+    def test_default_policies_loaded(self):
+        policies = load_healing_policies()
+        assert len(policies) == 3
+        rule_ids = {p.rule_id for p in policies}
+        assert rule_ids == {"HP-001", "HP-002", "HP-003"}
+
+    def test_all_default_policies_are_idempotent(self):
+        policies = load_healing_policies()
+        for p in policies:
+            assert p.idempotent is True, f"{p.rule_id} should be idempotent"
+
+    def test_policy_tiers(self):
+        policies = load_healing_policies()
+        by_id = {p.rule_id: p for p in policies}
+        assert by_id["HP-001"].tier == 1  # auto-heal
+        assert by_id["HP-002"].tier == 1  # auto-heal
+        assert by_id["HP-003"].tier == 2  # suggest

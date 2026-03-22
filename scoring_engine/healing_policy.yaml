@@ -1,0 +1,22 @@
+# Sgraal Healing Policy Configuration
+# A2 Axiom: All policies are idempotent — identical memory state +
+# identical healing_counter = identical Ω_MEM score and repair plan.
+
+policies:
+  - rule_id: HP-001
+    condition: "s_freshness > 60"
+    action: REFETCH
+    tier: 1        # auto-heal
+    idempotent: true
+
+  - rule_id: HP-002
+    condition: "s_interference > 50"
+    action: VERIFY_WITH_SOURCE
+    tier: 1        # auto-heal
+    idempotent: true
+
+  - rule_id: HP-003
+    condition: "r_belief < 0.3"
+    action: REBUILD_WORKING_SET
+    tier: 2        # suggest to agent
+    idempotent: true

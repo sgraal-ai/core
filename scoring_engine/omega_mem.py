@@ -28,6 +28,15 @@ class HealingAction:
 
 
 @dataclass
+class HealingPolicy:
+    rule_id: str
+    condition: str           # e.g. "s_freshness > 60"
+    action: Literal["REFETCH", "VERIFY_WITH_SOURCE", "REBUILD_WORKING_SET"]
+    tier: int                # 1 = auto-heal, 2 = suggest, 3 = log-only
+    idempotent: bool         # True = same input always produces same output
+
+
+@dataclass
 class PreflightResult:
     omega_mem_final: float
     recommended_action: Literal["USE_MEMORY","WARN","ASK_USER","BLOCK"]
@@ -35,6 +44,7 @@ class PreflightResult:
     explainability_note: str
     component_breakdown: dict
     repair_plan: list[HealingAction] = field(default_factory=list)
+    healing_counter: int = 0
 
 # Default beta weights — v1.0
 WEIGHTS = {
@@ -91,6 +101,57 @@ C_DOMAIN = {
     "medical":          2.0,
 }
 
+# Default healing policies (also loadable from healing_policy.yaml)
+DEFAULT_HEALING_POLICIES = [
+    HealingPolicy(
+        rule_id="HP-001",
+        condition="s_freshness > 60",
+        action="REFETCH",
+        tier=1,
+        idempotent=True,
+    ),
+    HealingPolicy(
+        rule_id="HP-002",
+        condition="s_interference > 50",
+        action="VERIFY_WITH_SOURCE",
+        tier=1,
+        idempotent=True,
+    ),
+    HealingPolicy(
+        rule_id="HP-003",
+        condition="r_belief < 0.3",
+        action="REBUILD_WORKING_SET",
+        tier=2,
+        idempotent=True,
+    ),
+]
+
+
+def load_healing_policies(path: Optional[str] = None) -> list[HealingPolicy]:
+    """Load healing policies from YAML file or return defaults.
+
+    All policies are idempotent by design (A2 axiom): identical memory state
+    + identical healing_counter = identical Ω_MEM score and repair plan.
+    """
+    if path is None:
+        return DEFAULT_HEALING_POLICIES
+
+    import yaml  # lazy import — only needed when loading from file
+    with open(path) as f:
+        data = yaml.safe_load(f)
+
+    return [
+        HealingPolicy(
+            rule_id=r["rule_id"],
+            condition=r["condition"],
+            action=r["action"],
+            tier=r.get("tier", 1),
+            idempotent=r.get("idempotent", True),
+        )
+        for r in data.get("policies", [])
+    ]
+
+
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     """Cosine similarity between two vectors. Returns 0.0 if either is zero-length."""
     dot = sum(x * y for x, y in zip(a, b))
@@ -109,7 +170,7 @@ def compute(
 ) -> PreflightResult:
 
     if not entries:
-        return PreflightResult(0, "USE_MEMORY", 100, "No memory entries.", {}, [])
+        return PreflightResult(0, "USE_MEMORY", 100, "No memory entries.", {}, [], 0)
 
     # Component scores (0–100, higher = more risk)
     # s_freshness uses Weibull decay — memory type determines how fast it goes stale
@@ -227,6 +288,9 @@ def compute(
     # Sort by priority (1 first), then by projected improvement (highest first)
     repair_plan.sort(key=lambda h: (h.priority, -h.projected_improvement))
 
+    # Healing counter: sum of all entry healing counters
+    total_healing_counter = sum(e.healing_counter for e in entries)
+
     return PreflightResult(
         omega_mem_final=round(omega_final, 1),
         recommended_action=action,
@@ -234,4 +298,5 @@ def compute(
         explainability_note=note,
         component_breakdown={k: round(v, 1) for k, v in components.items()},
         repair_plan=repair_plan,
+        healing_counter=total_healing_counter,
     )

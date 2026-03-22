@@ -212,6 +212,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "action_type": req.action_type,
                 "explainability_note": result.explainability_note,
                 "component_breakdown": result.component_breakdown,
+                "healing_counter": result.healing_counter,
             }).execute()
         except Exception as e:
             pass
@@ -232,4 +233,5 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             }
             for h in result.repair_plan
         ],
+        "healing_counter": result.healing_counter,
     }
