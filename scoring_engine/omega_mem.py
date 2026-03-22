@@ -1,5 +1,7 @@
-from dataclasses import dataclass
-from typing import Literal
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Literal, Optional
 import math
 
 @dataclass
@@ -12,6 +14,7 @@ class MemoryEntry:
     source_conflict: float     # 0.0 – 1.0  (Dempster-Shafer K)
     downstream_count: int      # blast radius
     r_belief: float = 0.5      # 0.0 – 1.0  (model belief divergence)
+    prompt_embedding: Optional[list[float]] = field(default=None, repr=False)  # embedding of memory content
 
 @dataclass
 class PreflightResult:
@@ -32,6 +35,7 @@ WEIGHTS = {
     "s_interference": 0.10,
     "s_recovery":    -0.10,
     "r_belief":       0.05,
+    "s_relevance":    0.06,
 }
 
 C_ACTION = {
@@ -50,10 +54,21 @@ C_DOMAIN = {
     "medical":          2.0,
 }
 
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two vectors. Returns 0.0 if either is zero-length."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
 def compute(
     entries: list[MemoryEntry],
     action_type: str = "reversible",
     domain: str = "general",
+    current_goal_embedding: Optional[list[float]] = None,
 ) -> PreflightResult:
 
     if not entries:
@@ -73,6 +88,20 @@ def compute(
     # r_belief 0.0–1.0 maps to risk 100–0 (inverted)
     r_belief_score = min(100, sum((1 - e.r_belief) * 100 for e in entries) / len(entries))
 
+    # S_relevance: intent-drift detection via cosine similarity
+    # When embeddings are provided, low similarity means the memory
+    # points to an old goal — adds 20 risk points per drifted entry
+    s_relevance = 0.0
+    if current_goal_embedding is not None:
+        drift_penalties = []
+        for e in entries:
+            if e.prompt_embedding is not None:
+                sim = _cosine_similarity(e.prompt_embedding, current_goal_embedding)
+                penalty = 20.0 if sim < 0.6 else 0.0
+                drift_penalties.append(penalty)
+        if drift_penalties:
+            s_relevance = min(100, sum(drift_penalties) / len(drift_penalties))
+
     components = {
         "s_freshness":    s_freshness,
         "s_drift":        s_drift,
@@ -83,6 +112,7 @@ def compute(
         "s_interference": s_interference,
         "s_recovery":     s_recovery,
         "r_belief":       r_belief_score,
+        "s_relevance":    s_relevance,
     }
 
     omega = sum(WEIGHTS[k] * v for k, v in components.items())
@@ -107,6 +137,10 @@ def compute(
     # Explainability
     worst = max(components, key=components.get)
     note = f"Highest risk: {worst} ({components[worst]:.1f}/100). Action: {action}."
+
+    # S_relevance advisory: intent-drift detected
+    if s_relevance > 0:
+        note += " Intent-drift detected — memory may point to an old goal."
 
     # R_belief advisory: low belief suggests external storage
     avg_belief = sum(e.r_belief for e in entries) / len(entries)

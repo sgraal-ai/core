@@ -73,6 +73,7 @@ class MemoryEntryRequest(BaseModel):
     source_conflict: float = 0.1
     downstream_count: int = 1
     r_belief: float = 0.5
+    prompt_embedding: Optional[list[float]] = None
 
 class PreflightRequest(BaseModel):
     agent_id: Optional[str] = "anonymous"
@@ -80,6 +81,8 @@ class PreflightRequest(BaseModel):
     memory_state: list[MemoryEntryRequest]
     action_type: Literal["informational","reversible","irreversible","destructive"] = "reversible"
     domain: Literal["general","customer_support","coding","legal","fintech","medical"] = "general"
+    current_goal: Optional[str] = None
+    current_goal_embedding: Optional[list[float]] = None
 
 class SignupRequest(BaseModel):
     email: str
@@ -166,10 +169,11 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         source_trust=e.source_trust,
         source_conflict=e.source_conflict,
         downstream_count=e.downstream_count,
-        r_belief=e.r_belief)
+        r_belief=e.r_belief,
+        prompt_embedding=e.prompt_embedding)
         for e in req.memory_state]
 
-    result = compute(entries, req.action_type, req.domain)
+    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
 
     # Increment calls_this_month and update last_used_at
     key_hash = key_record.get("key_hash")

@@ -94,7 +94,7 @@ class TestScoringEngine:
         expected_keys = {
             "s_freshness", "s_drift", "s_provenance", "s_propagation",
             "r_recall", "r_encode", "s_interference", "s_recovery",
-            "r_belief",
+            "r_belief", "s_relevance",
         }
         assert set(result.component_breakdown.keys()) == expected_keys
 
@@ -175,6 +175,97 @@ class TestScoringEngine:
         high = compute([MemoryEntry(**base, r_belief=0.9)])
 
         assert low.omega_mem_final > high.omega_mem_final
+
+    def test_s_relevance_zero_without_embeddings(self):
+        """Without embeddings, s_relevance should be 0."""
+        entries = [
+            MemoryEntry(
+                id="mem_rel_none",
+                content="No embedding",
+                type="semantic",
+                timestamp_age_days=1,
+                source_trust=0.9,
+                source_conflict=0.1,
+                downstream_count=1,
+            )
+        ]
+        result = compute(entries)
+        assert result.component_breakdown["s_relevance"] == 0.0
+
+    def test_s_relevance_low_similarity_adds_penalty(self):
+        """Orthogonal embeddings (sim~0) should trigger 20-point penalty."""
+        entries = [
+            MemoryEntry(
+                id="mem_rel_low",
+                content="Old goal memory",
+                type="semantic",
+                timestamp_age_days=1,
+                source_trust=0.9,
+                source_conflict=0.1,
+                downstream_count=1,
+                prompt_embedding=[1.0, 0.0, 0.0],
+            )
+        ]
+        # Orthogonal goal embedding
+        result = compute(entries, current_goal_embedding=[0.0, 1.0, 0.0])
+        assert result.component_breakdown["s_relevance"] == 20.0
+        assert "intent-drift" in result.explainability_note.lower()
+
+    def test_s_relevance_high_similarity_no_penalty(self):
+        """Aligned embeddings (sim~1) should have 0 penalty."""
+        entries = [
+            MemoryEntry(
+                id="mem_rel_high",
+                content="Current goal memory",
+                type="semantic",
+                timestamp_age_days=1,
+                source_trust=0.9,
+                source_conflict=0.1,
+                downstream_count=1,
+                prompt_embedding=[1.0, 0.0, 0.0],
+            )
+        ]
+        result = compute(entries, current_goal_embedding=[1.0, 0.0, 0.0])
+        assert result.component_breakdown["s_relevance"] == 0.0
+        assert "intent-drift" not in result.explainability_note.lower()
+
+    def test_s_relevance_mixed_entries(self):
+        """Mix of relevant and drifted entries should average the penalty."""
+        entries = [
+            MemoryEntry(
+                id="mem_rel_a", content="Aligned", type="semantic",
+                timestamp_age_days=1, source_trust=0.9,
+                source_conflict=0.1, downstream_count=1,
+                prompt_embedding=[1.0, 0.0, 0.0],
+            ),
+            MemoryEntry(
+                id="mem_rel_b", content="Drifted", type="semantic",
+                timestamp_age_days=1, source_trust=0.9,
+                source_conflict=0.1, downstream_count=1,
+                prompt_embedding=[0.0, 1.0, 0.0],
+            ),
+        ]
+        result = compute(entries, current_goal_embedding=[1.0, 0.0, 0.0])
+        # One gets 0, one gets 20 → average = 10
+        assert result.component_breakdown["s_relevance"] == 10.0
+
+    def test_s_relevance_increases_omega(self):
+        """Drifted memory should produce higher omega than aligned."""
+        base = dict(
+            id="mem_cmp_rel", content="Test", type="semantic",
+            timestamp_age_days=30, source_trust=0.8,
+            source_conflict=0.2, downstream_count=3,
+        )
+        goal = [1.0, 0.0, 0.0]
+        aligned = compute(
+            [MemoryEntry(**base, prompt_embedding=[1.0, 0.0, 0.0])],
+            current_goal_embedding=goal,
+        )
+        drifted = compute(
+            [MemoryEntry(**base, prompt_embedding=[0.0, 1.0, 0.0])],
+            current_goal_embedding=goal,
+        )
+        assert drifted.omega_mem_final > aligned.omega_mem_final
 
     def test_omega_clamped_to_0_100(self):
         entries = [
@@ -259,6 +350,18 @@ class TestPreflightAPI:
         data = resp.json()
         assert "r_belief" in data["component_breakdown"]
         assert data["component_breakdown"]["r_belief"] == 90.0
+
+    def test_s_relevance_via_api(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(prompt_embedding=[1.0, 0.0, 0.0])],
+            "action_type": "informational",
+            "domain": "general",
+            "current_goal_embedding": [0.0, 1.0, 0.0],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["component_breakdown"]["s_relevance"] == 20.0
 
     def test_r_belief_defaults_in_api(self):
         resp = client.post("/v1/preflight", json={
