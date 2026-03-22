@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Literal, Optional
 import sys, os
@@ -20,6 +21,23 @@ if SUPABASE_URL and SUPABASE_KEY:
 
 app = FastAPI(title="Sgraal API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# In-memory API key store: api_key -> stripe_customer_id
+API_KEYS: dict[str, str] = {
+    "sg_test_key_001": "cus_test_001",
+}
+
+bearer_scheme = HTTPBearer()
+
+
+def verify_api_key(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> str:
+    """Validate Bearer token and return the associated API key."""
+    api_key = credentials.credentials
+    if api_key not in API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return api_key
 
 class MemoryEntryRequest(BaseModel):
     id: str
@@ -47,7 +65,7 @@ def health():
     return {"status": "ok"}
 
 @app.post("/v1/preflight")
-def preflight(req: PreflightRequest):
+def preflight(req: PreflightRequest, api_key: str = Depends(verify_api_key)):
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
