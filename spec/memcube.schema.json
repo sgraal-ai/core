@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sgraal.com/spec/memcube.schema.json",
+  "title": "MemCube",
+  "description": "Sgraal MemCube — standardized memory entry format for AI agent memory governance.",
+  "type": "object",
+  "required": [
+    "id",
+    "content",
+    "type",
+    "timestamp_age_days",
+    "source_trust",
+    "source_conflict",
+    "downstream_count"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for this memory entry."
+    },
+    "content": {
+      "type": "string",
+      "description": "The memory content — what the agent remembers."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "episodic",
+        "semantic",
+        "preference",
+        "tool_state",
+        "shared_workflow",
+        "policy",
+        "identity"
+      ],
+      "description": "Category of memory, affecting how risk is interpreted."
+    },
+    "timestamp_age_days": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Age of the memory in days since last confirmed accurate."
+    },
+    "source_trust": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Trust score for the memory source (0.0 = untrusted, 1.0 = fully trusted)."
+    },
+    "source_conflict": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Dempster-Shafer K conflict coefficient. Measures contradiction between sources (0.0 = no conflict, 1.0 = total contradiction)."
+    },
+    "downstream_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of downstream decisions or actions that depend on this memory. Measures blast radius."
+    },
+    "goal_id": {
+      "type": "string",
+      "description": "Optional. Links this memory to a specific agent goal or task."
+    },
+    "source": {
+      "type": "string",
+      "description": "Optional. Origin of the memory (e.g. 'user_input', 'api_response', 'tool_output', 'agent_inference')."
+    },
+    "provenance": {
+      "type": "string",
+      "description": "Optional. Chain of custody — how this memory was derived or transformed."
+    },
+    "gsv": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional. Global Schema Version — tracks which version of the memory schema produced this entry."
+    },
+    "context_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional. Tags for filtering and grouping memories (e.g. ['onboarding', 'billing', 'eu-region'])."
+    },
+    "geo_tag": {
+      "type": "string",
+      "description": "Optional. Geographic context for jurisdiction-sensitive memories (e.g. 'EU', 'US-CA', 'HU-BU')."
+    }
+  },
+  "additionalProperties": false
+}
