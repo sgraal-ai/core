@@ -26,6 +26,10 @@ pip install -r requirements.txt
 # Run API server locally
 uvicorn api.main:app --reload
 
+# Run tests
+pip install pytest httpx
+python3 -m pytest tests/ -v
+
 # Run example scoring
 python examples/basic_usage.py
 ```
