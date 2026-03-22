@@ -267,8 +267,13 @@ function Signup() {
 function Footer() {
   return (
     <footer className="border-t border-surface-light py-10 mt-10">
-      <div className="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-6">
         <p className="font-mono text-gold text-lg font-bold">Sgraal</p>
+        <div className="flex items-center gap-6 text-sm text-muted">
+          <a href="mailto:hello@sgraal.com" className="hover:text-foreground transition">Contact</a>
+          <a href="/privacy" className="hover:text-foreground transition">Privacy Policy</a>
+          <a href="/terms" className="hover:text-foreground transition">Terms of Service</a>
+        </div>
         <p className="text-muted text-sm">
           Apache 2.0 — Open protocol, free to use and embed.
         </p>
