@@ -834,3 +834,86 @@ class TestGSV:
             }, headers=AUTH)
 
             assert r2.json()["gsv"] > r1.json()["gsv"]
+
+
+class TestHealEndpoint:
+    def test_heal_returns_success(self):
+        resp = client.post("/v1/heal", json={
+            "entry_id": "heal_test_001",
+            "action": "REFETCH",
+            "agent_id": "test_agent",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["healed"] is True
+        assert data["action_taken"] == "REFETCH"
+        assert data["entry_id"] == "heal_test_001"
+        assert data["healing_counter"] >= 1
+        assert data["projected_improvement"] > 0
+        assert "timestamp" in data
+
+    def test_heal_increments_counter(self):
+        """Consecutive heals on same entry should increment counter."""
+        entry_id = "heal_incr_001"
+        r1 = client.post("/v1/heal", json={
+            "entry_id": entry_id,
+            "action": "VERIFY_WITH_SOURCE",
+        }, headers=AUTH)
+        r2 = client.post("/v1/heal", json={
+            "entry_id": entry_id,
+            "action": "VERIFY_WITH_SOURCE",
+        }, headers=AUTH)
+
+        assert r2.json()["healing_counter"] == r1.json()["healing_counter"] + 1
+
+    def test_heal_different_entries_independent_counters(self):
+        """Different entries should have independent healing counters."""
+        r1 = client.post("/v1/heal", json={
+            "entry_id": "heal_indep_a",
+            "action": "REFETCH",
+        }, headers=AUTH)
+        r2 = client.post("/v1/heal", json={
+            "entry_id": "heal_indep_b",
+            "action": "REFETCH",
+        }, headers=AUTH)
+
+        # Both should start at 1 (independent counters)
+        assert r1.json()["healing_counter"] == 1
+        assert r2.json()["healing_counter"] == 1
+
+    def test_heal_all_action_types(self):
+        """All three action types should be accepted."""
+        for action in ["REFETCH", "VERIFY_WITH_SOURCE", "REBUILD_WORKING_SET"]:
+            resp = client.post("/v1/heal", json={
+                "entry_id": f"heal_action_{action}",
+                "action": action,
+            }, headers=AUTH)
+            assert resp.status_code == 200
+            assert resp.json()["action_taken"] == action
+
+    def test_heal_projected_improvements(self):
+        """Each action type should have a positive projected improvement."""
+        improvements = {}
+        for action in ["REFETCH", "VERIFY_WITH_SOURCE", "REBUILD_WORKING_SET"]:
+            resp = client.post("/v1/heal", json={
+                "entry_id": f"heal_pi_{action}",
+                "action": action,
+            }, headers=AUTH)
+            improvements[action] = resp.json()["projected_improvement"]
+
+        assert all(v > 0 for v in improvements.values())
+
+    def test_heal_requires_auth(self):
+        resp = client.post("/v1/heal", json={
+            "entry_id": "no_auth",
+            "action": "REFETCH",
+        })
+        assert resp.status_code in (401, 403)
+
+    def test_heal_invalid_action_returns_422(self):
+        resp = client.post("/v1/heal", json={
+            "entry_id": "bad_action",
+            "action": "INVALID",
+        }, headers=AUTH)
+        assert resp.status_code == 422

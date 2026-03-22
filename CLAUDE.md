@@ -70,6 +70,8 @@ The `/v1/preflight` endpoint requires a Bearer token in the `Authorization` head
 
 `POST /v1/preflight` — requires `Authorization: Bearer <api_key>`. Accepts `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), `domain` (general/customer_support/coding/legal/fintech/medical), and optional `client_gsv` (integer). The Stripe customer ID is resolved automatically from the API key. Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, `component_breakdown`, `repair_plan`, `healing_counter`, and `gsv`. If `client_gsv` is provided and server GSV < client_gsv, returns `stale_state_warning: STALE_STATE_DETECTED`. GSV increments monotonically via Upstash Redis INCR (falls back to 0 if Redis unavailable).
 
+`POST /v1/heal` — requires `Authorization: Bearer <api_key>`. Accepts `entry_id` (string), `action` (REFETCH/VERIFY_WITH_SOURCE/REBUILD_WORKING_SET), and optional `agent_id`. Increments the per-entry healing counter and returns `healed`, `healing_counter`, `projected_improvement`, `action_taken`, and `timestamp`. Logged to Supabase `memory_ledger`.
+
 ## Rate Limiting
 
 Monthly call limits enforced per API key via `calls_this_month` in the `api_keys` table: free (10,000), starter (100,000), growth (1,000,000). Returns 429 when exceeded. Counter increments and `last_used_at` updates on every successful preflight call. In-memory test keys skip rate limiting.

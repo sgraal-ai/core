@@ -107,6 +107,11 @@ class PreflightRequest(BaseModel):
     current_goal_embedding: Optional[list[float]] = None
     client_gsv: Optional[int] = None
 
+class HealRequest(BaseModel):
+    entry_id: str
+    action: Literal["REFETCH", "VERIFY_WITH_SOURCE", "REBUILD_WORKING_SET"]
+    agent_id: Optional[str] = "anonymous"
+
 class SignupRequest(BaseModel):
     email: str
 
@@ -167,6 +172,53 @@ def signup(req: SignupRequest):
         "api_key": api_key,
         "customer_id": customer.id,
         "tier": "free",
+    }
+
+
+# In-memory healing counter store (per entry_id)
+_healing_counters: dict[str, int] = {}
+
+# Projected improvement estimates per action type
+_HEAL_IMPROVEMENTS = {
+    "REFETCH": 8.0,
+    "VERIFY_WITH_SOURCE": 5.0,
+    "REBUILD_WORKING_SET": 3.5,
+}
+
+
+@app.post("/v1/heal")
+def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
+    # Increment healing counter for this entry
+    prev = _healing_counters.get(req.entry_id, 0)
+    _healing_counters[req.entry_id] = prev + 1
+
+    now = datetime.now(timezone.utc)
+    projected = _HEAL_IMPROVEMENTS.get(req.action, 0.0)
+
+    # Log healing event to Supabase
+    if supabase_client:
+        try:
+            supabase_client.table("memory_ledger").insert({
+                "agent_id": req.agent_id,
+                "action_type": f"heal:{req.action}",
+                "healing_counter": prev + 1,
+                "explainability_note": f"Heal action {req.action} applied to {req.entry_id}",
+                "omega_mem_final": 0,
+                "recommended_action": "HEAL",
+                "assurance_score": 0,
+                "domain": "general",
+                "component_breakdown": {"entry_id": req.entry_id},
+            }).execute()
+        except Exception:
+            pass
+
+    return {
+        "healed": True,
+        "healing_counter": prev + 1,
+        "projected_improvement": projected,
+        "action_taken": req.action,
+        "entry_id": req.entry_id,
+        "timestamp": now.isoformat(),
     }
 
 
