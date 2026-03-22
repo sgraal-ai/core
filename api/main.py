@@ -4,6 +4,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Literal, Optional
 import sys, os
+import secrets
+import hashlib
 import stripe
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,10 +16,17 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+
 supabase_client = None
 if SUPABASE_URL and SUPABASE_KEY:
     from supabase import create_client
     supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase_service_client = None
+if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+    from supabase import create_client as _create_client
+    supabase_service_client = _create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 app = FastAPI(title="Sgraal API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -33,11 +42,21 @@ bearer_scheme = HTTPBearer()
 def verify_api_key(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> str:
-    """Validate Bearer token and return the associated API key."""
+    """Validate Bearer token against in-memory store or Supabase api_keys table."""
     api_key = credentials.credentials
-    if api_key not in API_KEYS:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return api_key
+
+    # Check in-memory store first
+    if api_key in API_KEYS:
+        return api_key
+
+    # Fall back to Supabase hash lookup
+    if supabase_service_client:
+        key_hash = _hash_key(api_key)
+        result = supabase_service_client.table("api_keys").select("customer_id").eq("key_hash", key_hash).execute()
+        if result.data:
+            return api_key
+
+    raise HTTPException(status_code=401, detail="Invalid API key")
 
 class MemoryEntryRequest(BaseModel):
     id: str
@@ -56,6 +75,18 @@ class PreflightRequest(BaseModel):
     action_type: Literal["informational","reversible","irreversible","destructive"] = "reversible"
     domain: Literal["general","customer_support","coding","legal","fintech","medical"] = "general"
 
+class SignupRequest(BaseModel):
+    email: str
+
+
+def _generate_api_key() -> str:
+    return "sg_live_" + secrets.token_urlsafe(32)
+
+
+def _hash_key(api_key: str) -> str:
+    return hashlib.sha256(api_key.encode()).hexdigest()
+
+
 @app.get("/")
 def root():
     return {"name": "Sgraal", "version": "0.1.0"}
@@ -63,6 +94,42 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.post("/v1/signup")
+def signup(req: SignupRequest):
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+    if not supabase_service_client:
+        raise HTTPException(status_code=503, detail="Supabase not configured")
+
+    # 1. Create Stripe customer
+    customer = stripe.Customer.create(email=req.email)
+
+    # 2. Create free tier subscription
+    stripe.Subscription.create(
+        customer=customer.id,
+        items=[{"price": "price_1TDnSaHIIn2LzB5quygTrclw"}],
+    )
+
+    # 3. Generate API key
+    api_key = _generate_api_key()
+    key_hash = _hash_key(api_key)
+
+    # 4. Store hashed key in Supabase (service role bypasses RLS)
+    supabase_service_client.table("api_keys").insert({
+        "key_hash": key_hash,
+        "customer_id": customer.id,
+        "email": req.email,
+        "tier": "free",
+    }).execute()
+
+    # 5. Return plaintext key (only time it's shown)
+    return {
+        "api_key": api_key,
+        "customer_id": customer.id,
+        "tier": "free",
+    }
+
 
 @app.post("/v1/preflight")
 def preflight(req: PreflightRequest, api_key: str = Depends(verify_api_key)):
