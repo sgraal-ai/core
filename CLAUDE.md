@@ -36,7 +36,12 @@ web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
 
 - `SUPABASE_URL` — Supabase project URL (optional, enables logging)
 - `SUPABASE_KEY` — Supabase service key (optional, enables logging)
+- `STRIPE_SECRET_KEY` — Stripe secret key (optional, enables usage-based billing via Stripe Meters)
 
 ## Key API Endpoint
 
-`POST /v1/preflight` — accepts `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), and `domain` (general/customer_support/coding/legal/fintech/medical). Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, and `component_breakdown`.
+`POST /v1/preflight` — accepts `stripe_customer_id`, `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), and `domain` (general/customer_support/coding/legal/fintech/medical). Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, and `component_breakdown`.
+
+## Billing
+
+Usage-based billing via Stripe Meters. Every `/v1/preflight` call emits an `omega_mem_preflight` meter event attributed to the request's `stripe_customer_id`. Free tier: first 10,000 calls per customer are free (configured in Stripe pricing).

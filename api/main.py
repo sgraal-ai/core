@@ -3,12 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Literal, Optional
 import sys, os
+import stripe
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scoring_engine import compute, MemoryEntry
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 supabase_client = None
 if SUPABASE_URL and SUPABASE_KEY:
@@ -30,6 +33,7 @@ class MemoryEntryRequest(BaseModel):
 class PreflightRequest(BaseModel):
     agent_id: Optional[str] = "anonymous"
     task_id: Optional[str] = None
+    stripe_customer_id: str
     memory_state: list[MemoryEntryRequest]
     action_type: Literal["informational","reversible","irreversible","destructive"] = "reversible"
     domain: Literal["general","customer_support","coding","legal","fintech","medical"] = "general"
@@ -56,6 +60,18 @@ def preflight(req: PreflightRequest):
         for e in req.memory_state]
 
     result = compute(entries, req.action_type, req.domain)
+
+    if stripe.api_key:
+        try:
+            stripe.billing.MeterEvent.create(
+                event_name="omega_mem_preflight",
+                payload={
+                    "value": "1",
+                    "stripe_customer_id": req.stripe_customer_id,
+                },
+            )
+        except Exception:
+            pass
 
     if supabase_client:
         try:
