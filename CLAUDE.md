@@ -35,14 +35,17 @@ web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
 ## Environment Variables
 
 - `SUPABASE_URL` — Supabase project URL (optional, enables logging)
-- `SUPABASE_KEY` — Supabase service key (optional, enables logging)
-- `STRIPE_SECRET_KEY` — Stripe secret key (optional, enables usage-based billing via Stripe Meters)
+- `SUPABASE_KEY` — Supabase anon key (optional, enables logging)
+- `SUPABASE_SERVICE_KEY` — Supabase service role key (required for signup, bypasses RLS for api_keys inserts)
+- `STRIPE_SECRET_KEY` — Stripe secret key (optional, enables billing and signup)
 
 ## Authentication
 
-The `/v1/preflight` endpoint requires a Bearer token in the `Authorization` header. API keys are stored in an in-memory dict (`API_KEYS` in `api/main.py`) mapping API keys to Stripe customer IDs. Returns 401 for invalid keys, 403 if the header is missing.
+The `/v1/preflight` endpoint requires a Bearer token in the `Authorization` header. API keys are validated against the in-memory `API_KEYS` dict first, then fall back to a SHA-256 hash lookup in the Supabase `api_keys` table. Returns 401 for invalid keys, 403 if the header is missing.
 
-## Key API Endpoint
+## API Endpoints
+
+`POST /v1/signup` — accepts `{ "email": "..." }`. Creates a Stripe customer, subscribes to the free tier, generates a secure API key (`sg_live_` prefix), stores the SHA-256 hash in Supabase `api_keys`, and returns the plaintext key once.
 
 `POST /v1/preflight` — requires `Authorization: Bearer <api_key>`. Accepts `stripe_customer_id`, `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), and `domain` (general/customer_support/coding/legal/fintech/medical). Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, and `component_breakdown`.
 
