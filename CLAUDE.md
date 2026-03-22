@@ -12,6 +12,7 @@ Sgraal is a memory governance protocol for AI agents. It provides a preflight sc
 - **`api/`** — FastAPI REST API exposing `POST /v1/preflight` as the single scoring endpoint. Optionally logs results to Supabase (`memory_ledger` table) when `SUPABASE_URL` and `SUPABASE_KEY` env vars are set.
 - **`examples/`** — Usage examples for the scoring engine.
 - **`web/`** — Next.js landing page deployed to Vercel at [sgraal.com](https://www.sgraal.com). Sections: hero, how it works, API demo, pricing, signup form. Includes `/privacy` and `/terms` pages. Uses `NEXT_PUBLIC_API_URL` env var to point at the API.
+- **`mcp/`** — `@sgraal/mcp` npm package. MCP server (`sgraal_preflight` tool) for Claude Desktop, plus `createGuard()` and `withPreflight()` middleware for LangGraph/Node.js. Reads `SGRAAL_API_KEY` from env. Blocks on BLOCK, warns on WARN, passes through on USE_MEMORY.
 - **`scripts/`** — Stripe setup, Supabase migrations, and pg_cron monthly reset.
 
 ## Commands
@@ -72,4 +73,21 @@ Usage-based billing via Stripe Meters. Every `/v1/preflight` call emits an `omeg
 One-time Stripe setup (creates meter, product, and graduated pricing):
 ```bash
 STRIPE_SECRET_KEY=sk_test_... python scripts/setup_stripe.py
+```
+
+## MCP Package
+
+`@sgraal/mcp` — install with `npm install @sgraal/mcp`, publish with `cd mcp && npm publish --access public`.
+
+Build: `cd mcp && npm run build`. Claude Desktop config:
+```json
+{
+  "mcpServers": {
+    "sgraal": {
+      "command": "npx",
+      "args": ["@sgraal/mcp"],
+      "env": { "SGRAAL_API_KEY": "sg_live_..." }
+    }
+  }
+}
 ```
