@@ -15,7 +15,30 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Sgraal — Memory Governance for AI Agents",
   description:
-    "Before your AI agent acts, Sgraal checks if its memory is still true. One preflight call. Under 10ms.",
+    "Before your AI agent acts, Sgraal checks if its memory is still true. One preflight call. Under 10ms. 9 risk components. Full explainability.",
+  metadataBase: new URL("https://sgraal.com"),
+  openGraph: {
+    title: "Sgraal — Memory Governance for AI Agents",
+    description:
+      "Your AI agent doesn't know it's forgetting. Sgraal catches stale, conflicting, and drifted memory before your agent acts.",
+    url: "https://sgraal.com",
+    siteName: "Sgraal",
+    type: "website",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Sgraal — Memory Governance for AI Agents",
+    description:
+      "Your AI agent doesn't know it's forgetting. Sgraal catches it in under 10ms.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
+  alternates: {
+    canonical: "https://sgraal.com",
+  },
 };
 
 export default function RootLayout({

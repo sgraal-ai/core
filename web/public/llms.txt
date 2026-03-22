@@ -1,0 +1,60 @@
+# Sgraal — Memory Governance Protocol for AI Agents
+
+> Before an AI agent acts, Sgraal checks if its memory is still true.
+
+## What is Sgraal?
+
+Sgraal is a memory governance protocol that provides a preflight scoring API for AI agents. It evaluates whether the memory an agent is relying on is fresh, consistent, and trustworthy — returning a risk score (Ω_MEM) and a recommended action in under 10ms.
+
+## API Endpoint
+
+POST https://api.sgraal.com/v1/preflight
+
+Accepts memory entries with trust, conflict, age, and belief metadata. Returns:
+- omega_mem_final: Risk score (0-100)
+- recommended_action: USE_MEMORY | WARN | ASK_USER | BLOCK
+- assurance_score: Confidence score
+- component_breakdown: 9 individual risk components
+
+## Install
+
+- Python: pip install sgraal
+- Node.js: npm install @sgraal/mcp
+- REST API: No SDK needed, call directly with curl or any HTTP client
+- Claude Desktop: MCP server via npx @sgraal/mcp
+
+## Scoring Components
+
+The Ω_MEM formula uses 9 weighted risk components:
+1. s_freshness — how old is the memory
+2. s_drift — has the memory drifted from its original meaning
+3. s_provenance — how trusted is the source
+4. s_propagation — blast radius if memory is wrong
+5. r_recall — likelihood of accurate recall
+6. r_encode — quality of original encoding
+7. s_interference — conflict between sources (Dempster-Shafer K)
+8. s_recovery — ability to recover from memory errors
+9. r_belief — model belief divergence
+
+## Memory Types
+
+episodic, semantic, preference, tool_state, shared_workflow, policy, identity
+
+## Pricing
+
+Free: 10,000 calls/month
+Usage-based: $0.001 per call after free tier
+
+## Links
+
+- Website: https://sgraal.com
+- API: https://api.sgraal.com
+- GitHub: https://github.com/sgraal-ai/core
+- PyPI: https://pypi.org/project/sgraal/
+- npm: https://www.npmjs.com/package/@sgraal/mcp
+- Documentation: https://sgraal.com
+- Contact: hello@sgraal.com
+
+## License
+
+Apache 2.0 — open protocol, free to use and embed.
