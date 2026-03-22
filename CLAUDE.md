@@ -53,6 +53,10 @@ The `/v1/preflight` endpoint requires a Bearer token in the `Authorization` head
 
 `POST /v1/preflight` — requires `Authorization: Bearer <api_key>`. Accepts `stripe_customer_id`, `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), and `domain` (general/customer_support/coding/legal/fintech/medical). Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, and `component_breakdown`.
 
+## Rate Limiting
+
+Monthly call limits enforced per API key via `calls_this_month` in the `api_keys` table: free (10,000), starter (100,000), growth (1,000,000). Returns 429 when exceeded. Counter increments and `last_used_at` updates on every successful preflight call. In-memory test keys skip rate limiting.
+
 ## Billing
 
 Usage-based billing via Stripe Meters. Every `/v1/preflight` call emits an `omega_mem_preflight` meter event attributed to the request's `stripe_customer_id`. Free tier: first 10,000 calls per customer are free (configured in Stripe pricing).
