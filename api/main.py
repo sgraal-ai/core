@@ -76,7 +76,6 @@ class MemoryEntryRequest(BaseModel):
 class PreflightRequest(BaseModel):
     agent_id: Optional[str] = "anonymous"
     task_id: Optional[str] = None
-    stripe_customer_id: str
     memory_state: list[MemoryEntryRequest]
     action_type: Literal["informational","reversible","irreversible","destructive"] = "reversible"
     domain: Literal["general","customer_support","coding","legal","fintech","medical"] = "general"
@@ -187,7 +186,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 event_name="omega_mem_preflight",
                 payload={
                     "value": "1",
-                    "stripe_customer_id": req.stripe_customer_id,
+                    "stripe_customer_id": key_record["customer_id"],
                 },
             )
         except Exception:

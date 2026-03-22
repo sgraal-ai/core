@@ -51,7 +51,7 @@ The `/v1/preflight` endpoint requires a Bearer token in the `Authorization` head
 
 `POST /v1/signup` — accepts `{ "email": "..." }`. Creates a Stripe customer, subscribes to the free tier, generates a secure API key (`sg_live_` prefix), stores the SHA-256 hash in Supabase `api_keys`, and returns the plaintext key once.
 
-`POST /v1/preflight` — requires `Authorization: Bearer <api_key>`. Accepts `stripe_customer_id`, `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), and `domain` (general/customer_support/coding/legal/fintech/medical). Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, and `component_breakdown`.
+`POST /v1/preflight` — requires `Authorization: Bearer <api_key>`. Accepts `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), and `domain` (general/customer_support/coding/legal/fintech/medical). The Stripe customer ID is resolved automatically from the API key. Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, and `component_breakdown`.
 
 ## Rate Limiting
 
