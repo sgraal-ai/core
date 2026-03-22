@@ -21,9 +21,9 @@ They act anyway — and the mistake only surfaces later.
 A single preflight call before every memory-based decision:
 ```bash
 curl -X POST https://api.sgraal.com/v1/preflight \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "agent_id": "my-agent",
     "memory_state": [{
       "id": "entry_001",
       "content": "User prefers email communication",
@@ -74,23 +74,90 @@ https://api.sgraal.com/health
 https://api.sgraal.com/docs
 ```
 
-No setup required. Call it directly.
+## Get started
+
+Sign up for a free API key (10,000 calls/month):
+```bash
+curl -X POST https://api.sgraal.com/v1/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@company.com"}'
+```
 
 ---
 
 ## Install
 ```bash
-pip install sgraal
-```
-```bash
 npm install @sgraal/mcp
+```
+
+### Claude Desktop
+
+Add to your `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "sgraal": {
+      "command": "npx",
+      "args": ["@sgraal/mcp"],
+      "env": { "SGRAAL_API_KEY": "sg_live_..." }
+    }
+  }
+}
+```
+
+Claude will automatically have access to the `sgraal_preflight` tool to check memory reliability before acting.
+
+### LangGraph / Node.js
+
+```typescript
+import { createGuard } from "@sgraal/mcp";
+
+const guard = createGuard(); // reads SGRAAL_API_KEY from env
+
+const result = await guard({
+  memory_state: [{
+    id: "mem_001",
+    content: "User prefers metric units",
+    type: "preference_memory",
+    timestamp_age_days: 45,
+    source_trust: 0.9,
+    source_conflict: 0.2,
+    downstream_count: 3,
+  }],
+  action_type: "irreversible",
+  domain: "fintech",
+});
+// Throws SgraalBlockedError on BLOCK
+// Logs warning on WARN
+// Passes through on USE_MEMORY
+```
+
+### Wrap any function
+
+```typescript
+import { withPreflight } from "@sgraal/mcp";
+
+const safeSendEmail = withPreflight(
+  sendEmail,
+  (to, subject, body, memories) => ({
+    memory_state: memories,
+    action_type: "irreversible",
+    domain: "customer_support",
+  }),
+);
+```
+
+### Python
+
+```bash
+pip install sgraal
 ```
 
 ## Integrations
 
-- LangGraph — `OmegaMemCheckpoint` node
+- LangGraph — `createGuard()` middleware
+- Claude Desktop — MCP server (`npx @sgraal/mcp`)
 - AutoGen — preflight middleware
-- Claude MCP — native plugin
 - CrewAI — tool guard decorator
 
 ---
