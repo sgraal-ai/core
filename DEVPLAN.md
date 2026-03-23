@@ -19,6 +19,7 @@
 | T-18 | Memory Dependency Graph — surgical BLOCK | Done | 8 tests |
 | T-19 | Automatic memory access tracking + SDK StepTracker | Done | 9 tests |
 | T-20 | Memory Privacy Layer — 3-layer protection (obfuscation, abstraction, ZK) | Done | 13 tests |
+| T-21 | Thread-aware scaling — bucketing + adaptive sampling | Done | 7 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -39,7 +40,7 @@
 
 ### Test Summary
 
-- **138 tests passing** (pytest)
+- **145 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -55,6 +56,7 @@
 - Dependency graph: 8 tests (surgical block, partial execution, API endpoint)
 - Memory tracker: 9 tests (auto-tracking, dependency graph, API auto_tracked, SDK StepTracker)
 - Privacy layer: 13 tests (obfuscation, abstraction, ZK commitment, API detail_level)
+- Thread manager: 7 tests (sampling rates, bucketing, determinism, API integration)
 
 ### Deployments
 
@@ -66,7 +68,7 @@
 
 ### Commits
 
-84 total (72 in this sprint session)
+87 total (75 in this sprint session)
 
 ### Next Up
 
