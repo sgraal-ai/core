@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import PlainTextResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -165,6 +166,39 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots_txt():
+    return "User-agent: *\nAllow: /\n\nSitemap: https://api.sgraal.com/sitemap.xml\n"
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://api.sgraal.com/</loc></url>
+  <url><loc>https://api.sgraal.com/docs</loc></url>
+  <url><loc>https://api.sgraal.com/v1/preflight</loc></url>
+  <url><loc>https://api.sgraal.com/v1/heal</loc></url>
+</urlset>"""
+    return Response(content=xml, media_type="application/xml")
+
+@app.get("/v1/preflight")
+def preflight_info():
+    return {
+        "endpoint": "POST /v1/preflight",
+        "description": "Memory governance preflight check for AI agents",
+        "docs": "https://sgraal.com",
+        "method": "POST",
+    }
+
+@app.get("/v1/heal")
+def heal_info():
+    return {
+        "endpoint": "POST /v1/heal",
+        "description": "Execute healing actions on stale memory entries",
+        "docs": "https://sgraal.com",
+        "method": "POST",
+    }
 
 @app.get("/v1/verify")
 def verify(
