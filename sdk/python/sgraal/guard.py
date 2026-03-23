@@ -26,6 +26,7 @@ def guard(
     domain: str = "general",
     block_on: str = "BLOCK",
     client: SgraalClient | None = None,
+    fallback_policy: str = "warn",
 ) -> Callable:
     """Decorator that runs a Sgraal preflight check before function execution.
 
@@ -59,7 +60,7 @@ def guard(
     def decorator(fn: Callable) -> Callable:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            sgraal = client or SgraalClient()
+            sgraal = client or SgraalClient(fallback_policy=fallback_policy)
 
             entries = (
                 memory_state(*args, **kwargs)

@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2074,3 +2074,108 @@ class TestCustomWeights:
 
         assert resp.status_code == 400
         assert "sum" in resp.json()["detail"].lower()
+
+
+class TestFallbackEngine:
+    def test_circuit_opens_after_threshold(self):
+        cb = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
+        assert cb.state == CircuitState.CLOSED
+        cb.record_failure()
+        cb.record_failure()
+        assert cb.should_allow_request() is True  # still closed
+        cb.record_failure()
+        assert cb.state == CircuitState.OPEN
+        assert cb.should_allow_request() is False
+
+    def test_circuit_recovers_to_half_open(self):
+        cb = CircuitBreaker(failure_threshold=2, recovery_timeout=1)
+        cb.record_failure()
+        cb.record_failure()
+        assert cb.state == CircuitState.OPEN
+        # Simulate timeout passing
+        cb._last_failure_time = cb._last_failure_time - 2
+        assert cb.state == CircuitState.HALF_OPEN
+        assert cb.should_allow_request() is True
+
+    def test_circuit_closes_on_success(self):
+        cb = CircuitBreaker(failure_threshold=2, recovery_timeout=1)
+        cb.record_failure()
+        cb.record_failure()
+        cb._last_failure_time = cb._last_failure_time - 2
+        cb.record_success()
+        assert cb.state == CircuitState.CLOSED
+
+    def test_fallback_warn_policy(self):
+        engine = FallbackEngine(policy=FallbackPolicy.WARN)
+        entries = [MemoryEntry(
+            id="fb1", content="test", type="tool_state",
+            timestamp_age_days=30, source_trust=0.9,
+            source_conflict=0.1, downstream_count=1,
+        )]
+        result = engine.get_fallback_result(entries)
+        assert result.fallback is True
+        assert result.recommended_action == "WARN"
+        assert result.reason == "API_UNAVAILABLE"
+        assert result.omega_mem_final > 0
+
+    def test_fallback_block_policy(self):
+        engine = FallbackEngine(policy=FallbackPolicy.BLOCK)
+        result = engine.get_fallback_result([])
+        assert result.recommended_action == "BLOCK"
+        assert result.fallback is True
+
+    def test_fallback_allow_policy(self):
+        engine = FallbackEngine(policy=FallbackPolicy.ALLOW)
+        result = engine.get_fallback_result([])
+        assert result.recommended_action == "USE_MEMORY"
+
+    def test_local_scorer(self):
+        scorer = LocalFallbackScorer()
+        entry = MemoryEntry(
+            id="ls1", content="test", type="tool_state",
+            timestamp_age_days=30, source_trust=0.9,
+            source_conflict=0.1, downstream_count=1,
+        )
+        score = scorer.score(entry)
+        assert 0 <= score <= 100
+        assert score > 0  # 30 days tool_state should have significant decay
+
+    def test_sdk_client_fallback_on_failure(self):
+        """SDK client returns fallback result when API unreachable."""
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+        from sgraal.client import SgraalClient as SDKClient
+
+        sdk = SDKClient(
+            api_key="test_key",
+            base_url="http://localhost:1",  # unreachable
+            fallback_policy="warn",
+            timeout=0.1,
+            failure_threshold=1,
+        )
+        result = sdk.preflight(memory_state=[{
+            "id": "m1", "content": "test", "type": "semantic",
+            "timestamp_age_days": 10,
+        }])
+        assert result.fallback is True
+        assert result.recommended_action == "WARN"
+        assert result.circuit_state in ("CLOSED", "OPEN")
+
+    def test_sdk_circuit_opens_after_failures(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+        from sgraal.client import SgraalClient as SDKClient
+
+        sdk = SDKClient(
+            api_key="test_key",
+            base_url="http://localhost:1",
+            fallback_policy="warn",
+            timeout=0.1,
+            failure_threshold=2,
+        )
+        mem = [{"id": "m1", "content": "test", "type": "semantic", "timestamp_age_days": 5}]
+        sdk.preflight(memory_state=mem)
+        sdk.preflight(memory_state=mem)
+        # After 2 failures, circuit should be OPEN
+        assert sdk.circuit.state == "OPEN"
+        # Next call should fail-fast (fallback without trying)
+        result = sdk.preflight(memory_state=mem)
+        assert result.fallback is True
