@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, compute_importance, GrokGuard
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, GrokGuard, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -112,6 +112,7 @@ class PreflightRequest(BaseModel):
     current_goal_embedding: Optional[list[float]] = None
     client_gsv: Optional[int] = None
     client: Optional[str] = None
+    compliance_profile: Optional[str] = "GENERAL"
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -381,6 +382,38 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         for ir in importance_results if ir.at_risk
     ]
 
+    # Compliance evaluation
+    profile = ComplianceProfile(req.compliance_profile) if req.compliance_profile in [p.value for p in ComplianceProfile] else ComplianceProfile.GENERAL
+    compliance = ComplianceEngine().evaluate(
+        omega_mem_final=result.omega_mem_final,
+        assurance_score=result.assurance_score,
+        domain=req.domain,
+        action_type=req.action_type,
+        profile=profile,
+    )
+
+    # Override recommended_action if compliance requires it
+    if not compliance.compliant:
+        critical = any(v.severity == "critical" for v in compliance.violations)
+        if critical and result.recommended_action in ("USE_MEMORY", "WARN"):
+            result = PreflightResult(
+                omega_mem_final=result.omega_mem_final,
+                recommended_action="BLOCK",
+                assurance_score=result.assurance_score,
+                explainability_note=result.explainability_note,
+                component_breakdown=result.component_breakdown,
+                repair_plan=result.repair_plan,
+                healing_counter=result.healing_counter,
+            )
+
+    # Apply healing policy matrix to repair plan tiers
+    policy_matrix = HealingPolicyMatrix()
+    for action in result.repair_plan:
+        entry = next((e for e in entries if e.id == action.entry_id), None)
+        if entry:
+            policy = policy_matrix.lookup(entry.type, req.domain, profile)
+            action.priority = max(action.priority, policy.tier)
+
     # GrokGuard optimization
     grokguard_activated = False
     grokguard_version = None
@@ -410,6 +443,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "gsv": gsv,
         "outcome_id": outcome_id,
         "grokguard_activated": grokguard_activated,
+        "compliance_result": {
+            "compliant": compliance.compliant,
+            "violations": [
+                {"article": v.article, "description": v.description, "severity": v.severity}
+                for v in compliance.violations
+            ],
+            "audit_required": compliance.audit_required,
+            "profile_applied": compliance.profile_applied,
+        },
     }
     if grokguard_version:
         response["grokguard_version"] = grokguard_version

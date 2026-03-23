@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -1238,3 +1238,122 @@ class TestGrokGuard:
         assert resp.status_code == 200
         data = resp.json()
         assert data["grokguard_activated"] is False
+
+
+class TestComplianceEngine:
+    def test_eu_ai_act_blocks_irreversible_high_risk(self):
+        """EU_AI_ACT Article 12: omega>60 + irreversible → non-compliant, audit required."""
+        engine = ComplianceEngine()
+        result = engine.evaluate(
+            omega_mem_final=75, assurance_score=48, domain="fintech",
+            action_type="irreversible", profile=ComplianceProfile.EU_AI_ACT,
+        )
+        assert result.compliant is False
+        assert result.audit_required is True
+        assert any(v.article == "Article 12" for v in result.violations)
+        assert result.profile_applied == "EU_AI_ACT"
+
+    def test_eu_ai_act_allows_reversible(self):
+        """EU_AI_ACT should not block reversible actions even with high omega."""
+        engine = ComplianceEngine()
+        result = engine.evaluate(
+            omega_mem_final=75, assurance_score=48, domain="fintech",
+            action_type="reversible", profile=ComplianceProfile.EU_AI_ACT,
+        )
+        assert result.compliant is True
+
+    def test_eu_ai_act_medical_article_9(self):
+        """EU_AI_ACT Article 9: medical + omega>40 → non-compliant."""
+        engine = ComplianceEngine()
+        result = engine.evaluate(
+            omega_mem_final=50, assurance_score=65, domain="medical",
+            action_type="reversible", profile=ComplianceProfile.EU_AI_ACT,
+        )
+        assert result.compliant is False
+        assert any(v.article == "Article 9" for v in result.violations)
+
+    def test_general_profile_allows_same_action(self):
+        """GENERAL profile should not block what EU_AI_ACT would block."""
+        engine = ComplianceEngine()
+        result = engine.evaluate(
+            omega_mem_final=75, assurance_score=48, domain="fintech",
+            action_type="irreversible", profile=ComplianceProfile.GENERAL,
+        )
+        assert result.compliant is True
+
+    def test_fda_510k_medical_high_risk(self):
+        """FDA_510K: medical + omega>30 → non-compliant."""
+        engine = ComplianceEngine()
+        result = engine.evaluate(
+            omega_mem_final=40, assurance_score=72, domain="medical",
+            action_type="reversible", profile=ComplianceProfile.FDA_510K,
+        )
+        assert result.compliant is False
+        assert result.audit_required is True
+
+    def test_compliance_result_in_api_response(self):
+        """Preflight response should include compliance_result."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "compliance_profile": "GENERAL",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "compliance_result" in data
+        cr = data["compliance_result"]
+        assert "compliant" in cr
+        assert "violations" in cr
+        assert "audit_required" in cr
+        assert cr["profile_applied"] == "GENERAL"
+
+    def test_eu_ai_act_overrides_to_block_in_api(self):
+        """EU_AI_ACT should override recommended_action to BLOCK via API."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(
+                type="tool_state",
+                timestamp_age_days=94,
+                source_trust=0.5,
+                source_conflict=0.6,
+                downstream_count=10,
+            )],
+            "action_type": "irreversible",
+            "domain": "fintech",
+            "compliance_profile": "EU_AI_ACT",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["recommended_action"] == "BLOCK"
+        assert data["compliance_result"]["compliant"] is False
+        assert data["compliance_result"]["audit_required"] is True
+
+
+class TestHealingPolicyMatrix:
+    def test_tool_state_medical_fda(self):
+        """tool_state + medical + FDA_510K → tier=3, requires_approval=True."""
+        matrix = HealingPolicyMatrix()
+        policy = matrix.lookup("tool_state", "medical", ComplianceProfile.FDA_510K)
+        assert policy.tier == 3
+        assert policy.requires_approval is True
+
+    def test_tool_state_general(self):
+        """tool_state + general + GENERAL → tier=1, requires_approval=False."""
+        matrix = HealingPolicyMatrix()
+        policy = matrix.lookup("tool_state", "general", ComplianceProfile.GENERAL)
+        assert policy.tier == 1
+        assert policy.requires_approval is False
+
+    def test_semantic_fintech_eu_ai_act(self):
+        """semantic + fintech + EU_AI_ACT → tier=2, requires_approval=False."""
+        matrix = HealingPolicyMatrix()
+        policy = matrix.lookup("semantic", "fintech", ComplianceProfile.EU_AI_ACT)
+        assert policy.tier == 2
+        assert policy.requires_approval is False
+
+    def test_unknown_combination_returns_default(self):
+        """Unknown combination falls back to tier=1, no approval."""
+        matrix = HealingPolicyMatrix()
+        policy = matrix.lookup("identity", "coding", ComplianceProfile.GENERAL)
+        assert policy.tier == 1
+        assert policy.requires_approval is False
