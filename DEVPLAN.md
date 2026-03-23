@@ -10,6 +10,7 @@
 | T-09 | Global State Vector (GSV) via Upstash Redis | Done | 7 tests |
 | T-10 | OPA compliance engine — EU AI Act, FDA 510K, HIPAA | Done | 11 tests |
 | T-11 | Decision Readiness Dashboard (app.sgraal.com) | Done | mock data |
+| T-12 | Live API connection for dashboard (Settings panel, demo fleet) | Done | — |
 | T-13 | 4-signal importance detector + at-risk warnings | Done | 9 tests |
 | T-14 | Outcome Registry + shadow calibration stub | Done | 6 tests |
 | T-15 | Client optimizer (refactored from GrokGuard — generic for any client) | Done | 4 tests |
@@ -59,13 +60,12 @@
 
 ### Commits
 
-71 total (59 in this sprint session)
+75 total (63 in this sprint session)
 
 ### Next Up
 
 | Task | Description | Status |
 |------|-------------|--------|
-| T-12 | Live API connection for dashboard (replace mock data) | Planned |
 | T-18 | PyMC Bayesian calibration (after 50+ outcomes) | Blocked on data |
 | T-19 | Webhook notifications for BLOCK/at-risk events | Planned |
 | T-20 | SDK v0.2 — add heal() and outcome() methods | Planned |
