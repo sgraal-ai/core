@@ -1,14 +1,15 @@
-import { notFound } from "next/navigation";
+"use client";
+
+import { useState, useEffect, use } from "react";
 import Link from "next/link";
-import { getAgent, MOCK_AGENTS } from "../../lib/mock-data";
+import type { Agent } from "../../lib/mock-data";
+import { getAgent } from "../../lib/mock-data";
+import { DEMO_FLEET } from "../../lib/demo-fleet";
+import { fetchPreflight } from "../../lib/api-client";
 import { OmegaMeter } from "../../components/OmegaMeter";
 import { ComponentBreakdown } from "../../components/ComponentBreakdown";
 import { RepairPlanList } from "../../components/RepairPlanList";
 import { AtRiskWarnings } from "../../components/AtRiskWarnings";
-
-export function generateStaticParams() {
-  return MOCK_AGENTS.map((a) => ({ id: a.id }));
-}
 
 const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
   USE_MEMORY: { bg: "bg-green-400/10", text: "text-green-400" },
@@ -17,10 +18,38 @@ const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
   BLOCK:      { bg: "bg-red-400/10", text: "text-red-400" },
 };
 
-export default async function AgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const agent = getAgent(id);
-  if (!agent) notFound();
+export default function AgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const [agent, setAgent] = useState<Agent | null>(getAgent(id) ?? null);
+  const [isLive, setIsLive] = useState(false);
+
+  useEffect(() => {
+    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+
+    if (!apiKey) return;
+
+    const demo = DEMO_FLEET.find((d) => d.id === id);
+    if (!demo) return;
+
+    fetchPreflight(demo, apiKey, apiUrl)
+      .then((liveAgent) => {
+        setAgent(liveAgent);
+        setIsLive(true);
+      })
+      .catch(() => {});
+  }, [id]);
+
+  if (!agent) {
+    return (
+      <div>
+        <Link href="/" className="text-sm text-muted hover:text-foreground transition mb-6 inline-block">
+          &larr; Back to fleet
+        </Link>
+        <p className="text-muted">Agent not found.</p>
+      </div>
+    );
+  }
 
   const style = ACTION_STYLES[agent.recommended_action] ?? ACTION_STYLES.WARN;
 
@@ -29,6 +58,13 @@ export default async function AgentDetailPage({ params }: { params: Promise<{ id
       <Link href="/" className="text-sm text-muted hover:text-foreground transition mb-6 inline-block">
         &larr; Back to fleet
       </Link>
+
+      {isLive && (
+        <div className="bg-green-400/10 border border-green-400/30 rounded-lg px-4 py-3 mb-6 text-sm text-green-400 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
+          Live data from Sgraal API
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-8 mb-10">
         <OmegaMeter value={agent.omega_mem_final} size={140} />
