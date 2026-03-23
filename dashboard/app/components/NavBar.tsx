@@ -14,6 +14,7 @@ export function NavBar() {
       <div className="flex items-center gap-8">
         <Link href="/" className="font-mono text-gold text-lg font-bold">Sgraal</Link>
         <div className="flex items-center gap-5 text-sm text-muted">
+          <a href="https://sgraal.com" className="hover:text-foreground transition">&larr; sgraal.com</a>
           <Link href="/" className="hover:text-foreground transition">Dashboard</Link>
           <Link href="/verify" className="hover:text-foreground transition">Verify</Link>
         </div>

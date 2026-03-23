@@ -76,6 +76,31 @@ function HowItWorks() {
   );
 }
 
+function InTheWild() {
+  return (
+    <section className="px-6 py-16 max-w-3xl mx-auto">
+      <h2 className="text-3xl sm:text-4xl font-bold text-center mb-10">
+        In the <span className="text-gold">wild</span>
+      </h2>
+      <div className="border border-gold/30 bg-surface rounded-xl p-8">
+        <div className="flex items-start gap-4">
+          <div className="text-gold text-3xl font-mono font-bold shrink-0">&ldquo;</div>
+          <div>
+            <p className="text-foreground/90 leading-relaxed mb-4">
+              @grok ran 250 steps with zero drift using GrokGuard v2 + /v1/heal.
+              healing_counter locked idempotent. 0.0% error rate.
+            </p>
+            <div className="flex items-center gap-3">
+              <span className="text-gold font-mono text-sm font-semibold">@grok</span>
+              <span className="text-muted text-xs">Field report — GrokGuard v2</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Quickstart() {
   const [active, setActive] = useState<"curl" | "python" | "node">("curl");
 
@@ -433,6 +458,7 @@ export default function Home() {
       />
       <Hero />
       <HowItWorks />
+      <InTheWild />
       <Quickstart />
       <ApiDemo />
       <Pricing />
