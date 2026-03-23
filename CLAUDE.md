@@ -15,7 +15,7 @@ Sgraal is a memory governance protocol for AI agents. It provides a preflight sc
 - **`mcp/`** — `@sgraal/mcp` npm package. MCP server (`sgraal_preflight` tool) for Claude Desktop, plus `createGuard()` and `withPreflight()` middleware for LangGraph/Node.js. Reads `SGRAAL_API_KEY` from env. Blocks on BLOCK, warns on WARN, passes through on USE_MEMORY.
 - **`spec/`** — MemCube specification. `memcube.schema.json` defines the standardized memory entry format (JSON Schema draft 2020-12). 7 required fields (id, content, type, timestamp_age_days, source_trust, source_conflict, downstream_count) and 6 optional fields (goal_id, source, provenance, gsv, context_tags, geo_tag). Memory types: episodic, semantic, preference, tool_state, shared_workflow, policy, identity. See `MEMCUBE.md` for field documentation and examples.
 - **`sdk/python/`** — `sgraal` PyPI package (`pip install sgraal`). `SgraalClient` with `preflight()` and `signup()` methods. `@guard()` decorator wraps functions with automatic preflight checks, configurable `block_on` level. Publish: `cd sdk/python && python -m build && twine upload dist/*`.
-- **`scripts/`** — Stripe setup, Supabase migrations, and pg_cron monthly reset.
+- **`scripts/`** — Stripe setup, Supabase migrations, pg_cron monthly reset, outcome_log table migration, and `shadow_calibration.py` (reads closed outcomes from Supabase, counts component attribution frequencies, prints suggested β weight adjustments — stub until 50+ outcomes collected).
 
 ## Commands
 
@@ -58,7 +58,9 @@ Env var: `NEXT_PUBLIC_API_URL=https://api.sgraal.com` (set in Vercel project set
 
 ## Database Setup
 
-The `api_keys` table migration is at `scripts/create_api_keys_table.sql`. Run it in the Supabase SQL Editor or via CLI. Schema: `id` (uuid), `created_at`, `key_hash` (unique, indexed), `customer_id` (Stripe, indexed), `email`, `tier` (free/starter/growth), `calls_this_month`, `last_used_at`. RLS enabled: users see only their own keys by email; only service role can insert/delete.
+The `api_keys` table migration is at `scripts/create_api_keys_table.sql`. Schema: `id` (uuid), `created_at`, `key_hash` (unique, indexed), `customer_id` (Stripe, indexed), `email`, `tier` (free/starter/growth), `calls_this_month`, `last_used_at`. RLS enabled: users see only their own keys; only service role can insert/delete.
+
+The `outcome_log` table migration is at `scripts/create_outcome_log_table.sql`. Schema: `outcome_id` (uuid), `preflight_id`, `agent_id`, `task_id`, `status` (open/success/failure/partial), `component_attribution` (jsonb), `created_at`, `closed_at`. Service role full access via RLS.
 
 ## Authentication
 
@@ -68,9 +70,11 @@ The `/v1/preflight` endpoint requires a Bearer token in the `Authorization` head
 
 `POST /v1/signup` — accepts `{ "email": "..." }`. Creates a Stripe customer, subscribes to the free tier, generates a secure API key (`sg_live_` prefix), stores the SHA-256 hash in Supabase `api_keys`, and returns the plaintext key once.
 
-`POST /v1/preflight` — requires `Authorization: Bearer <api_key>`. Accepts `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), `domain` (general/customer_support/coding/legal/fintech/medical), and optional `client_gsv` (integer). The Stripe customer ID is resolved automatically from the API key. Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, `component_breakdown`, `repair_plan`, `healing_counter`, and `gsv`. If `client_gsv` is provided and server GSV < client_gsv, returns `stale_state_warning: STALE_STATE_DETECTED`. GSV increments monotonically via Upstash Redis INCR (falls back to 0 if Redis unavailable).
+`POST /v1/preflight` — requires `Authorization: Bearer <api_key>`. Accepts `memory_state` (list of memory entries with trust/conflict/age metadata), `action_type` (informational/reversible/irreversible/destructive), `domain` (general/customer_support/coding/legal/fintech/medical), and optional `client_gsv` (integer). The Stripe customer ID is resolved automatically from the API key. Returns `omega_mem_final` score, `recommended_action`, `assurance_score`, `component_breakdown`, `repair_plan`, `healing_counter`, `gsv`, and `outcome_id` (uuid for closing via `/v1/outcome`). If `client_gsv` is provided and server GSV < client_gsv, returns `stale_state_warning: STALE_STATE_DETECTED`. GSV increments monotonically via Upstash Redis INCR (falls back to 0 if Redis unavailable).
 
 `POST /v1/heal` — requires `Authorization: Bearer <api_key>`. Accepts `entry_id` (string), `action` (REFETCH/VERIFY_WITH_SOURCE/REBUILD_WORKING_SET), and optional `agent_id`. Increments the per-entry healing counter and returns `healed`, `healing_counter`, `projected_improvement`, `action_taken`, and `timestamp`. Logged to Supabase `memory_ledger`.
+
+`POST /v1/outcome` — requires `Authorization: Bearer <api_key>`. Closes an outcome from a previous preflight call. Accepts `outcome_id`, `status` (success/failure/partial), and `failure_components` (list of β component names for attribution). Returns `outcome_id`, `status`, `closed_at`. Logged to Supabase `outcome_log`. Returns 404 for unknown outcome_id, 409 if already closed.
 
 ## Rate Limiting
 
