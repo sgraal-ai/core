@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -118,6 +118,7 @@ class PreflightRequest(BaseModel):
     client: Optional[str] = None
     compliance_profile: Optional[str] = "GENERAL"
     steps: Optional[list[StepRequest]] = None
+    detail_level: Optional[str] = "obfuscated"  # "obfuscated" (default) or "full"
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -500,22 +501,34 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             }
             auto_tracked = True
 
+    # Privacy layers
+    session_key = str(uuid.uuid4())
+    full_detail = req.detail_level == "full"
+    all_entry_ids = [e.id for e in entries]
+
+    # Layer 1: obfuscate entry IDs in repair plan
+    repair_plan_out = []
+    for h in result.repair_plan:
+        eid = h.entry_id if full_detail else ObfuscatedId.obfuscate(h.entry_id, session_key)
+        reason = h.reason if full_detail else ReasonAbstractor.abstract(h.reason)
+        repair_plan_out.append({
+            "action": h.action,
+            "entry_id": eid,
+            "reason": reason,
+            "projected_improvement": h.projected_improvement,
+            "priority": h.priority,
+        })
+
+    # Layer 3: ZK commitment
+    zk_commitment = ZKAssurance.commit(result.omega_mem_final, all_entry_ids)
+
     response = {
         "omega_mem_final": result.omega_mem_final,
         "recommended_action": result.recommended_action,
         "assurance_score": result.assurance_score,
         "explainability_note": result.explainability_note,
         "component_breakdown": result.component_breakdown,
-        "repair_plan": [
-            {
-                "action": h.action,
-                "entry_id": h.entry_id,
-                "reason": h.reason,
-                "projected_improvement": h.projected_improvement,
-                "priority": h.priority,
-            }
-            for h in result.repair_plan
-        ],
+        "repair_plan": repair_plan_out,
         "healing_counter": result.healing_counter,
         "gsv": gsv,
         "outcome_id": outcome_id,
@@ -529,10 +542,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "audit_required": compliance.audit_required,
             "profile_applied": compliance.profile_applied,
         },
+        "session_key": session_key,
+        "zk_commitment": zk_commitment,
     }
     if optimizer_version:
         response["optimizer_version"] = optimizer_version
     if at_risk_warnings:
+        if not full_detail:
+            at_risk_warnings = [
+                {**w, "entry_id": ObfuscatedId.obfuscate(w["entry_id"], session_key)}
+                for w in at_risk_warnings
+            ]
         response["at_risk_warnings"] = at_risk_warnings
     if stale_state_warning:
         response["stale_state_warning"] = stale_state_warning

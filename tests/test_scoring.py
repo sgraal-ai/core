@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -1068,6 +1068,7 @@ class TestImportanceDetector:
             }],
             "action_type": "irreversible",
             "domain": "fintech",
+            "detail_level": "full",
         }, headers=AUTH)
 
         assert resp.status_code == 200
@@ -1700,3 +1701,97 @@ class TestSDKStepTracker:
         tracker.reset()
 
         assert tracker.get_steps() == []
+
+
+class TestPrivacyLayer:
+    def test_obfuscated_id_not_original(self):
+        obf = ObfuscatedId.obfuscate("mem_001", "session_abc")
+        assert obf != "mem_001"
+        assert len(obf) == 16
+
+    def test_obfuscation_deterministic(self):
+        a = ObfuscatedId.obfuscate("mem_001", "session_abc")
+        b = ObfuscatedId.obfuscate("mem_001", "session_abc")
+        assert a == b
+
+    def test_different_session_key_different_id(self):
+        a = ObfuscatedId.obfuscate("mem_001", "key_1")
+        b = ObfuscatedId.obfuscate("mem_001", "key_2")
+        assert a != b
+
+    def test_deobfuscate_reverse_lookup(self):
+        session = "session_xyz"
+        obf = ObfuscatedId.obfuscate("mem_002", session)
+        original = ObfuscatedId.deobfuscate(obf, session, ["mem_001", "mem_002", "mem_003"])
+        assert original == "mem_002"
+
+    def test_reason_abstraction_stale(self):
+        assert ReasonAbstractor.abstract("Memory is stale (freshness=88/100, type=tool_state)") == "STALE"
+
+    def test_reason_abstraction_conflict(self):
+        assert ReasonAbstractor.abstract("High source conflict (K=0.82)") == "CONFLICT"
+
+    def test_reason_abstraction_belief(self):
+        assert ReasonAbstractor.abstract("Low model belief (r_belief=0.15)") == "INTENT_DRIFT"
+
+    def test_reason_abstraction_unknown(self):
+        assert ReasonAbstractor.abstract("Some unknown reason") == "GENERAL_RISK"
+
+    def test_zk_commitment_present(self):
+        commitment = ZKAssurance.commit(42.1, ["mem_001", "mem_002"])
+        assert len(commitment) == 64  # SHA256 hex
+
+    def test_zk_verify(self):
+        ids = ["mem_001", "mem_002"]
+        commitment = ZKAssurance.commit(42.1, ids)
+        assert ZKAssurance.verify(commitment, 42.1, ids) is True
+        assert ZKAssurance.verify(commitment, 42.2, ids) is False
+
+    def test_zk_commitment_in_api_response(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "zk_commitment" in data
+        assert len(data["zk_commitment"]) == 64
+        assert "session_key" in data
+
+    def test_obfuscated_by_default(self):
+        """Default detail_level should obfuscate entry_ids in repair_plan."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(
+                id="mem_priv_test",
+                type="tool_state",
+                timestamp_age_days=30,
+                source_conflict=0.8,
+            )],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        if data["repair_plan"]:
+            # Entry ID should be obfuscated (not the original)
+            assert data["repair_plan"][0]["entry_id"] != "mem_priv_test"
+            # Reason should be abstracted
+            assert data["repair_plan"][0]["reason"] in ["STALE", "CONFLICT", "LOW_TRUST", "PROPAGATION_RISK", "INTENT_DRIFT", "GENERAL_RISK"]
+
+    def test_full_detail_returns_original(self):
+        """detail_level=full should return original entry_ids and reasons."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(
+                id="mem_full_test",
+                type="tool_state",
+                timestamp_age_days=30,
+                source_conflict=0.8,
+            )],
+            "detail_level": "full",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        if data["repair_plan"]:
+            assert data["repair_plan"][0]["entry_id"] == "mem_full_test"
+            # Full reason contains specific values
+            assert "(" in data["repair_plan"][0]["reason"]
