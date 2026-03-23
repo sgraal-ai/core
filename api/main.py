@@ -26,13 +26,19 @@ UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN")
 
 supabase_client = None
 if SUPABASE_URL and SUPABASE_KEY:
-    from supabase import create_client
-    supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    try:
+        from supabase import create_client
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception:
+        pass
 
 supabase_service_client = None
 if SUPABASE_URL and SUPABASE_SERVICE_KEY:
-    from supabase import create_client as _create_client
-    supabase_service_client = _create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    try:
+        from supabase import create_client as _create_client
+        supabase_service_client = _create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    except Exception:
+        pass
 
 def _increment_gsv() -> int:
     """Increment Global State Vector via Upstash Redis INCR. Returns 0 if unavailable."""
@@ -164,7 +170,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "port": os.environ.get("PORT", "not set")}
 
 @app.get("/v1/verify")
 def verify(
