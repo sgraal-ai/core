@@ -16,6 +16,7 @@
 | T-15 | Client optimizer (refactored from GrokGuard — generic for any client) | Done | 4 tests |
 | T-16 | Kalman filter trend forecasting for Ω_MEM scores | Done | 8 tests |
 | T-17 | Z3 SMT formal verification layer | Done | 9 tests |
+| T-18 | Memory Dependency Graph — surgical BLOCK | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -36,7 +37,7 @@
 
 ### Test Summary
 
-- **108 tests passing** (pytest)
+- **116 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -49,6 +50,7 @@
 - Outcome registry: 6 tests (close, attribution, 404, 409)
 - GSV: 7 tests (fallback, stale detection, monotonic)
 - Kalman forecast: 8 tests (trends, collapse risk, clamping, API endpoint)
+- Dependency graph: 8 tests (surgical block, partial execution, API endpoint)
 
 ### Deployments
 
@@ -60,13 +62,13 @@
 
 ### Commits
 
-75 total (63 in this sprint session)
+78 total (66 in this sprint session)
 
 ### Next Up
 
 | Task | Description | Status |
 |------|-------------|--------|
-| T-18 | PyMC Bayesian calibration (after 50+ outcomes) | Blocked on data |
+| T-22 | PyMC Bayesian calibration (after 50+ outcomes) | Blocked on data |
 | T-19 | Webhook notifications for BLOCK/at-risk events | Planned |
 | T-20 | SDK v0.2 — add heal() and outcome() methods | Planned |
 | T-21 | Multi-agent shared memory governance | Planned |
