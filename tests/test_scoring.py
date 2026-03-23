@@ -1176,3 +1176,65 @@ class TestOutcomeRegistry:
             "status": "success",
         })
         assert resp.status_code in (401, 403)
+
+
+class TestGrokGuard:
+    def test_grok_client_activates_grokguard(self):
+        """client=grok should trigger grokguard_activated=true."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(type="tool_state", timestamp_age_days=10)],
+            "client": "grok",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["grokguard_activated"] is True
+        assert "grokguard_version" in data
+        assert data["grokguard_version"] == "v2"
+
+    def test_standard_client_does_not_trigger_grokguard(self):
+        """Without client=grok, grokguard_activated should be false."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["grokguard_activated"] is False
+        assert "grokguard_version" not in data
+
+    def test_grokguard_repair_plan_refetch_first(self):
+        """GrokGuard should order REFETCH before other actions."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(
+                type="tool_state",
+                timestamp_age_days=30,
+                source_conflict=0.8,
+                r_belief=0.1,
+            )],
+            "client": "grok",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["grokguard_activated"] is True
+        plan = data["repair_plan"]
+        assert len(plan) > 0
+        # REFETCH should come before VERIFY_WITH_SOURCE and REBUILD_WORKING_SET
+        actions = [h["action"] for h in plan]
+        if "REFETCH" in actions:
+            refetch_idx = actions.index("REFETCH")
+            for other in ["VERIFY_WITH_SOURCE", "REBUILD_WORKING_SET"]:
+                if other in actions:
+                    assert refetch_idx < actions.index(other), f"REFETCH should come before {other}"
+
+    def test_grokguard_not_activated_for_fresh_entries(self):
+        """GrokGuard should not activate when no stale tool_state and no repair plan."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(type="semantic", timestamp_age_days=0)],
+            "client": "grok",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["grokguard_activated"] is False

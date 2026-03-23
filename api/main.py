@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, compute_importance
+from scoring_engine import compute, MemoryEntry, compute_importance, GrokGuard
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -111,6 +111,7 @@ class PreflightRequest(BaseModel):
     current_goal: Optional[str] = None
     current_goal_embedding: Optional[list[float]] = None
     client_gsv: Optional[int] = None
+    client: Optional[str] = None
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -380,6 +381,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         for ir in importance_results if ir.at_risk
     ]
 
+    # GrokGuard optimization
+    grokguard_activated = False
+    grokguard_version = None
+    if req.client == "grok":
+        gg = GrokGuard().optimize(result, entries)
+        result = gg.preflight
+        grokguard_activated = gg.grokguard_activated
+        grokguard_version = gg.grokguard_version
+
     response = {
         "omega_mem_final": result.omega_mem_final,
         "recommended_action": result.recommended_action,
@@ -399,7 +409,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "healing_counter": result.healing_counter,
         "gsv": gsv,
         "outcome_id": outcome_id,
+        "grokguard_activated": grokguard_activated,
     }
+    if grokguard_version:
+        response["grokguard_version"] = grokguard_version
     if at_risk_warnings:
         response["at_risk_warnings"] = at_risk_warnings
     if stale_state_warning:
