@@ -18,6 +18,7 @@
 | T-17 | Z3 SMT formal verification layer | Done | 9 tests |
 | T-18 | Memory Dependency Graph — surgical BLOCK | Done | 8 tests |
 | T-19 | Automatic memory access tracking + SDK StepTracker | Done | 9 tests |
+| T-20 | Memory Privacy Layer — 3-layer protection (obfuscation, abstraction, ZK) | Done | 13 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -38,7 +39,7 @@
 
 ### Test Summary
 
-- **125 tests passing** (pytest)
+- **138 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -53,6 +54,7 @@
 - Kalman forecast: 8 tests (trends, collapse risk, clamping, API endpoint)
 - Dependency graph: 8 tests (surgical block, partial execution, API endpoint)
 - Memory tracker: 9 tests (auto-tracking, dependency graph, API auto_tracked, SDK StepTracker)
+- Privacy layer: 13 tests (obfuscation, abstraction, ZK commitment, API detail_level)
 
 ### Deployments
 
@@ -64,13 +66,14 @@
 
 ### Commits
 
-81 total (69 in this sprint session)
+84 total (72 in this sprint session)
 
 ### Next Up
 
 | Task | Description | Status |
 |------|-------------|--------|
 | T-22 | PyMC Bayesian calibration (after 50+ outcomes) | Blocked on data |
-| T-19 | Webhook notifications for BLOCK/at-risk events | Planned |
-| T-20 | SDK v0.2 — add heal() and outcome() methods | Planned |
-| T-21 | Multi-agent shared memory governance | Planned |
+| T-23 | Webhook notifications for BLOCK/at-risk events | Planned |
+| T-24 | SDK v0.2 — add heal() and outcome() methods | Planned |
+| T-25 | Multi-agent shared memory governance | Planned |
+| T-26 | Full ZK proof implementation (Phase 2) | Planned |
