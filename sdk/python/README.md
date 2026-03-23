@@ -136,6 +136,68 @@ def preflight_node(state):
     return {**state, "blocked": False, "omega_score": result.omega_mem_final}
 ```
 
+## GeminiGuard
+
+```python
+from sgraal import GeminiGuard
+
+guard = GeminiGuard(
+    sgraal_api_key="sg_live_...",
+    gemini_api_key="...",
+    model="gemini-1.5-flash",
+)
+
+# Automatically checks memory before calling Gemini
+# BLOCK → returns block message without calling Gemini
+# WARN → adds warning context to Gemini prompt
+# USE_MEMORY → calls Gemini normally
+response = guard.check_and_generate(
+    "What is the user's shipping address?",
+    memory_data=[{
+        "id": "mem_addr",
+        "content": "User address: 123 Main St",
+        "type": "preference",
+        "timestamp_age_days": 30,
+        "source_trust": 0.9,
+        "source_conflict": 0.1,
+        "downstream_count": 2,
+    }],
+    action_type="irreversible",
+    domain="customer_support",
+)
+```
+
+Requires: `pip install google-generativeai`
+
+## OpenAIGuard
+
+```python
+from sgraal import OpenAIGuard
+
+guard = OpenAIGuard(
+    sgraal_api_key="sg_live_...",
+    openai_api_key="...",
+    model="gpt-4",
+)
+
+response = guard.check_and_generate(
+    "Summarize the contract terms",
+    memory_data=[{
+        "id": "mem_contract",
+        "content": "Liability capped at €500K",
+        "type": "tool_state",
+        "timestamp_age_days": 90,
+        "source_trust": 0.7,
+        "source_conflict": 0.4,
+        "downstream_count": 5,
+    }],
+    action_type="irreversible",
+    domain="legal",
+)
+```
+
+Requires: `pip install openai`
+
 ## License
 
 Apache 2.0

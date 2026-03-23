@@ -1,6 +1,6 @@
 import sys
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -1881,3 +1881,89 @@ class TestThreadManager:
         data = resp.json()
         assert "thread_id" not in data
         assert "bucket_id" not in data
+
+
+class TestLLMGuards:
+    """Test GeminiGuard and OpenAIGuard with mocked Sgraal + LLM APIs."""
+
+    @staticmethod
+    def _get_guards():
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+        from sgraal.integrations import GeminiGuard, OpenAIGuard
+        from sgraal.client import PreflightResult
+        return GeminiGuard, OpenAIGuard, PreflightResult
+
+    def _mock_preflight(self, action, omega):
+        _, _, PreflightResult = self._get_guards()
+        return PreflightResult(
+            omega_mem_final=omega,
+            recommended_action=action,
+            assurance_score=max(0, round(100 - omega * 0.7)),
+            explainability_note=f"Test: Action={action}.",
+            component_breakdown={},
+        )
+
+    def test_gemini_guard_blocks_on_high_omega(self):
+        GeminiGuard, _, _ = self._get_guards()
+
+        guard = GeminiGuard(sgraal_api_key="test", gemini_api_key="test")
+        with patch.object(guard, "_preflight", return_value=self._mock_preflight("BLOCK", 85)):
+            result = guard.check_and_generate("query", memory_data=[{"id": "m1", "content": "x", "type": "semantic", "timestamp_age_days": 1}])
+            assert "[SGRAAL BLOCKED]" in result
+            assert "85" in result
+
+    def test_openai_guard_warns_on_medium_omega(self):
+        _, OpenAIGuard, _ = self._get_guards()
+
+        guard = OpenAIGuard(sgraal_api_key="test", openai_api_key="test")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "OpenAI response"
+
+        with patch.object(guard, "_preflight", return_value=self._mock_preflight("WARN", 55)):
+            with patch("sgraal.integrations.OpenAI") as mock_openai:
+                mock_openai.return_value.chat.completions.create.return_value = mock_response
+                result = guard.check_and_generate("query", memory_data=[{"id": "m1", "content": "x", "type": "semantic", "timestamp_age_days": 1}])
+                assert result == "OpenAI response"
+                # Verify the prompt included the warning prefix
+                call_args = mock_openai.return_value.chat.completions.create.call_args
+                msg = call_args[1]["messages"][0]["content"]
+                assert "[SGRAAL WARNING" in msg
+
+    def test_gemini_guard_passes_on_low_omega(self):
+        GeminiGuard, _, _ = self._get_guards()
+
+        guard = GeminiGuard(sgraal_api_key="test", gemini_api_key="test")
+        mock_response = MagicMock()
+        mock_response.text = "Gemini response"
+
+        with patch.object(guard, "_preflight", return_value=self._mock_preflight("USE_MEMORY", 10)):
+            with patch("sgraal.integrations.genai") as mock_genai:
+                mock_genai.GenerativeModel.return_value.generate_content.return_value = mock_response
+                result = guard.check_and_generate("query", memory_data=[{"id": "m1", "content": "x", "type": "semantic", "timestamp_age_days": 1}])
+                assert result == "Gemini response"
+                # No warning prefix for USE_MEMORY
+                call_args = mock_genai.GenerativeModel.return_value.generate_content.call_args
+                assert "[SGRAAL" not in call_args[0][0]
+
+    def test_openai_guard_blocks_on_high_omega(self):
+        _, OpenAIGuard, _ = self._get_guards()
+
+        guard = OpenAIGuard(sgraal_api_key="test", openai_api_key="test")
+        with patch.object(guard, "_preflight", return_value=self._mock_preflight("BLOCK", 90)):
+            result = guard.check_and_generate("query", memory_data=[{"id": "m1", "content": "x", "type": "semantic", "timestamp_age_days": 1}])
+            assert "[SGRAAL BLOCKED]" in result
+
+    def test_openai_guard_passes_on_low_omega(self):
+        _, OpenAIGuard, _ = self._get_guards()
+
+        guard = OpenAIGuard(sgraal_api_key="test", openai_api_key="test")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "GPT response"
+
+        with patch.object(guard, "_preflight", return_value=self._mock_preflight("USE_MEMORY", 8)):
+            with patch("sgraal.integrations.OpenAI") as mock_openai:
+                mock_openai.return_value.chat.completions.create.return_value = mock_response
+                result = guard.check_and_generate("query", memory_data=[{"id": "m1", "content": "x", "type": "semantic", "timestamp_age_days": 1}])
+                assert result == "GPT response"
