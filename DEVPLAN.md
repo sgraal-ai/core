@@ -17,6 +17,7 @@
 | T-16 | Kalman filter trend forecasting for Ω_MEM scores | Done | 8 tests |
 | T-17 | Z3 SMT formal verification layer | Done | 9 tests |
 | T-18 | Memory Dependency Graph — surgical BLOCK | Done | 8 tests |
+| T-19 | Automatic memory access tracking + SDK StepTracker | Done | 9 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -37,7 +38,7 @@
 
 ### Test Summary
 
-- **116 tests passing** (pytest)
+- **125 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -51,6 +52,7 @@
 - GSV: 7 tests (fallback, stale detection, monotonic)
 - Kalman forecast: 8 tests (trends, collapse risk, clamping, API endpoint)
 - Dependency graph: 8 tests (surgical block, partial execution, API endpoint)
+- Memory tracker: 9 tests (auto-tracking, dependency graph, API auto_tracked, SDK StepTracker)
 
 ### Deployments
 
@@ -62,7 +64,7 @@
 
 ### Commits
 
-78 total (66 in this sprint session)
+81 total (69 in this sprint session)
 
 ### Next Up
 
