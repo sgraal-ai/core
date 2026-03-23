@@ -21,6 +21,7 @@
 | T-20 | Memory Privacy Layer — 3-layer protection (obfuscation, abstraction, ZK) | Done | 13 tests |
 | T-21 | Thread-aware scaling — bucketing + adaptive sampling | Done | 7 tests |
 | T-22 | GeminiGuard + OpenAIGuard wrappers in Python SDK | Done | 5 tests |
+| T-25 | Graceful Fallback Engine — circuit breaker + offline mode | Done | 9 tests |
 | T-26 | Batch scoring + custom weights + self-hosting docs | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
@@ -42,7 +43,7 @@
 
 ### Test Summary
 
-- **158 tests passing** (pytest)
+- **167 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -60,6 +61,7 @@
 - Privacy layer: 13 tests (obfuscation, abstraction, ZK commitment, API detail_level)
 - Thread manager: 7 tests (sampling rates, bucketing, determinism, API integration)
 - LLM guards: 5 tests (GeminiGuard block/warn/pass, OpenAIGuard block/pass)
+- Fallback engine: 9 tests (circuit breaker, policies, local scorer, SDK fallback)
 - Batch scoring: 5 tests (all results, summary, max 100, empty, auth)
 - Custom weights: 3 tests (override, batch, bad sum)
 
@@ -73,7 +75,7 @@
 
 ### Commits
 
-91 total (79 in this sprint session)
+93 total (81 in this sprint session)
 
 ### Next Up
 
