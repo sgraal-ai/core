@@ -92,17 +92,22 @@ def compute_importance(entry: MemoryEntry) -> ImportanceResult:
     age_ratio = entry.timestamp_age_days / threshold if threshold > 0 else 0
     at_risk = importance >= 5.0 and age_ratio >= 0.7
 
+    # Top signal reason — derived from whichever signal scored highest
+    signal_reasons = {
+        "return_frequency": "frequently referenced",
+        "blast_radius": "many downstream decisions depend on it",
+        "irreversibility": "used in irreversible actions",
+        "uniqueness": "only known from a single source",
+    }
+    top_signal = max(signals, key=signals.get)
+    top_reason = signal_reasons[top_signal]
+
     warning = None
     if at_risk:
         content_preview = entry.content[:60] + ("..." if len(entry.content) > 60 else "")
-        source_note = (
-            "only known from a single source"
-            if not entry.has_backup_source
-            else "multiple sources available"
-        )
         warning = (
-            f"Memory at risk: '{content_preview}' "
-            f"({entry.timestamp_age_days:.0f} days old, {source_note}). "
+            f"\u26a0\ufe0f Memory at risk: '{content_preview}' "
+            f"({entry.timestamp_age_days:.0f} days old, {top_reason}). "
             f"Consider refreshing before proceeding."
         )
 

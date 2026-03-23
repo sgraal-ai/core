@@ -942,7 +942,11 @@ class TestImportanceDetector:
         assert result.warning is not None
         assert "Budapest office" in result.warning
         assert "94 days old" in result.warning
-        assert "single source" in result.warning
+        # Top signal reason should be present (irreversibility or uniqueness both score 1.0)
+        assert any(reason in result.warning for reason in [
+            "only known from a single source",
+            "used in irreversible actions",
+        ])
 
     def test_fresh_entry_not_at_risk(self):
         """Fresh entry should not be at risk regardless of importance."""
