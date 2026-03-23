@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -1357,3 +1357,74 @@ class TestHealingPolicyMatrix:
         policy = matrix.lookup("identity", "coding", ComplianceProfile.GENERAL)
         assert policy.tier == 1
         assert policy.requires_approval is False
+
+
+class TestFormalVerification:
+    def test_healing_policy_verifies(self):
+        """Default healing policy should pass all Z3 checks."""
+        verifier = PolicyVerifier()
+        result = verifier.verify_healing_policy()
+        assert result.verified is True
+        assert result.counterexample is None
+        assert result.duration_ms >= 0
+        assert "verified" in result.proof.lower()
+
+    def test_general_compliance_verifies(self):
+        """GENERAL compliance rules should be consistent."""
+        verifier = PolicyVerifier()
+        result = verifier.verify_compliance_rules(ComplianceProfile.GENERAL, "general")
+        assert result.verified is True
+        assert result.counterexample is None
+
+    def test_eu_ai_act_compliance_verifies(self):
+        """EU_AI_ACT compliance rules should be internally consistent."""
+        verifier = PolicyVerifier()
+        result = verifier.verify_compliance_rules(ComplianceProfile.EU_AI_ACT, "fintech")
+        assert result.verified is True
+        assert result.counterexample is None
+
+    def test_eu_ai_act_medical_verifies(self):
+        """EU_AI_ACT + medical domain should be consistent."""
+        verifier = PolicyVerifier()
+        result = verifier.verify_compliance_rules(ComplianceProfile.EU_AI_ACT, "medical")
+        assert result.verified is True
+
+    def test_fda_510k_verifies(self):
+        """FDA_510K compliance rules should be consistent."""
+        verifier = PolicyVerifier()
+        result = verifier.verify_compliance_rules(ComplianceProfile.FDA_510K, "medical")
+        assert result.verified is True
+
+    def test_verification_result_fields(self):
+        """VerificationResult should have all required fields."""
+        verifier = PolicyVerifier()
+        result = verifier.verify_healing_policy()
+        assert hasattr(result, "verified")
+        assert hasattr(result, "proof")
+        assert hasattr(result, "counterexample")
+        assert hasattr(result, "duration_ms")
+
+    def test_verify_endpoint(self):
+        """GET /v1/verify should return verification results."""
+        resp = client.get("/v1/verify?profile=GENERAL&domain=general", headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["verified"] is True
+        assert "proof" in data
+        assert data["counterexample"] is None
+        assert data["duration_ms"] >= 0
+        assert data["profile"] == "GENERAL"
+        assert data["domain"] == "general"
+
+    def test_verify_endpoint_eu_ai_act(self):
+        """GET /v1/verify with EU_AI_ACT profile should verify."""
+        resp = client.get("/v1/verify?profile=EU_AI_ACT&domain=fintech", headers=AUTH)
+
+        assert resp.status_code == 200
+        assert resp.json()["verified"] is True
+        assert resp.json()["profile"] == "EU_AI_ACT"
+
+    def test_verify_requires_auth(self):
+        resp = client.get("/v1/verify")
+        assert resp.status_code in (401, 403)

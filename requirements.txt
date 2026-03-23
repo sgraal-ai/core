@@ -3,3 +3,4 @@ uvicorn
 pydantic
 supabase
 stripe
+z3-solver

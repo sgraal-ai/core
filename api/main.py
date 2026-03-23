@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, GrokGuard, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, GrokGuard, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -151,6 +151,32 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/v1/verify")
+def verify(
+    profile: str = "GENERAL",
+    domain: str = "general",
+    key_record: dict = Depends(verify_api_key),
+):
+    verifier = PolicyVerifier()
+    comp_profile = ComplianceProfile(profile) if profile in [p.value for p in ComplianceProfile] else ComplianceProfile.GENERAL
+
+    healing_result = verifier.verify_healing_policy()
+    compliance_result = verifier.verify_compliance_rules(comp_profile, domain)
+
+    verified = healing_result.verified and compliance_result.verified
+    proofs = [healing_result.proof, compliance_result.proof]
+    counterexample = healing_result.counterexample or compliance_result.counterexample
+    duration = round(healing_result.duration_ms + compliance_result.duration_ms, 2)
+
+    return {
+        "verified": verified,
+        "proof": " | ".join(proofs),
+        "counterexample": counterexample,
+        "duration_ms": duration,
+        "profile": comp_profile.value,
+        "domain": domain,
+    }
 
 @app.post("/v1/signup")
 def signup(req: SignupRequest):
