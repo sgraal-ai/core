@@ -11,7 +11,7 @@ from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, l
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
     from fastapi.testclient import TestClient
-    from api.main import app, API_KEYS, verify_api_key, TIER_LIMITS
+    from api.main import app, API_KEYS, verify_api_key, TIER_LIMITS, _outcomes
 
 client = TestClient(app)
 AUTH = {"Authorization": "Bearer sg_test_key_001"}
@@ -1089,3 +1089,90 @@ class TestImportanceDetector:
 
         assert resp.status_code == 200
         assert "at_risk_warnings" not in resp.json()
+
+
+class TestOutcomeRegistry:
+    def test_outcome_id_in_preflight_response(self):
+        """Preflight response should include an outcome_id."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "outcome_id" in data
+        assert len(data["outcome_id"]) == 36  # UUID format
+
+    def test_close_outcome_success(self):
+        """POST /v1/outcome should close an open outcome."""
+        # First create a preflight to get an outcome_id
+        preflight_resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        outcome_id = preflight_resp.json()["outcome_id"]
+
+        # Close the outcome
+        resp = client.post("/v1/outcome", json={
+            "outcome_id": outcome_id,
+            "status": "success",
+            "failure_components": [],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["outcome_id"] == outcome_id
+        assert data["status"] == "success"
+        assert "closed_at" in data
+
+    def test_close_outcome_failure_with_components(self):
+        """Closing with failure status should accept component attribution."""
+        preflight_resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        outcome_id = preflight_resp.json()["outcome_id"]
+
+        resp = client.post("/v1/outcome", json={
+            "outcome_id": outcome_id,
+            "status": "failure",
+            "failure_components": ["s_freshness", "s_drift"],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "failure"
+
+    def test_invalid_outcome_id_returns_404(self):
+        """Unknown outcome_id should return 404."""
+        resp = client.post("/v1/outcome", json={
+            "outcome_id": "00000000-0000-0000-0000-000000000000",
+            "status": "success",
+        }, headers=AUTH)
+
+        assert resp.status_code == 404
+
+    def test_double_close_returns_409(self):
+        """Closing an already-closed outcome should return 409."""
+        preflight_resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        outcome_id = preflight_resp.json()["outcome_id"]
+
+        # Close once
+        client.post("/v1/outcome", json={
+            "outcome_id": outcome_id,
+            "status": "success",
+        }, headers=AUTH)
+
+        # Try to close again
+        resp = client.post("/v1/outcome", json={
+            "outcome_id": outcome_id,
+            "status": "failure",
+        }, headers=AUTH)
+
+        assert resp.status_code == 409
+
+    def test_outcome_requires_auth(self):
+        resp = client.post("/v1/outcome", json={
+            "outcome_id": "test",
+            "status": "success",
+        })
+        assert resp.status_code in (401, 403)

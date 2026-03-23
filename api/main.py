@@ -6,6 +6,7 @@ from typing import Literal, Optional
 import sys, os
 import secrets
 import hashlib
+import uuid
 from datetime import datetime, timezone
 import stripe
 import requests as http_requests
@@ -116,6 +117,12 @@ class HealRequest(BaseModel):
     action: Literal["REFETCH", "VERIFY_WITH_SOURCE", "REBUILD_WORKING_SET"]
     agent_id: Optional[str] = "anonymous"
 
+class OutcomeRequest(BaseModel):
+    outcome_id: str
+    preflight_id: Optional[str] = None
+    status: Literal["success", "failure", "partial"]
+    failure_components: list[str] = []
+
 class SignupRequest(BaseModel):
     email: str
 
@@ -182,6 +189,9 @@ def signup(req: SignupRequest):
 # In-memory healing counter store (per entry_id)
 _healing_counters: dict[str, int] = {}
 
+# In-memory outcome registry (outcome_id -> outcome record)
+_outcomes: dict[str, dict] = {}
+
 # Projected improvement estimates per action type
 _HEAL_IMPROVEMENTS = {
     "REFETCH": 8.0,
@@ -226,6 +236,42 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
     }
 
 
+@app.post("/v1/outcome")
+def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key)):
+    if req.outcome_id not in _outcomes:
+        raise HTTPException(status_code=404, detail=f"Outcome {req.outcome_id} not found")
+
+    outcome = _outcomes[req.outcome_id]
+    if outcome["status"] != "open":
+        raise HTTPException(status_code=409, detail=f"Outcome {req.outcome_id} already closed")
+
+    now = datetime.now(timezone.utc)
+    outcome["status"] = req.status
+    outcome["closed_at"] = now.isoformat()
+    outcome["component_attribution"] = req.failure_components
+
+    # Log to Supabase outcome_log
+    if supabase_client:
+        try:
+            supabase_client.table("outcome_log").insert({
+                "outcome_id": req.outcome_id,
+                "preflight_id": req.preflight_id or outcome.get("preflight_id"),
+                "agent_id": outcome.get("agent_id"),
+                "task_id": outcome.get("task_id"),
+                "status": req.status,
+                "component_attribution": req.failure_components,
+                "closed_at": now.isoformat(),
+            }).execute()
+        except Exception:
+            pass
+
+    return {
+        "outcome_id": req.outcome_id,
+        "status": req.status,
+        "closed_at": now.isoformat(),
+    }
+
+
 @app.post("/v1/preflight")
 def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
     if not req.memory_state:
@@ -258,6 +304,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         for e in req.memory_state]
 
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
+
+    # Generate outcome_id for tracking
+    outcome_id = str(uuid.uuid4())
+    _outcomes[outcome_id] = {
+        "status": "open",
+        "agent_id": req.agent_id,
+        "task_id": req.task_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "closed_at": None,
+        "component_attribution": [],
+    }
 
     # Increment Global State Vector
     gsv = _increment_gsv()
@@ -341,6 +398,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         ],
         "healing_counter": result.healing_counter,
         "gsv": gsv,
+        "outcome_id": outcome_id,
     }
     if at_risk_warnings:
         response["at_risk_warnings"] = at_risk_warnings
