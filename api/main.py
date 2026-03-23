@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -102,6 +102,10 @@ class MemoryEntryRequest(BaseModel):
     has_backup_source: bool = True
     action_context: str = "reversible"
 
+class StepRequest(BaseModel):
+    step_id: str
+    entry_ids: list[str]
+
 class PreflightRequest(BaseModel):
     agent_id: Optional[str] = "anonymous"
     task_id: Optional[str] = None
@@ -113,6 +117,7 @@ class PreflightRequest(BaseModel):
     client_gsv: Optional[int] = None
     client: Optional[str] = None
     compliance_profile: Optional[str] = "GENERAL"
+    steps: Optional[list[StepRequest]] = None
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -465,6 +470,20 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         client_optimized = co.client_optimized
         optimizer_version = co.optimizer_version
 
+    # Surgical block via dependency graph
+    surgical_result = None
+    if req.steps:
+        graph = MemoryDependencyGraph()
+        for step in req.steps:
+            graph.add_step(step.step_id, step.entry_ids)
+        blocked_entries = [h.entry_id for h in result.repair_plan]
+        sr = graph.surgical_block(blocked_entries)
+        surgical_result = {
+            "blocked_steps": sr.blocked_steps,
+            "safe_steps": sr.safe_steps,
+            "partial_execution_possible": sr.partial_execution_possible,
+        }
+
     response = {
         "omega_mem_final": result.omega_mem_final,
         "recommended_action": result.recommended_action,
@@ -501,5 +520,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["at_risk_warnings"] = at_risk_warnings
     if stale_state_warning:
         response["stale_state_warning"] = stale_state_warning
+    if surgical_result:
+        response["surgical_result"] = surgical_result
 
     return response

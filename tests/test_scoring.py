@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -1502,3 +1502,90 @@ class TestKalmanForecast:
 
         assert resp.status_code == 200
         assert "forecast" not in resp.json()
+
+
+class TestDependencyGraph:
+    def test_step_with_stale_entry_is_blocked(self):
+        graph = MemoryDependencyGraph()
+        graph.add_step("step_send_email", ["mem_customer_pref"])
+        graph.add_step("step_log_event", ["mem_event_log"])
+
+        result = graph.surgical_block(blocked_entries=["mem_customer_pref"])
+        assert "step_send_email" in result.blocked_steps
+        assert "step_log_event" in result.safe_steps
+
+    def test_step_with_no_stale_deps_is_safe(self):
+        graph = MemoryDependencyGraph()
+        graph.add_step("step_a", ["mem_fresh"])
+        graph.add_step("step_b", ["mem_stale"])
+
+        result = graph.surgical_block(blocked_entries=["mem_stale"])
+        assert "step_a" in result.safe_steps
+        assert "step_b" in result.blocked_steps
+
+    def test_partial_execution_possible(self):
+        graph = MemoryDependencyGraph()
+        graph.add_step("step_a", ["mem_fresh"])
+        graph.add_step("step_b", ["mem_stale"])
+
+        result = graph.surgical_block(blocked_entries=["mem_stale"])
+        assert result.partial_execution_possible is True
+
+    def test_no_partial_when_all_blocked(self):
+        graph = MemoryDependencyGraph()
+        graph.add_step("step_a", ["mem_stale"])
+        graph.add_step("step_b", ["mem_stale"])
+
+        result = graph.surgical_block(blocked_entries=["mem_stale"])
+        assert result.partial_execution_possible is False
+        assert len(result.safe_steps) == 0
+
+    def test_no_partial_when_all_safe(self):
+        graph = MemoryDependencyGraph()
+        graph.add_step("step_a", ["mem_fresh"])
+
+        result = graph.surgical_block(blocked_entries=["mem_other"])
+        assert result.partial_execution_possible is False
+        assert len(result.blocked_steps) == 0
+
+    def test_get_affected_steps(self):
+        graph = MemoryDependencyGraph()
+        graph.add_step("step_a", ["mem_1", "mem_2"])
+        graph.add_step("step_b", ["mem_2", "mem_3"])
+
+        affected = graph.get_affected_steps("mem_2")
+        assert "step_a" in affected
+        assert "step_b" in affected
+
+    def test_surgical_result_in_api_response(self):
+        """Preflight with steps should return surgical_result."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="mem_stale_x", type="tool_state", timestamp_age_days=30, source_conflict=0.8),
+                _fresh_entry(id="mem_fresh_y"),
+            ],
+            "steps": [
+                {"step_id": "step_charge", "entry_ids": ["mem_stale_x"]},
+                {"step_id": "step_log", "entry_ids": ["mem_fresh_y"]},
+            ],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "surgical_result" in data
+        sr = data["surgical_result"]
+        assert "blocked_steps" in sr
+        assert "safe_steps" in sr
+        assert "partial_execution_possible" in sr
+        # mem_stale_x should trigger repair → step_charge blocked
+        assert "step_charge" in sr["blocked_steps"]
+        assert "step_log" in sr["safe_steps"]
+        assert sr["partial_execution_possible"] is True
+
+    def test_no_surgical_result_without_steps(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "surgical_result" not in resp.json()
