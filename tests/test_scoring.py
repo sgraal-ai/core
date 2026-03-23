@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -1795,3 +1795,89 @@ class TestPrivacyLayer:
             assert data["repair_plan"][0]["entry_id"] == "mem_full_test"
             # Full reason contains specific values
             assert "(" in data["repair_plan"][0]["reason"]
+
+
+class TestThreadManager:
+    def test_high_risk_domain_always_checked(self):
+        """medical/fintech/legal should have sample_rate=1.0."""
+        tm = ThreadManager()
+        for domain in ["medical", "fintech", "legal"]:
+            assert tm.get_sample_rate(domain) == 1.0
+            assert tm.should_check("any_thread", domain) is True
+
+    def test_low_risk_domain_sampled(self):
+        """customer_support/coding should have sample_rate=0.1."""
+        tm = ThreadManager()
+        assert tm.get_sample_rate("customer_support") == 0.1
+        assert tm.get_sample_rate("coding") == 0.1
+
+    def test_same_thread_same_bucket(self):
+        """Same thread_id always gets the same bucket_id."""
+        tm = ThreadManager()
+        b1 = tm.assign_bucket("thread_abc", "general")
+        b2 = tm.assign_bucket("thread_abc", "general")
+        assert b1 == b2
+        assert b1.startswith("bucket:")
+
+    def test_should_check_deterministic(self):
+        """Same thread_id + domain always returns same result."""
+        tm = ThreadManager()
+        r1 = tm.should_check("thread_xyz", "general")
+        r2 = tm.should_check("thread_xyz", "general")
+        assert r1 == r2
+
+    def test_sampled_out_response_via_api(self):
+        """Sampled-out thread should get lightweight USE_MEMORY response."""
+        # Find a thread_id that gets sampled out for coding (10% rate)
+        tm = ThreadManager()
+        sampled_out_thread = None
+        for i in range(200):
+            tid = f"thread_sample_test_{i}"
+            if not tm.should_check(tid, "coding"):
+                sampled_out_thread = tid
+                break
+
+        if sampled_out_thread is None:
+            return  # extremely unlikely but skip if all 200 pass
+
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "domain": "coding",
+            "thread_id": sampled_out_thread,
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sampled"] is False
+        assert data["recommended_action"] == "USE_MEMORY"
+        assert data["reason"] == "sampled_out"
+        assert data["thread_id"] == sampled_out_thread
+        assert "bucket_id" in data
+        assert data["sample_rate"] == 0.1
+
+    def test_full_scoring_with_thread_id(self):
+        """Thread in high-risk domain should get full scoring with thread info."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "domain": "medical",
+            "thread_id": "thread_medical_001",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sampled"] is True
+        assert data["thread_id"] == "thread_medical_001"
+        assert "bucket_id" in data
+        assert data["sample_rate"] == 1.0
+        assert "omega_mem_final" in data
+
+    def test_no_thread_info_without_thread_id(self):
+        """Without thread_id, response should not include thread info."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "thread_id" not in data
+        assert "bucket_id" not in data

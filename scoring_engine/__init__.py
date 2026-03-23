@@ -8,3 +8,4 @@ from .kalman_forecast import KalmanForecaster, ForecastResult
 from .dependency_graph import MemoryDependencyGraph, SurgicalResult, Step
 from .memory_tracker import MemoryAccessTracker
 from .privacy_layer import ObfuscatedId, ReasonAbstractor, ZKAssurance
+from .thread_manager import ThreadManager, ThreadBucket

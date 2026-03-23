@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -119,6 +119,7 @@ class PreflightRequest(BaseModel):
     compliance_profile: Optional[str] = "GENERAL"
     steps: Optional[list[StepRequest]] = None
     detail_level: Optional[str] = "obfuscated"  # "obfuscated" (default) or "full"
+    thread_id: Optional[str] = None
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -239,6 +240,9 @@ def signup(req: SignupRequest):
 # In-memory healing counter store (per entry_id)
 _healing_counters: dict[str, int] = {}
 
+# Thread manager for adaptive sampling
+_thread_manager = ThreadManager()
+
 # In-memory outcome registry (outcome_id -> outcome record)
 _outcomes: dict[str, dict] = {}
 
@@ -337,6 +341,22 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             detail=f"Monthly limit of {limit:,} calls exceeded for {tier} tier. "
                    f"Upgrade your plan or wait until the next billing cycle.",
         )
+
+    # Thread-aware sampling
+    thread_bucket_id = None
+    thread_sample_rate = None
+    if req.thread_id:
+        thread_bucket_id = _thread_manager.assign_bucket(req.thread_id, req.domain)
+        thread_sample_rate = _thread_manager.get_sample_rate(req.domain)
+        if not _thread_manager.should_check(req.thread_id, req.domain):
+            return {
+                "sampled": False,
+                "recommended_action": "USE_MEMORY",
+                "reason": "sampled_out",
+                "thread_id": req.thread_id,
+                "bucket_id": thread_bucket_id,
+                "sample_rate": thread_sample_rate,
+            }
 
     entries = [MemoryEntry(
         id=e.id, content=e.content, type=e.type,
@@ -544,7 +564,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         },
         "session_key": session_key,
         "zk_commitment": zk_commitment,
+        "sampled": True,
     }
+    if req.thread_id:
+        response["thread_id"] = req.thread_id
+        response["bucket_id"] = thread_bucket_id
+        response["sample_rate"] = thread_sample_rate
     if optimizer_version:
         response["optimizer_version"] = optimizer_version
     if at_risk_warnings:
