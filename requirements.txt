@@ -3,4 +3,5 @@ uvicorn
 pydantic
 supabase
 stripe
+requests
 # z3-solver — optional, install separately for formal verification (pip install z3-solver)
