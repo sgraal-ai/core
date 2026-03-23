@@ -16,6 +16,10 @@ class MemoryEntry:
     r_belief: float = 0.5      # 0.0 – 1.0  (model belief divergence)
     prompt_embedding: Optional[list[float]] = field(default=None, repr=False)  # embedding of memory content
     healing_counter: int = 0   # number of times this entry has been healed
+    reference_count: int = 1   # how often this entry is referenced
+    source: Optional[str] = None          # origin: "user_stated", "api_response", etc.
+    has_backup_source: bool = True        # whether a backup source exists
+    action_context: str = "reversible"    # "irreversible", "reversible", "advisory"
 
 
 @dataclass

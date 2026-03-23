@@ -11,7 +11,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry
+from scoring_engine import compute, MemoryEntry, compute_importance
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -96,6 +96,10 @@ class MemoryEntryRequest(BaseModel):
     r_belief: float = 0.5
     prompt_embedding: Optional[list[float]] = None
     healing_counter: int = 0
+    reference_count: int = 1
+    source: Optional[str] = None
+    has_backup_source: bool = True
+    action_context: str = "reversible"
 
 class PreflightRequest(BaseModel):
     agent_id: Optional[str] = "anonymous"
@@ -246,7 +250,11 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         downstream_count=e.downstream_count,
         r_belief=e.r_belief,
         prompt_embedding=e.prompt_embedding,
-        healing_counter=e.healing_counter)
+        healing_counter=e.healing_counter,
+        reference_count=e.reference_count,
+        source=e.source,
+        has_backup_source=e.has_backup_source,
+        action_context=e.action_context)
         for e in req.memory_state]
 
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
@@ -303,6 +311,18 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         except Exception as e:
             pass
 
+    # Importance detection — find at-risk entries
+    importance_results = [compute_importance(e) for e in entries]
+    at_risk_warnings = [
+        {
+            "entry_id": ir.entry_id,
+            "importance_score": ir.importance_score,
+            "warning": ir.warning,
+            "signal_breakdown": ir.signal_breakdown,
+        }
+        for ir in importance_results if ir.at_risk
+    ]
+
     response = {
         "omega_mem_final": result.omega_mem_final,
         "recommended_action": result.recommended_action,
@@ -322,6 +342,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "healing_counter": result.healing_counter,
         "gsv": gsv,
     }
+    if at_risk_warnings:
+        response["at_risk_warnings"] = at_risk_warnings
     if stale_state_warning:
         response["stale_state_warning"] = stale_state_warning
 

@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -917,3 +917,171 @@ class TestHealEndpoint:
             "action": "INVALID",
         }, headers=AUTH)
         assert resp.status_code == 422
+
+
+class TestImportanceDetector:
+    def test_budapest_office_at_risk(self):
+        """Budapest use case: tool_state, 94 days, user_stated, no backup, downstream=4 → at_risk."""
+        entry = MemoryEntry(
+            id="entry_001",
+            content="Budapest office: Váci út 47, open 9-18",
+            type="tool_state",
+            timestamp_age_days=94,
+            source_trust=0.9,
+            source_conflict=0.1,
+            downstream_count=4,
+            source="user_stated",
+            has_backup_source=False,
+            action_context="irreversible",
+            reference_count=6,
+        )
+        result = compute_importance(entry)
+
+        assert result.at_risk is True
+        assert result.importance_score >= 5.0
+        assert result.warning is not None
+        assert "Budapest office" in result.warning
+        assert "94 days old" in result.warning
+        assert "single source" in result.warning
+
+    def test_fresh_entry_not_at_risk(self):
+        """Fresh entry should not be at risk regardless of importance."""
+        entry = MemoryEntry(
+            id="fresh_imp",
+            content="Fresh important data",
+            type="tool_state",
+            timestamp_age_days=1,
+            source_trust=0.9,
+            source_conflict=0.1,
+            downstream_count=8,
+            source="user_stated",
+            has_backup_source=False,
+            action_context="irreversible",
+            reference_count=10,
+        )
+        result = compute_importance(entry)
+
+        assert result.importance_score >= 5.0
+        assert result.at_risk is False  # fresh, under 70% of 7-day threshold
+        assert result.warning is None
+
+    def test_low_importance_not_at_risk(self):
+        """Low-importance entry should not be at risk even if old."""
+        entry = MemoryEntry(
+            id="low_imp",
+            content="Minor note",
+            type="semantic",
+            timestamp_age_days=200,
+            source_trust=0.9,
+            source_conflict=0.1,
+            downstream_count=1,
+            reference_count=1,
+            source="api_response",
+            has_backup_source=True,
+            action_context="advisory",
+        )
+        result = compute_importance(entry)
+
+        assert result.importance_score < 5.0
+        assert result.at_risk is False
+
+    def test_importance_score_range(self):
+        """Score should be between 0 and 10."""
+        entry = MemoryEntry(
+            id="range_test",
+            content="Test",
+            type="semantic",
+            timestamp_age_days=10,
+            source_trust=0.9,
+            source_conflict=0.1,
+            downstream_count=5,
+        )
+        result = compute_importance(entry)
+        assert 0.0 <= result.importance_score <= 10.0
+
+    def test_signal_breakdown_keys(self):
+        entry = MemoryEntry(
+            id="sig_test",
+            content="Test",
+            type="semantic",
+            timestamp_age_days=10,
+            source_trust=0.9,
+            source_conflict=0.1,
+            downstream_count=3,
+        )
+        result = compute_importance(entry)
+        assert set(result.signal_breakdown.keys()) == {
+            "return_frequency", "blast_radius", "irreversibility", "uniqueness",
+        }
+
+    def test_uniqueness_signal_user_stated_no_backup(self):
+        """user_stated + no backup should give highest uniqueness signal."""
+        entry = MemoryEntry(
+            id="uniq_high",
+            content="User stated fact",
+            type="semantic",
+            timestamp_age_days=10,
+            source_trust=0.9,
+            source_conflict=0.1,
+            downstream_count=1,
+            source="user_stated",
+            has_backup_source=False,
+        )
+        result = compute_importance(entry)
+        assert result.signal_breakdown["uniqueness"] == 1.0
+
+    def test_uniqueness_signal_backed_up(self):
+        """Entry with backup source should have low uniqueness signal."""
+        entry = MemoryEntry(
+            id="uniq_low",
+            content="Well-backed fact",
+            type="semantic",
+            timestamp_age_days=10,
+            source_trust=0.9,
+            source_conflict=0.1,
+            downstream_count=1,
+            source="api_response",
+            has_backup_source=True,
+        )
+        result = compute_importance(entry)
+        assert result.signal_breakdown["uniqueness"] < 0.5
+
+    def test_at_risk_warnings_in_api_response(self):
+        """API should return at_risk_warnings for at-risk entries."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [{
+                "id": "api_risk_001",
+                "content": "Budapest office: Váci út 47, open 9-18",
+                "type": "tool_state",
+                "timestamp_age_days": 94,
+                "source_trust": 0.9,
+                "source_conflict": 0.1,
+                "downstream_count": 4,
+                "source": "user_stated",
+                "has_backup_source": False,
+                "action_context": "irreversible",
+                "reference_count": 6,
+            }],
+            "action_type": "irreversible",
+            "domain": "fintech",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "at_risk_warnings" in data
+        assert len(data["at_risk_warnings"]) == 1
+        warning = data["at_risk_warnings"][0]
+        assert warning["entry_id"] == "api_risk_001"
+        assert "Budapest office" in warning["warning"]
+        assert warning["importance_score"] >= 5.0
+
+    def test_no_at_risk_warnings_for_healthy_entries(self):
+        """Healthy entries should not produce at_risk_warnings."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "action_type": "informational",
+            "domain": "general",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "at_risk_warnings" not in resp.json()
