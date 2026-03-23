@@ -12,7 +12,8 @@
 | T-11 | Decision Readiness Dashboard (app.sgraal.com) | Done | mock data |
 | T-13 | 4-signal importance detector + at-risk warnings | Done | 9 tests |
 | T-14 | Outcome Registry + shadow calibration stub | Done | 6 tests |
-| T-15 | GrokGuard — Grok/xAI optimization layer | Done | 4 tests |
+| T-15 | Client optimizer (refactored from GrokGuard — generic for any client) | Done | 4 tests |
+| T-16 | Kalman filter trend forecasting for Ω_MEM scores | Done | 8 tests |
 | T-17 | Z3 SMT formal verification layer | Done | 9 tests |
 
 ### Also Delivered (Pre-Sprint)
@@ -34,7 +35,7 @@
 
 ### Test Summary
 
-- **100 tests passing** (pytest)
+- **108 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -42,10 +43,11 @@
 - Importance detector: 9 tests (Budapest use case, signals, at-risk)
 - Compliance engine: 7 tests (EU AI Act, FDA, GENERAL, API override)
 - Policy matrix: 4 tests (tier/approval lookups)
-- GrokGuard: 4 tests (activation, ordering, fresh entries)
+- Client optimizer: 4 tests (activation, ordering, fresh entries)
 - Z3 verification: 9 tests (healing policy, compliance, API endpoint)
 - Outcome registry: 6 tests (close, attribution, 404, 409)
 - GSV: 7 tests (fallback, stale detection, monotonic)
+- Kalman forecast: 8 tests (trends, collapse risk, clamping, API endpoint)
 
 ### Deployments
 
@@ -57,14 +59,14 @@
 
 ### Commits
 
-66 total (54 in this sprint session)
+71 total (59 in this sprint session)
 
 ### Next Up
 
 | Task | Description | Status |
 |------|-------------|--------|
 | T-12 | Live API connection for dashboard (replace mock data) | Planned |
-| T-16 | Multi-agent shared memory governance | Planned |
 | T-18 | PyMC Bayesian calibration (after 50+ outcomes) | Blocked on data |
 | T-19 | Webhook notifications for BLOCK/at-risk events | Planned |
 | T-20 | SDK v0.2 — add heal() and outcome() methods | Planned |
+| T-21 | Multi-agent shared memory governance | Planned |
