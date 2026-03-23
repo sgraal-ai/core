@@ -1967,3 +1967,110 @@ class TestLLMGuards:
                 mock_openai.return_value.chat.completions.create.return_value = mock_response
                 result = guard.check_and_generate("query", memory_data=[{"id": "m1", "content": "x", "type": "semantic", "timestamp_age_days": 1}])
                 assert result == "GPT response"
+
+
+class TestBatchScoring:
+    def test_batch_returns_all_results(self):
+        resp = client.post("/v1/preflight/batch", json={
+            "entries": [
+                _fresh_entry(id="batch_1"),
+                _fresh_entry(id="batch_2", type="tool_state", timestamp_age_days=30),
+                _fresh_entry(id="batch_3"),
+            ],
+            "action_type": "reversible",
+            "domain": "general",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["results"]) == 3
+        ids = [r["entry_id"] for r in data["results"]]
+        assert "batch_1" in ids
+        assert "batch_2" in ids
+        assert "batch_3" in ids
+
+    def test_batch_summary_counts(self):
+        resp = client.post("/v1/preflight/batch", json={
+            "entries": [
+                _fresh_entry(id="bs_safe"),
+                _fresh_entry(id="bs_risky", type="tool_state", timestamp_age_days=94, source_trust=0.3, source_conflict=0.7),
+            ],
+            "action_type": "irreversible",
+            "domain": "fintech",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        summary = resp.json()["batch_summary"]
+        assert summary["total"] == 2
+        assert summary["blocked"] + summary["warned"] + summary["safe"] == 2
+        assert "highest_risk_entry_id" in summary
+
+    def test_batch_max_100_entries(self):
+        entries = [_fresh_entry(id=f"max_{i}") for i in range(101)]
+        resp = client.post("/v1/preflight/batch", json={
+            "entries": entries,
+        }, headers=AUTH)
+
+        assert resp.status_code == 400
+        assert "100" in resp.json()["detail"]
+
+    def test_batch_empty_returns_400(self):
+        resp = client.post("/v1/preflight/batch", json={
+            "entries": [],
+        }, headers=AUTH)
+        assert resp.status_code == 400
+
+    def test_batch_requires_auth(self):
+        resp = client.post("/v1/preflight/batch", json={
+            "entries": [_fresh_entry()],
+        })
+        assert resp.status_code in (401, 403)
+
+
+class TestCustomWeights:
+    def test_custom_weights_override_defaults(self):
+        """Custom weights should change the omega_mem_final score."""
+        # Heavy freshness weight
+        resp_custom = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(type="tool_state", timestamp_age_days=30)],
+            "custom_weights": {
+                "s_freshness": 0.50, "s_drift": 0.10, "s_provenance": 0.05,
+                "s_propagation": 0.05, "r_recall": 0.05, "r_encode": 0.05,
+                "s_interference": 0.05, "s_recovery": -0.05, "r_belief": 0.05,
+                "s_relevance": 0.05,
+            },
+        }, headers=AUTH)
+
+        resp_default = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(type="tool_state", timestamp_age_days=30)],
+        }, headers=AUTH)
+
+        assert resp_custom.status_code == 200
+        assert resp_default.status_code == 200
+        assert resp_custom.json()["weights_used"] == "custom"
+        assert resp_default.json()["weights_used"] == "default"
+        # Different weights should produce different scores
+        assert resp_custom.json()["omega_mem_final"] != resp_default.json()["omega_mem_final"]
+
+    def test_custom_weights_in_batch(self):
+        resp = client.post("/v1/preflight/batch", json={
+            "entries": [_fresh_entry(id="cw_batch")],
+            "custom_weights": {
+                "s_freshness": 0.15, "s_drift": 0.15, "s_provenance": 0.12,
+                "s_propagation": 0.12, "r_recall": 0.18, "r_encode": 0.12,
+                "s_interference": 0.10, "s_recovery": -0.10, "r_belief": 0.05,
+                "s_relevance": 0.06,
+            },
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert resp.json()["weights_used"] == "custom"
+
+    def test_custom_weights_bad_sum_returns_400(self):
+        resp = client.post("/v1/preflight/batch", json={
+            "entries": [_fresh_entry()],
+            "custom_weights": {"s_freshness": 5.0},
+        }, headers=AUTH)
+
+        assert resp.status_code == 400
+        assert "sum" in resp.json()["detail"].lower()

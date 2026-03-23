@@ -171,6 +171,7 @@ def compute(
     action_type: str = "reversible",
     domain: str = "general",
     current_goal_embedding: Optional[list[float]] = None,
+    custom_weights: Optional[dict[str, float]] = None,
 ) -> PreflightResult:
 
     if not entries:
@@ -218,7 +219,8 @@ def compute(
         "s_relevance":    s_relevance,
     }
 
-    omega = sum(WEIGHTS[k] * v for k, v in components.items())
+    weights = custom_weights if custom_weights else WEIGHTS
+    omega = sum(weights.get(k, WEIGHTS.get(k, 0)) * v for k, v in components.items())
     omega = max(0, min(100, omega))
 
     c = C_ACTION.get(action_type, 1.0) * C_DOMAIN.get(domain, 1.0)

@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - SUPABASE_URL=http://supabase:54321
+      - SUPABASE_KEY=${SUPABASE_KEY:-local-anon-key}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-local-service-key}
+      - UPSTASH_REDIS_URL=http://redis:6379
+      - UPSTASH_REDIS_TOKEN=${UPSTASH_REDIS_TOKEN:-local-token}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+    depends_on:
+      - redis
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Note: For full Supabase local setup, use the Supabase CLI:
+  #   supabase init && supabase start
+  # This provides PostgreSQL + PostgREST + Auth + Storage.
+  # The docker-compose here provides API + Redis only.
+  # Connect to your Supabase instance via SUPABASE_URL env var.

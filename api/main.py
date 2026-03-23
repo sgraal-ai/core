@@ -120,6 +120,7 @@ class PreflightRequest(BaseModel):
     steps: Optional[list[StepRequest]] = None
     detail_level: Optional[str] = "obfuscated"  # "obfuscated" (default) or "full"
     thread_id: Optional[str] = None
+    custom_weights: Optional[dict[str, float]] = None
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -131,6 +132,12 @@ class OutcomeRequest(BaseModel):
     preflight_id: Optional[str] = None
     status: Literal["success", "failure", "partial"]
     failure_components: list[str] = []
+
+class BatchRequest(BaseModel):
+    entries: list[MemoryEntryRequest]
+    action_type: Literal["informational","reversible","irreversible","destructive"] = "reversible"
+    domain: Literal["general","customer_support","coding","legal","fintech","medical"] = "general"
+    custom_weights: Optional[dict[str, float]] = None
 
 class SignupRequest(BaseModel):
     email: str
@@ -290,6 +297,61 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
     }
 
 
+@app.post("/v1/preflight/batch")
+def preflight_batch(req: BatchRequest, key_record: dict = Depends(verify_api_key)):
+    if len(req.entries) == 0:
+        raise HTTPException(status_code=400, detail="entries cannot be empty")
+    if len(req.entries) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 entries per batch request")
+
+    # Validate custom weights if provided
+    if req.custom_weights:
+        weight_sum = sum(req.custom_weights.values())
+        if abs(weight_sum) > 2.0 or abs(weight_sum) < 0.5:
+            raise HTTPException(
+                status_code=400,
+                detail=f"custom_weights sum out of range (expected 0.5–2.0), got {weight_sum:.3f}",
+            )
+
+    results = []
+    for e in req.entries:
+        entry = MemoryEntry(
+            id=e.id, content=e.content, type=e.type,
+            timestamp_age_days=e.timestamp_age_days,
+            source_trust=e.source_trust,
+            source_conflict=e.source_conflict,
+            downstream_count=e.downstream_count,
+            r_belief=e.r_belief,
+            healing_counter=e.healing_counter,
+        )
+        result = compute([entry], req.action_type, req.domain, custom_weights=req.custom_weights)
+        results.append({
+            "entry_id": e.id,
+            "omega_mem_final": result.omega_mem_final,
+            "recommended_action": result.recommended_action,
+            "assurance_score": result.assurance_score,
+            "explainability_note": result.explainability_note,
+            "component_breakdown": result.component_breakdown,
+        })
+
+    blocked = sum(1 for r in results if r["recommended_action"] == "BLOCK")
+    warned = sum(1 for r in results if r["recommended_action"] in ("WARN", "ASK_USER"))
+    safe = sum(1 for r in results if r["recommended_action"] == "USE_MEMORY")
+    highest = max(results, key=lambda r: r["omega_mem_final"])
+
+    return {
+        "results": results,
+        "batch_summary": {
+            "total": len(results),
+            "blocked": blocked,
+            "warned": warned,
+            "safe": safe,
+            "highest_risk_entry_id": highest["entry_id"],
+        },
+        "weights_used": "custom" if req.custom_weights else "default",
+    }
+
+
 @app.post("/v1/outcome")
 def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key)):
     if req.outcome_id not in _outcomes:
@@ -373,7 +435,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         action_context=e.action_context)
         for e in req.memory_state]
 
-    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
+    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, req.custom_weights)
 
     # Generate outcome_id for tracking
     outcome_id = str(uuid.uuid4())
@@ -565,6 +627,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "session_key": session_key,
         "zk_commitment": zk_commitment,
         "sampled": True,
+        "weights_used": "custom" if req.custom_weights else "default",
     }
     if req.thread_id:
         response["thread_id"] = req.thread_id
