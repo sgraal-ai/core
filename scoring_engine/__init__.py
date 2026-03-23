@@ -6,3 +6,4 @@ from .healing_policy_matrix import HealingPolicyMatrix, PolicyMatrixEntry
 from .formal_verification import PolicyVerifier, VerificationResult
 from .kalman_forecast import KalmanForecaster, ForecastResult
 from .dependency_graph import MemoryDependencyGraph, SurgicalResult, Step
+from .memory_tracker import MemoryAccessTracker

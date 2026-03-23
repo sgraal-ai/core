@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -1589,3 +1589,114 @@ class TestDependencyGraph:
 
         assert resp.status_code == 200
         assert "surgical_result" not in resp.json()
+
+
+class TestMemoryAccessTracker:
+    def test_track_records_access(self):
+        tracker = MemoryAccessTracker()
+        tracker.track("step_a", "mem_1")
+        tracker.track("step_a", "mem_2")
+        tracker.track("step_b", "mem_2")
+
+        deps = tracker.get_step_dependencies()
+        assert deps["step_a"] == ["mem_1", "mem_2"]
+        assert deps["step_b"] == ["mem_2"]
+
+    def test_no_duplicate_tracking(self):
+        tracker = MemoryAccessTracker()
+        tracker.track("step_a", "mem_1")
+        tracker.track("step_a", "mem_1")
+
+        assert tracker.get_step_dependencies()["step_a"] == ["mem_1"]
+
+    def test_to_dependency_graph(self):
+        tracker = MemoryAccessTracker()
+        tracker.track("step_a", "mem_1")
+        tracker.track("step_b", "mem_2")
+
+        graph = tracker.to_dependency_graph()
+        result = graph.surgical_block(blocked_entries=["mem_1"])
+        assert "step_a" in result.blocked_steps
+        assert "step_b" in result.safe_steps
+
+    def test_begin_end_step_context(self):
+        tracker = MemoryAccessTracker()
+        tracker.begin_step("step_x")
+        tracker.track_current("mem_1")
+        tracker.track_current("mem_2")
+        tracker.end_step()
+
+        assert tracker.current_step is None
+        deps = tracker.get_step_dependencies()
+        assert deps["step_x"] == ["mem_1", "mem_2"]
+
+    def test_reset_clears_state(self):
+        tracker = MemoryAccessTracker()
+        tracker.track("step_a", "mem_1")
+        tracker.reset()
+
+        assert tracker.get_step_dependencies() == {}
+        assert tracker.current_step is None
+
+    def test_auto_tracked_in_api_response(self):
+        """When no manual steps and multiple entries with repairs, auto_tracked=true."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="mem_auto_stale", type="tool_state", timestamp_age_days=30, source_conflict=0.8),
+                _fresh_entry(id="mem_auto_fresh"),
+            ],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "surgical_result" in data
+        assert data["auto_tracked"] is True
+        sr = data["surgical_result"]
+        assert "auto:mem_auto_stale" in sr["blocked_steps"]
+        assert "auto:mem_auto_fresh" in sr["safe_steps"]
+
+    def test_manual_steps_not_auto_tracked(self):
+        """Manual steps should set auto_tracked=false."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="mem_m1", type="tool_state", timestamp_age_days=30, source_conflict=0.8),
+                _fresh_entry(id="mem_m2"),
+            ],
+            "steps": [
+                {"step_id": "s1", "entry_ids": ["mem_m1"]},
+                {"step_id": "s2", "entry_ids": ["mem_m2"]},
+            ],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["auto_tracked"] is False
+
+
+class TestSDKStepTracker:
+    def test_step_context_manager(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+        from sgraal.tracker import StepTracker
+
+        tracker = StepTracker()
+        with tracker.step("step_1"):
+            tracker.track("mem_a")
+            tracker.track("mem_b")
+        with tracker.step("step_2"):
+            tracker.track("mem_c")
+
+        steps = tracker.get_steps()
+        assert len(steps) == 2
+        s1 = next(s for s in steps if s["step_id"] == "step_1")
+        assert s1["entry_ids"] == ["mem_a", "mem_b"]
+
+    def test_step_tracker_reset(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+        from sgraal.tracker import StepTracker
+
+        tracker = StepTracker()
+        with tracker.step("step_1"):
+            tracker.track("mem_a")
+        tracker.reset()
+
+        assert tracker.get_steps() == []

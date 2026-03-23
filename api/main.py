@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -472,6 +472,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Surgical block via dependency graph
     surgical_result = None
+    auto_tracked = False
     if req.steps:
         graph = MemoryDependencyGraph()
         for step in req.steps:
@@ -483,6 +484,21 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "safe_steps": sr.safe_steps,
             "partial_execution_possible": sr.partial_execution_possible,
         }
+    elif len(entries) > 1:
+        # Auto-track: each entry is treated as its own step
+        tracker = MemoryAccessTracker()
+        for e in entries:
+            tracker.track(f"auto:{e.id}", e.id)
+        blocked_entries = [h.entry_id for h in result.repair_plan]
+        if blocked_entries:
+            graph = tracker.to_dependency_graph()
+            sr = graph.surgical_block(blocked_entries)
+            surgical_result = {
+                "blocked_steps": sr.blocked_steps,
+                "safe_steps": sr.safe_steps,
+                "partial_execution_possible": sr.partial_execution_possible,
+            }
+            auto_tracked = True
 
     response = {
         "omega_mem_final": result.omega_mem_final,
@@ -522,5 +538,6 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["stale_state_warning"] = stale_state_warning
     if surgical_result:
         response["surgical_result"] = surgical_result
+        response["auto_tracked"] = auto_tracked
 
     return response
