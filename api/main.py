@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -156,6 +156,7 @@ def health():
 def verify(
     profile: str = "GENERAL",
     domain: str = "general",
+    history: Optional[str] = None,
     key_record: dict = Depends(verify_api_key),
 ):
     verifier = PolicyVerifier()
@@ -169,7 +170,7 @@ def verify(
     counterexample = healing_result.counterexample or compliance_result.counterexample
     duration = round(healing_result.duration_ms + compliance_result.duration_ms, 2)
 
-    return {
+    response = {
         "verified": verified,
         "proof": " | ".join(proofs),
         "counterexample": counterexample,
@@ -177,6 +178,21 @@ def verify(
         "profile": comp_profile.value,
         "domain": domain,
     }
+
+    # Kalman forecast if history provided (comma-separated floats)
+    if history:
+        scores = [float(s.strip()) for s in history.split(",") if s.strip()]
+        if len(scores) >= 2:
+            forecaster = KalmanForecaster()
+            forecaster.fit(scores)
+            forecast = forecaster.predict(steps=5)
+            response["forecast"] = {
+                "trend": forecast.trend,
+                "collapse_risk": forecast.collapse_risk,
+                "forecast_scores": forecast.forecast_scores,
+            }
+
+    return response
 
 @app.post("/v1/signup")
 def signup(req: SignupRequest):

@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -1427,3 +1427,78 @@ class TestFormalVerification:
     def test_verify_requires_auth(self):
         resp = client.get("/v1/verify")
         assert resp.status_code in (401, 403)
+
+
+class TestKalmanForecast:
+    def test_degrading_trend(self):
+        """Rising scores should produce degrading trend."""
+        forecaster = KalmanForecaster()
+        forecaster.fit([10, 20, 30, 40, 50, 60])
+        result = forecaster.predict(steps=5)
+
+        assert result.trend == "degrading"
+        assert len(result.forecast_scores) == 5
+        assert all(s > 50 for s in result.forecast_scores)
+
+    def test_improving_trend(self):
+        """Falling scores should produce improving trend."""
+        forecaster = KalmanForecaster()
+        forecaster.fit([80, 70, 60, 50, 40, 30])
+        result = forecaster.predict(steps=5)
+
+        assert result.trend == "improving"
+        assert all(s < 40 for s in result.forecast_scores)
+
+    def test_stable_trend(self):
+        """Flat scores should produce stable trend."""
+        forecaster = KalmanForecaster()
+        forecaster.fit([25, 25, 25, 25, 25, 25])
+        result = forecaster.predict(steps=5)
+
+        assert result.trend == "stable"
+
+    def test_collapse_risk_high_when_approaching_block(self):
+        """Scores approaching BLOCK threshold should have collapse_risk > 0.5."""
+        forecaster = KalmanForecaster()
+        forecaster.fit([50, 55, 60, 65, 70, 75])
+        result = forecaster.predict(steps=5)
+
+        assert result.collapse_risk > 0.5
+        assert result.trend == "degrading"
+
+    def test_collapse_risk_zero_for_low_scores(self):
+        """Low stable scores should have zero collapse_risk."""
+        forecaster = KalmanForecaster()
+        forecaster.fit([5, 5, 5, 5, 5])
+        result = forecaster.predict(steps=5)
+
+        assert result.collapse_risk == 0.0
+
+    def test_forecast_scores_clamped(self):
+        """Forecast scores should be clamped to 0–100."""
+        forecaster = KalmanForecaster()
+        forecaster.fit([90, 92, 94, 96, 98, 100])
+        result = forecaster.predict(steps=10)
+
+        assert all(0 <= s <= 100 for s in result.forecast_scores)
+
+    def test_forecast_via_verify_endpoint(self):
+        """GET /v1/verify with history should include forecast."""
+        resp = client.get(
+            "/v1/verify?profile=GENERAL&domain=general&history=10,20,30,40,50,60",
+            headers=AUTH,
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "forecast" in data
+        assert data["forecast"]["trend"] == "degrading"
+        assert len(data["forecast"]["forecast_scores"]) == 5
+        assert 0 <= data["forecast"]["collapse_risk"] <= 1
+
+    def test_no_forecast_without_history(self):
+        """GET /v1/verify without history should not include forecast."""
+        resp = client.get("/v1/verify?profile=GENERAL&domain=general", headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "forecast" not in resp.json()
