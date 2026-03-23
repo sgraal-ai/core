@@ -5,11 +5,11 @@ from typing import Optional
 
 from .omega_mem import MemoryEntry, PreflightResult, HealingAction
 
-GROKGUARD_VERSION = "v2"
+OPTIMIZER_VERSION = "v2"
 
-# Grok-specific action priority overrides.
-# Grok prefers fresh data — REFETCH always gets highest priority.
-_GROK_ACTION_PRIORITY = {
+# Default action priority overrides.
+# REFETCH-first: prioritize fresh data for tool call chains.
+_ACTION_PRIORITY = {
     "REFETCH": 0,
     "VERIFY_WITH_SOURCE": 1,
     "REBUILD_WORKING_SET": 2,
@@ -17,22 +17,28 @@ _GROK_ACTION_PRIORITY = {
 
 
 @dataclass
-class GrokGuardResult:
+class ClientOptimizerResult:
     preflight: PreflightResult
-    grokguard_activated: bool
-    grokguard_version: str
+    client_optimized: bool
+    optimizer_version: str
 
 
-class GrokGuard:
-    """Grok-specific optimization layer for Sgraal preflight scoring.
+class ClientOptimizer:
+    """Generic client optimization layer for Sgraal preflight scoring.
 
-    When activated, GrokGuard re-orders the repair plan to prioritize
-    REFETCH actions (Grok prefers fresh data over rebuilding working sets)
-    and boosts priority of REFETCH on stale tool_state entries.
+    When activated, re-orders the repair plan to prioritize REFETCH actions
+    (fresh data over rebuilding working sets) and boosts priority of REFETCH
+    on stale tool_state entries. Works with any client profile: grok,
+    langchain, autogen, crewai, etc.
     """
 
-    def optimize(self, result: PreflightResult, entries: list[MemoryEntry]) -> GrokGuardResult:
-        """Apply GrokGuard optimizations to a preflight result."""
+    def optimize(
+        self,
+        result: PreflightResult,
+        entries: list[MemoryEntry],
+        client_profile: str = "default",
+    ) -> ClientOptimizerResult:
+        """Apply client-specific optimizations to a preflight result."""
 
         has_stale_tool_state = any(
             e.type == "tool_state" and e.timestamp_age_days > 1
@@ -40,10 +46,10 @@ class GrokGuard:
         )
 
         if not has_stale_tool_state and not result.repair_plan:
-            return GrokGuardResult(
+            return ClientOptimizerResult(
                 preflight=result,
-                grokguard_activated=False,
-                grokguard_version=GROKGUARD_VERSION,
+                client_optimized=False,
+                optimizer_version=OPTIMIZER_VERSION,
             )
 
         # Boost REFETCH priority for stale tool_state entries
@@ -55,14 +61,14 @@ class GrokGuard:
                     entry_id=action.entry_id,
                     reason=action.reason,
                     projected_improvement=action.projected_improvement,
-                    priority=1,  # always highest for Grok
+                    priority=1,  # always highest
                 ))
             else:
                 optimized_plan.append(action)
 
-        # Sort by Grok-specific action priority, then standard priority
+        # Sort by action priority, then standard priority
         optimized_plan.sort(
-            key=lambda h: (_GROK_ACTION_PRIORITY.get(h.action, 9), h.priority, -h.projected_improvement)
+            key=lambda h: (_ACTION_PRIORITY.get(h.action, 9), h.priority, -h.projected_improvement)
         )
 
         optimized_result = PreflightResult(
@@ -75,8 +81,8 @@ class GrokGuard:
             healing_counter=result.healing_counter,
         )
 
-        return GrokGuardResult(
+        return ClientOptimizerResult(
             preflight=optimized_result,
-            grokguard_activated=True,
-            grokguard_version=GROKGUARD_VERSION,
+            client_optimized=True,
+            optimizer_version=OPTIMIZER_VERSION,
         )

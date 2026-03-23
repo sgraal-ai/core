@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, GrokGuard, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -440,14 +440,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             policy = policy_matrix.lookup(entry.type, req.domain, profile)
             action.priority = max(action.priority, policy.tier)
 
-    # GrokGuard optimization
-    grokguard_activated = False
-    grokguard_version = None
-    if req.client == "grok":
-        gg = GrokGuard().optimize(result, entries)
-        result = gg.preflight
-        grokguard_activated = gg.grokguard_activated
-        grokguard_version = gg.grokguard_version
+    # Client optimization
+    client_optimized = False
+    optimizer_version = None
+    if req.client:
+        co = ClientOptimizer().optimize(result, entries, client_profile=req.client)
+        result = co.preflight
+        client_optimized = co.client_optimized
+        optimizer_version = co.optimizer_version
 
     response = {
         "omega_mem_final": result.omega_mem_final,
@@ -468,7 +468,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "healing_counter": result.healing_counter,
         "gsv": gsv,
         "outcome_id": outcome_id,
-        "grokguard_activated": grokguard_activated,
+        "client_optimized": client_optimized,
         "compliance_result": {
             "compliant": compliance.compliant,
             "violations": [
@@ -479,8 +479,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "profile_applied": compliance.profile_applied,
         },
     }
-    if grokguard_version:
-        response["grokguard_version"] = grokguard_version
+    if optimizer_version:
+        response["optimizer_version"] = optimizer_version
     if at_risk_warnings:
         response["at_risk_warnings"] = at_risk_warnings
     if stale_state_warning:
