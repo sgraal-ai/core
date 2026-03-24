@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2852,3 +2852,54 @@ class TestPageRankAuthority:
         assert resp.status_code == 200
         assert "authority_scores" not in resp.json()
         assert resp.json()["use_pagerank"] is False
+
+
+class TestDriftDetector:
+    def test_identical_distributions_zero_drift(self):
+        """Identical distributions should have near-zero drift."""
+        scores = [10, 10, 10, 10, 10]
+        metrics = compute_drift_metrics(scores, scores)
+        assert metrics.kl_divergence < 0.01
+        assert metrics.jsd < 0.01
+
+    def test_different_distributions_positive_drift(self):
+        """Different distributions should have positive drift."""
+        current = [80, 5, 5, 5, 5]
+        baseline = [20, 20, 20, 20, 20]
+        metrics = compute_drift_metrics(current, baseline)
+        assert metrics.kl_divergence > 0
+        assert metrics.wasserstein > 0
+        assert metrics.jsd > 0
+
+    def test_jsd_bounded(self):
+        """JSD should be bounded (scaled 0–100)."""
+        metrics = compute_drift_metrics([100, 0, 0], [0, 0, 100])
+        assert 0 <= metrics.jsd <= 100
+
+    def test_ensemble_score_range(self):
+        """Ensemble score should be 0–100."""
+        metrics = compute_drift_metrics([50, 30, 20, 10, 5])
+        assert 0 <= metrics.ensemble_score <= 100
+
+    def test_drift_method_is_ensemble(self):
+        metrics = compute_drift_metrics([10, 20, 30])
+        assert metrics.drift_method == "ensemble"
+
+    def test_empty_returns_zero(self):
+        metrics = compute_drift_metrics([])
+        assert metrics.ensemble_score == 0
+
+    def test_drift_details_in_api_response(self):
+        """Preflight response should include drift_details."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "drift_details" in data
+        dd = data["drift_details"]
+        assert "kl_divergence" in dd
+        assert "wasserstein" in dd
+        assert "jsd" in dd
+        assert dd["drift_method"] == "ensemble"

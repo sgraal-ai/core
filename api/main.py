@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1024,6 +1024,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
     }
+
+    # Drift details — ensemble of KL, Wasserstein, JSD
+    component_scores = list(result.component_breakdown.values())
+    drift = compute_drift_metrics(component_scores)
+    response["drift_details"] = {
+        "kl_divergence": drift.kl_divergence,
+        "wasserstein": drift.wasserstein,
+        "jsd": drift.jsd,
+        "drift_method": drift.drift_method,
+    }
+
     if req.thread_id:
         response["thread_id"] = req.thread_id
         response["bucket_id"] = thread_bucket_id
