@@ -27,6 +27,7 @@
 | T-28 | Lyapunov stability guarantee for heal loop | Done | 7 tests |
 | T-29 | Value of Information (VoI) scoring in importance detector | Done | 6 tests |
 | T-30 | ε-Differential Privacy with Laplace mechanism | Done | 10 tests |
+| T-31 | Custom thresholds + audit logging + request_id | Done | 6 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -47,7 +48,7 @@
 
 ### Test Summary
 
-- **198 tests passing** (pytest)
+- **204 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -72,6 +73,8 @@
 - Lyapunov stability: 7 tests (V positive, V̇ negative, guaranteed, convergence, decay rates, equilibrium, API)
 - Value of Information: 6 tests (positive for stale, zero for fresh, sorted descending, impact correlation, empty, API)
 - Differential privacy: 10 tests (noise, determinism, seeds, epsilon scaling, sensitivity, guarantee, API, clamping)
+- Custom thresholds: 4 tests (strict, relaxed, API, default)
+- Audit log: 2 tests (request_id present, unique per call)
 
 ### Deployments
 
@@ -83,7 +86,7 @@
 
 ### Commits
 
-107 total (95 in this sprint session)
+109 total (97 in this sprint session)
 
 ### Next Up
 
