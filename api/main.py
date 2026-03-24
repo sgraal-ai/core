@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -101,7 +101,7 @@ class MemoryEntryRequest(BaseModel):
     type: str
     timestamp_age_days: float
     source_trust: float = 0.9
-    source_conflict: float = 0.1
+    source_conflict: Optional[float] = None  # None = auto-compute via sheaf cohomology
     downstream_count: int = 1
     r_belief: float = 0.5
     prompt_embedding: Optional[list[float]] = None
@@ -795,11 +795,20 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "sample_rate": thread_sample_rate,
             }
 
+    # Sheaf cohomology: auto-compute source_conflict when not provided
+    any_manual_conflict = any(e.source_conflict is not None for e in req.memory_state)
+    sheaf_result = None
+    if not any_manual_conflict and len(req.memory_state) >= 2:
+        sheaf_entries = [{"id": e.id, "content": e.content, "prompt_embedding": e.prompt_embedding} for e in req.memory_state]
+        sheaf_result = compute_sheaf_consistency(sheaf_entries)
+
+    auto_conflict = sheaf_result.auto_source_conflict if sheaf_result else 0.1
+
     entries = [MemoryEntry(
         id=e.id, content=e.content, type=e.type,
         timestamp_age_days=e.timestamp_age_days,
         source_trust=e.source_trust,
-        source_conflict=e.source_conflict,
+        source_conflict=e.source_conflict if e.source_conflict is not None else auto_conflict,
         downstream_count=e.downstream_count,
         r_belief=e.r_belief,
         prompt_embedding=e.prompt_embedding,
@@ -1083,6 +1092,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "out_of_control": mewma.out_of_control,
         "monitored_components": mewma.monitored_components,
     }
+
+    # Sheaf consistency analysis
+    if sheaf_result:
+        response["consistency_analysis"] = {
+            "consistency_score": sheaf_result.consistency_score,
+            "h1_rank": sheaf_result.h1_rank,
+            "inconsistent_pairs": [list(p) for p in sheaf_result.inconsistent_pairs],
+            "auto_source_conflict": sheaf_result.auto_source_conflict,
+        }
 
     if req.thread_id:
         response["thread_id"] = req.thread_id

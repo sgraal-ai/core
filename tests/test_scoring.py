@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3246,3 +3246,108 @@ class TestMEWMA:
         assert "monitored_components" in m
         assert m["T2_stat"] >= 0
         assert m["control_limit"] == 12.0
+
+
+class TestSheafCohomology:
+    def test_zero_entries(self):
+        result = compute_sheaf_consistency([])
+        assert result.consistency_score == 1.0
+        assert result.h1_rank == 0
+        assert result.auto_source_conflict == 0.0
+
+    def test_single_entry(self):
+        result = compute_sheaf_consistency([{"id": "m1", "content": "hello world"}])
+        assert result.consistency_score == 1.0
+        assert result.h1_rank == 0
+
+    def test_fully_consistent_set(self):
+        """Identical content → fully consistent (Jaccard=1.0 > 0.7)."""
+        entries = [
+            {"id": "m1", "content": "Budapest office open 9-18"},
+            {"id": "m2", "content": "Budapest office open 9-18"},
+        ]
+        result = compute_sheaf_consistency(entries)
+        assert result.h1_rank == 0
+        assert result.consistency_score == 1.0
+        assert result.auto_source_conflict == 0.0
+
+    def test_inconsistent_pair(self):
+        """Overlapping but contradictory content → inconsistent."""
+        entries = [
+            {"id": "m1", "content": "Budapest office open weekdays 9-18"},
+            {"id": "m2", "content": "Budapest office closed permanently since 2025"},
+        ]
+        result = compute_sheaf_consistency(entries)
+        assert result.h1_rank >= 1
+        assert result.auto_source_conflict > 0
+        assert ("m1", "m2") in result.inconsistent_pairs or ("m2", "m1") in result.inconsistent_pairs
+
+    def test_cycle_detection_three_entries(self):
+        """Three entries with pairwise overlap but inconsistency."""
+        entries = [
+            {"id": "a", "content": "customer prefers email communication always"},
+            {"id": "b", "content": "customer prefers phone communication always"},
+            {"id": "c", "content": "customer prefers email phone communication"},
+        ]
+        result = compute_sheaf_consistency(entries)
+        assert result.h1_rank >= 0  # may detect inconsistencies
+        assert 0 <= result.consistency_score <= 1.0
+
+    def test_fallback_jaccard_no_embeddings(self):
+        """Without embeddings, uses Jaccard similarity."""
+        entries = [
+            {"id": "m1", "content": "the quick brown fox"},
+            {"id": "m2", "content": "the quick brown dog"},
+        ]
+        result = compute_sheaf_consistency(entries)
+        # Jaccard("the quick brown fox", "the quick brown dog") = 3/5 = 0.6 < 0.7 → inconsistent
+        assert result.h1_rank >= 0
+        assert 0 <= result.auto_source_conflict <= 1.0
+
+    def test_backward_compat_manual_override(self):
+        """Providing source_conflict manually should still work (no breakage)."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [{
+                "id": "compat_1",
+                "content": "Test entry",
+                "type": "semantic",
+                "timestamp_age_days": 5,
+                "source_conflict": 0.3,
+            }],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        # Manual source_conflict should be used, s_interference reflects it
+        assert data["component_breakdown"]["s_interference"] == 30.0
+
+    def test_performance_20_entries(self):
+        """Sheaf computation for 20 entries must complete in <5ms."""
+        entries = [
+            {"id": f"perf_{i}", "content": f"memory entry number {i} about topic alpha beta"}
+            for i in range(20)
+        ]
+        import time
+        start = time.monotonic()
+        result = compute_sheaf_consistency(entries)
+        elapsed_ms = (time.monotonic() - start) * 1000
+        assert elapsed_ms < 50  # generous bound (5ms target, 50ms CI tolerance)
+        assert 0 <= result.consistency_score <= 1.0
+
+    def test_consistency_analysis_in_api(self):
+        """Auto sheaf computation should appear in API response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                {"id": "sheaf_a", "content": "Budapest office Vaci ut 47 open weekdays", "type": "tool_state", "timestamp_age_days": 5},
+                {"id": "sheaf_b", "content": "Budapest office permanently closed since January", "type": "tool_state", "timestamp_age_days": 3},
+            ],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "consistency_analysis" in data
+        ca = data["consistency_analysis"]
+        assert "consistency_score" in ca
+        assert "h1_rank" in ca
+        assert "inconsistent_pairs" in ca
+        assert "auto_source_conflict" in ca

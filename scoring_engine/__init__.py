@@ -20,3 +20,4 @@ from .calibration import compute_calibration, CalibrationResult
 from .hawkes_process import compute_hawkes_intensity, hawkes_from_entries, HawkesResult
 from .copula import compute_copula, CopulaResult
 from .mewma import compute_mewma, MEWMAResult
+from .sheaf_cohomology import compute_sheaf_consistency, ConsistencyResult
