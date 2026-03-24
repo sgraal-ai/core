@@ -2640,3 +2640,66 @@ class TestComplianceEndpoints:
         data = resp.json()
         assert "below_99.9%" in data["credit_policy"]
         assert "10%" in data["credit_policy"]["below_99.9%"]
+
+
+class TestMetrics:
+    def test_metrics_prometheus_format(self):
+        """GET /metrics should return Prometheus text format."""
+        # Make a preflight call first to generate metrics
+        client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+
+        resp = client.get("/metrics")
+        assert resp.status_code == 200
+        text = resp.text
+        assert "sgraal_preflight_total" in text
+        assert "sgraal_heal_total" in text
+        assert "sgraal_decision_total" in text
+        assert "sgraal_omega_avg" in text
+        assert "sgraal_response_time_p95_ms" in text
+        assert "# TYPE" in text
+
+    def test_metrics_json_format(self):
+        """GET /metrics?accept=json should return JSON."""
+        resp = client.get("/metrics?accept=json")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "preflight_total" in data
+        assert "heal_total" in data
+        assert "decisions" in data
+        assert "avg_omega" in data
+        assert "p95_response_time_ms" in data
+
+    def test_metrics_increment_on_preflight(self):
+        """Preflight calls should increment metrics."""
+        before = client.get("/metrics?accept=json").json()
+        client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        after = client.get("/metrics?accept=json").json()
+        assert after["preflight_total"] == before["preflight_total"] + 1
+
+    def test_metrics_increment_on_heal(self):
+        """Heal calls should increment heal_total."""
+        before = client.get("/metrics?accept=json").json()
+        client.post("/v1/heal", json={"entry_id": "metrics_heal_test", "action": "REFETCH"}, headers=AUTH)
+        after = client.get("/metrics?accept=json").json()
+        assert after["heal_total"] == before["heal_total"] + 1
+
+    def test_trace_in_preflight_response(self):
+        """Preflight response should include _trace with span attributes."""
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "_trace" in data
+        trace = data["_trace"]
+        assert trace["span"] == "preflight"
+        assert "api_key_id" in trace
+        assert "decision" in trace
+        assert "omega_score" in trace
+        assert "request_id" in trace
+        assert "duration_ms" in trace
+        assert trace["duration_ms"] >= 0
+
+    def test_decision_distribution_tracked(self):
+        """Decision distribution should track USE_MEMORY counts."""
+        data = client.get("/metrics?accept=json").json()
+        assert "USE_MEMORY" in data["decisions"]
+        assert data["decisions"]["USE_MEMORY"] > 0

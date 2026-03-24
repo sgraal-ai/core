@@ -174,6 +174,14 @@ def root():
 def health():
     return {"status": "ok", "port": os.environ.get("PORT", "not set")}
 
+@app.get("/metrics")
+def metrics(accept: Optional[str] = None):
+    """Prometheus-format metrics export. Also accepts ?format=json."""
+    if accept == "json":
+        return _metrics.to_json()
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content=_metrics.to_prometheus(), media_type="text/plain")
+
 @app.get("/v1/compliance/gdpr")
 def gdpr_compliance():
     return {
@@ -369,6 +377,79 @@ def signup(req: SignupRequest):
     }
 
 
+# --- Metrics collector ---
+import time as _time
+
+class _Metrics:
+    def __init__(self):
+        self.preflight_total = 0
+        self.heal_total = 0
+        self.decisions = {"USE_MEMORY": 0, "WARN": 0, "ASK_USER": 0, "BLOCK": 0}
+        self.omega_sum = 0.0
+        self.response_times: list[float] = []  # seconds
+
+    def record_preflight(self, decision: str, omega: float, duration: float):
+        self.preflight_total += 1
+        self.decisions[decision] = self.decisions.get(decision, 0) + 1
+        self.omega_sum += omega
+        self.response_times.append(duration)
+        # Keep last 1000 response times for p95
+        if len(self.response_times) > 1000:
+            self.response_times = self.response_times[-1000:]
+
+    def record_heal(self):
+        self.heal_total += 1
+
+    def avg_omega(self) -> float:
+        return round(self.omega_sum / max(self.preflight_total, 1), 2)
+
+    def p95_response_time_ms(self) -> float:
+        if not self.response_times:
+            return 0.0
+        sorted_times = sorted(self.response_times)
+        idx = int(len(sorted_times) * 0.95)
+        return round(sorted_times[min(idx, len(sorted_times) - 1)] * 1000, 2)
+
+    def to_prometheus(self) -> str:
+        lines = [
+            "# HELP sgraal_preflight_total Total preflight API calls",
+            "# TYPE sgraal_preflight_total counter",
+            f"sgraal_preflight_total {self.preflight_total}",
+            "",
+            "# HELP sgraal_heal_total Total heal API calls",
+            "# TYPE sgraal_heal_total counter",
+            f"sgraal_heal_total {self.heal_total}",
+            "",
+            "# HELP sgraal_decision_total Decision distribution",
+            "# TYPE sgraal_decision_total counter",
+        ]
+        for decision, count in self.decisions.items():
+            lines.append(f'sgraal_decision_total{{decision="{decision}"}} {count}')
+        lines += [
+            "",
+            "# HELP sgraal_omega_avg Average omega_mem_final score",
+            "# TYPE sgraal_omega_avg gauge",
+            f"sgraal_omega_avg {self.avg_omega()}",
+            "",
+            "# HELP sgraal_response_time_p95_ms p95 response time in milliseconds",
+            "# TYPE sgraal_response_time_p95_ms gauge",
+            f"sgraal_response_time_p95_ms {self.p95_response_time_ms()}",
+        ]
+        return "\n".join(lines) + "\n"
+
+    def to_json(self) -> dict:
+        return {
+            "preflight_total": self.preflight_total,
+            "heal_total": self.heal_total,
+            "decisions": dict(self.decisions),
+            "avg_omega": self.avg_omega(),
+            "p95_response_time_ms": self.p95_response_time_ms(),
+        }
+
+
+_metrics = _Metrics()
+
+
 def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str, omega: float, extra: dict = None):
     """Log audit event to Supabase."""
     if not supabase_client:
@@ -440,6 +521,7 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
 
     heal_request_id = str(uuid.uuid4())
     _audit_log("heal", heal_request_id, key_record, req.action, 0, {"entry_id": req.entry_id})
+    _metrics.record_heal()
 
     return {
         "healed": True,
@@ -553,6 +635,8 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
 
 @app.post("/v1/preflight")
 def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
+    _t_start = _time.monotonic()
+
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
@@ -835,5 +919,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Audit log
     _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out)
+
+    # Metrics + tracing
+    _duration = _time.monotonic() - _t_start
+    _metrics.record_preflight(result.recommended_action, omega_out, _duration)
+    response["_trace"] = {
+        "span": "preflight",
+        "api_key_id": key_record.get("key_hash", "in_memory"),
+        "decision": result.recommended_action,
+        "omega_score": omega_out,
+        "request_id": request_id,
+        "duration_ms": round(_duration * 1000, 2),
+    }
 
     return response
