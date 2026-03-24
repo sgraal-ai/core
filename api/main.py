@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1139,6 +1139,22 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "true_interference_count": rmt_result.true_interference_count,
                 "noise_interference_count": rmt_result.noise_interference_count,
                 "signal_ratio": rmt_result.signal_ratio,
+            }
+    except Exception:
+        pass  # graceful degradation
+
+    # Causal graph discovery (LiNGAM)
+    try:
+        cg_entries = [{"id": e.id, "content": e.content, "timestamp_age_days": e.timestamp_age_days,
+                       "source_trust": e.source_trust, "source_conflict": e.source_conflict,
+                       "downstream_count": e.downstream_count} for e in entries]
+        cg = compute_causal_graph(cg_entries)
+        if cg and cg.edges:
+            response["causal_graph"] = {
+                "edges": [{"from": e.from_id, "to": e.to_id, "strength": e.strength, "confirmed": e.confirmed} for e in cg.edges],
+                "root_cause": cg.root_cause,
+                "causal_chain": cg.causal_chain,
+                "causal_explanation": cg.causal_explanation,
             }
     except Exception:
         pass  # graceful degradation

@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3615,3 +3615,91 @@ class TestRMT:
 
         assert resp.status_code == 200
         assert "rmt_analysis" not in resp.json()
+
+
+class TestCausalGraph:
+    def test_single_entry_returns_none(self):
+        result = compute_causal_graph([{"id": "m1", "content": "hello"}])
+        assert result is None
+
+    def test_insufficient_history_skip(self):
+        """With histories but <10 observations, should return None."""
+        entries = [{"id": "a"}, {"id": "b"}]
+        histories = {"a": [1, 2, 3], "b": [4, 5, 6]}  # only 3 obs
+        result = compute_causal_graph(entries, histories=histories)
+        assert result is None
+
+    def test_two_entry_causal_chain(self):
+        """Two entries with different ages → causal relationship."""
+        entries = [
+            {"id": "old", "content": "old data", "timestamp_age_days": 90, "downstream_count": 5, "source_trust": 0.8, "source_conflict": 0.3},
+            {"id": "new", "content": "new data", "timestamp_age_days": 5, "downstream_count": 2, "source_trust": 0.9, "source_conflict": 0.1},
+        ]
+        result = compute_causal_graph(entries)
+        assert result is not None
+        assert len(result.edges) >= 1
+        assert result.edges[0].from_id == "old"
+
+    def test_multi_entry_dag(self):
+        """Multiple entries should produce a DAG."""
+        entries = [
+            {"id": "root", "timestamp_age_days": 100, "downstream_count": 8, "source_trust": 0.7, "source_conflict": 0.4, "content": "root"},
+            {"id": "mid", "timestamp_age_days": 50, "downstream_count": 4, "source_trust": 0.8, "source_conflict": 0.2, "content": "mid"},
+            {"id": "leaf", "timestamp_age_days": 5, "downstream_count": 1, "source_trust": 0.95, "source_conflict": 0.05, "content": "leaf"},
+        ]
+        result = compute_causal_graph(entries)
+        assert result is not None
+        assert result.root_cause is not None
+
+    def test_root_cause_identification(self):
+        """Root cause should be the entry with most outgoing causal influence."""
+        entries = [
+            {"id": "cause", "timestamp_age_days": 120, "downstream_count": 10, "source_trust": 0.5, "source_conflict": 0.6, "content": "cause"},
+            {"id": "effect1", "timestamp_age_days": 10, "downstream_count": 2, "source_trust": 0.9, "source_conflict": 0.1, "content": "e1"},
+            {"id": "effect2", "timestamp_age_days": 5, "downstream_count": 1, "source_trust": 0.95, "source_conflict": 0.05, "content": "e2"},
+        ]
+        result = compute_causal_graph(entries)
+        assert result is not None
+        assert result.root_cause == "cause"
+
+    def test_causal_explanation_format(self):
+        entries = [
+            {"id": "src", "timestamp_age_days": 80, "downstream_count": 6, "source_trust": 0.6, "source_conflict": 0.5, "content": "source"},
+            {"id": "dst", "timestamp_age_days": 5, "downstream_count": 1, "source_trust": 0.9, "source_conflict": 0.1, "content": "dest"},
+        ]
+        result = compute_causal_graph(entries)
+        assert result is not None
+        if result.edges:
+            assert "causally affects" in result.causal_explanation
+            assert "risk source" in result.causal_explanation
+
+    def test_with_history_lingam(self):
+        """With sufficient history, should use LiNGAM-style analysis."""
+        entries = [{"id": "a"}, {"id": "b"}]
+        # a causes b: b = 0.7*a + noise
+        import random
+        random.seed(42)
+        a_hist = [random.gauss(50, 10) for _ in range(20)]
+        b_hist = [0.7 * a_hist[i] + random.gauss(0, 5) for i in range(20)]
+        histories = {"a": a_hist, "b": b_hist}
+        result = compute_causal_graph(entries, histories=histories)
+        assert result is not None
+        assert len(result.edges) >= 1
+
+    def test_causal_graph_in_api(self):
+        """Preflight with 2+ entries should include causal_graph when edges found."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="cg_old", type="tool_state", timestamp_age_days=90, downstream_count=8),
+                _fresh_entry(id="cg_new", timestamp_age_days=5, downstream_count=1),
+            ],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        if "causal_graph" in data:
+            cg = data["causal_graph"]
+            assert "edges" in cg
+            assert "root_cause" in cg
+            assert "causal_chain" in cg
+            assert "causal_explanation" in cg
