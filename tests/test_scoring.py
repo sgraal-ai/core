@@ -2589,3 +2589,54 @@ class TestAuditLog:
         r2 = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
 
         assert r1.json()["request_id"] != r2.json()["request_id"]
+
+
+class TestComplianceEndpoints:
+    def test_gdpr_endpoint(self):
+        resp = client.get("/v1/compliance/gdpr")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "data_retention" in data
+        assert "right_to_erasure" in data
+        assert "data_portability" in data
+        assert "dpa_contact" in data
+        assert data["dpa_contact"]["email"] == "dpa@sgraal.com"
+        assert "memory_state" in data["data_retention"]
+        assert "not stored" in data["data_retention"]["memory_state"]
+
+    def test_sla_endpoint(self):
+        resp = client.get("/v1/compliance/sla")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "tiers" in data
+        assert "free" in data["tiers"]
+        assert "starter" in data["tiers"]
+        assert "growth" in data["tiers"]
+        assert "enterprise" in data["tiers"]
+        assert data["tiers"]["starter"]["uptime"] == "99.9%"
+        assert "credit_policy" in data
+
+    def test_compliance_docs_endpoint(self):
+        resp = client.get("/v1/compliance/docs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "profiles" in data
+        assert "EU_AI_ACT" in data["profiles"]
+        assert "GDPR" in data["profiles"]
+        assert "FDA_510K" in data["profiles"]
+        assert "HIPAA" in data["profiles"]
+        assert "Article 12" in data["profiles"]["EU_AI_ACT"]["articles"]
+
+    def test_gdpr_sub_processors_listed(self):
+        resp = client.get("/v1/compliance/gdpr")
+        data = resp.json()
+        assert "sub_processors" in data
+        names = [sp["name"] for sp in data["sub_processors"]]
+        assert "Supabase" in names
+        assert "Stripe" in names
+
+    def test_sla_credit_policy(self):
+        resp = client.get("/v1/compliance/sla")
+        data = resp.json()
+        assert "below_99.9%" in data["credit_policy"]
+        assert "10%" in data["credit_policy"]["below_99.9%"]

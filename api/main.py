@@ -174,6 +174,123 @@ def root():
 def health():
     return {"status": "ok", "port": os.environ.get("PORT", "not set")}
 
+@app.get("/v1/compliance/gdpr")
+def gdpr_compliance():
+    return {
+        "policy": "Sgraal GDPR Data Processing Commitment",
+        "data_retention": {
+            "preflight_logs": "90 days, then auto-deleted",
+            "audit_logs": "1 year, then archived",
+            "api_keys": "retained until account deletion",
+            "memory_state": "not stored — processed in real time and discarded",
+        },
+        "right_to_erasure": {
+            "endpoint": "DELETE /v1/account",
+            "scope": "All API keys, logs, and associated data permanently deleted within 30 days",
+            "contact": "dpa@sgraal.com",
+        },
+        "data_portability": {
+            "endpoint": "GET /v1/account/export",
+            "format": "JSON",
+            "scope": "All preflight logs, audit logs, and API key metadata",
+        },
+        "dpa_contact": {
+            "email": "dpa@sgraal.com",
+            "name": "Sgraal Data Protection Officer",
+            "response_time": "72 hours",
+        },
+        "data_location": "EU (Frankfurt, DE)",
+        "sub_processors": [
+            {"name": "Supabase", "purpose": "Database", "location": "EU"},
+            {"name": "Railway", "purpose": "API hosting", "location": "US/EU"},
+            {"name": "Stripe", "purpose": "Billing", "location": "US"},
+            {"name": "Upstash", "purpose": "Redis (GSV)", "location": "EU"},
+        ],
+        "legal_basis": "Legitimate interest (Article 6(1)(f)) and contract performance (Article 6(1)(b))",
+    }
+
+@app.get("/v1/compliance/sla")
+def sla_tiers():
+    return {
+        "sla": "Sgraal Service Level Agreement",
+        "tiers": {
+            "free": {
+                "uptime": "99.0%",
+                "response_time_p95": "500ms",
+                "support_response": "community (GitHub Issues)",
+                "rate_limit": "10,000 calls/month",
+            },
+            "starter": {
+                "uptime": "99.9%",
+                "response_time_p95": "200ms",
+                "support_response": "48 hours (email)",
+                "rate_limit": "100,000 calls/month",
+            },
+            "growth": {
+                "uptime": "99.9%",
+                "response_time_p95": "100ms",
+                "support_response": "4 hours (priority email)",
+                "rate_limit": "1,000,000 calls/month",
+            },
+            "enterprise": {
+                "uptime": "99.99%",
+                "response_time_p95": "50ms",
+                "support_response": "1 hour (dedicated Slack channel)",
+                "rate_limit": "custom",
+            },
+        },
+        "credit_policy": {
+            "below_99.9%": "10% monthly credit",
+            "below_99.0%": "25% monthly credit",
+            "below_95.0%": "50% monthly credit",
+        },
+        "exclusions": ["scheduled maintenance (announced 48h in advance)", "force majeure", "client-side issues"],
+        "contact": "sla@sgraal.com",
+    }
+
+@app.get("/v1/compliance/docs")
+def compliance_docs():
+    return {
+        "title": "Sgraal Compliance Documentation",
+        "profiles": {
+            "EU_AI_ACT": {
+                "description": "European Union AI Act compliance profile",
+                "articles": {
+                    "Article 9": "Risk management — medical domain with omega>40 requires human oversight",
+                    "Article 12": "Logging — irreversible actions with omega>60 blocked, audit trail required",
+                    "Article 13": "Transparency — explainability_note always included in every response",
+                },
+                "enforcement": "Critical violations override recommended_action to BLOCK",
+            },
+            "GDPR": {
+                "description": "General Data Protection Regulation",
+                "measures": {
+                    "data_minimization": "Memory state processed in real time, not stored",
+                    "privacy_by_design": "3-layer privacy: ID obfuscation, reason abstraction, ZK commitment",
+                    "differential_privacy": "Optional ε-DP via Laplace mechanism (dp_epsilon field)",
+                    "right_to_erasure": "DELETE /v1/account removes all data within 30 days",
+                },
+            },
+            "FDA_510K": {
+                "description": "FDA 510(k) medical device compliance",
+                "rules": {
+                    "predicate_comparison": "Medical domain with omega>30 requires predicate device comparison",
+                    "risk_classification": "Irreversible/destructive actions with omega>50 require Class III review",
+                },
+                "healing_policy": "tool_state + medical → tier 3 (log-only), requires approval",
+            },
+            "HIPAA": {
+                "description": "Health Insurance Portability and Accountability Act",
+                "rules": {
+                    "phi_integrity": "Medical domain with assurance<70 → PHI integrity cannot be guaranteed",
+                },
+                "healing_policy": "All medical memory types require approval for healing actions",
+            },
+        },
+        "usage": "Add compliance_profile field to POST /v1/preflight (e.g. 'EU_AI_ACT')",
+        "docs_url": "https://sgraal.com/docs/compliance",
+    }
+
 @app.get("/v1/verify")
 def verify(
     profile: str = "GENERAL",
