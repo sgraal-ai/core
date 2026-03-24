@@ -40,6 +40,7 @@
 | T-40 | Multivariate EWMA (MEWMA) joint trend monitoring | Done | 8 tests |
 | SH-01 | Sheaf Cohomology consistency checker — auto source_conflict | Done | 9 tests |
 | RL-01 | Causal Q-learning for outcome learning loop | Done | 11 tests |
+| BP-01 | Bayesian Online Change Point Detection (BOCPD) | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -60,7 +61,7 @@
 
 ### Test Summary
 
-- **299 tests passing** (pytest)
+- **307 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -99,6 +100,7 @@
 - MEWMA: 8 tests (in control, out of control, T² non-negative, components, custom, history, limit, API)
 - Sheaf cohomology: 9 tests (zero, single, consistent, inconsistent, cycles, Jaccard fallback, backward compat, performance, API)
 - RL policy: 11 tests (cold start, rewards, Q-update, domain separation, episodes, override, discretization, API, outcome trigger)
+- BOCPD: 8 tests (stable, abrupt shift, merkle reset, run length, cold start, hazard sensitivity, API, no history)
 
 ### Deployments
 
@@ -110,7 +112,7 @@
 
 ### Commits
 
-134 total (122 in this sprint session)
+136 total (124 in this sprint session)
 
 ### Next Up
 
