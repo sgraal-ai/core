@@ -10,3 +10,4 @@ from .memory_tracker import MemoryAccessTracker
 from .privacy_layer import ObfuscatedId, ReasonAbstractor, ZKAssurance
 from .thread_manager import ThreadManager, ThreadBucket
 from .fallback_engine import FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, FallbackResult
+from .shapley_explain import compute_shapley_values

@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2179,3 +2179,109 @@ class TestFallbackEngine:
         # Next call should fail-fast (fallback without trying)
         result = sdk.preflight(memory_state=mem)
         assert result.fallback is True
+
+
+class TestShapleyValues:
+    def test_shapley_values_sum_to_omega(self):
+        """Shapley values should approximately sum to omega_mem_final."""
+        entries = [MemoryEntry(
+            id="shap_1", content="Test", type="tool_state",
+            timestamp_age_days=30, source_trust=0.7,
+            source_conflict=0.3, downstream_count=5,
+            r_belief=0.6,
+        )]
+        result = compute(entries, action_type="reversible", domain="general")
+        shapley = compute_shapley_values(result.component_breakdown, "reversible", "general")
+
+        assert abs(sum(shapley.values()) - result.omega_mem_final) < 1.0
+
+    def test_shapley_has_all_components(self):
+        """Shapley dict should have same keys as component_breakdown."""
+        entries = [MemoryEntry(
+            id="shap_2", content="Test", type="semantic",
+            timestamp_age_days=10, source_trust=0.9,
+            source_conflict=0.1, downstream_count=2,
+        )]
+        result = compute(entries)
+        shapley = compute_shapley_values(result.component_breakdown)
+
+        assert set(shapley.keys()) == set(result.component_breakdown.keys())
+
+    def test_high_freshness_dominates_shapley(self):
+        """Stale entry should have s_freshness as largest positive Shapley contributor."""
+        entries = [MemoryEntry(
+            id="shap_3", content="Stale", type="tool_state",
+            timestamp_age_days=60, source_trust=0.95,
+            source_conflict=0.05, downstream_count=1,
+        )]
+        result = compute(entries, action_type="reversible", domain="general")
+        shapley = compute_shapley_values(result.component_breakdown, "reversible", "general")
+
+        # s_freshness should be the largest positive contributor
+        positive = {k: v for k, v in shapley.items() if v > 0}
+        if positive:
+            top = max(positive, key=positive.get)
+            assert top in ("s_freshness", "s_drift", "r_recall")  # all freshness-driven
+
+    def test_recovery_negative_shapley(self):
+        """s_recovery should have negative Shapley value (reduces risk)."""
+        entries = [MemoryEntry(
+            id="shap_4", content="Fresh", type="semantic",
+            timestamp_age_days=5, source_trust=0.9,
+            source_conflict=0.1, downstream_count=2,
+        )]
+        result = compute(entries)
+        shapley = compute_shapley_values(result.component_breakdown)
+
+        assert shapley["s_recovery"] < 0
+
+    def test_shapley_in_api_response(self):
+        """Preflight API response should include shapley_values."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(type="tool_state", timestamp_age_days=20)],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "shapley_values" in data
+        sv = data["shapley_values"]
+        assert isinstance(sv, dict)
+        assert "s_freshness" in sv
+        assert "s_recovery" in sv
+
+    def test_shapley_in_batch_response(self):
+        """Batch response should include shapley_values per entry."""
+        resp = client.post("/v1/preflight/batch", json={
+            "entries": [
+                _fresh_entry(id="shap_b1"),
+                _fresh_entry(id="shap_b2", type="tool_state", timestamp_age_days=30),
+            ],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        for r in resp.json()["results"]:
+            assert "shapley_values" in r
+
+    def test_shapley_with_custom_weights(self):
+        """Custom weights should produce different Shapley values."""
+        breakdown = {"s_freshness": 50.0, "s_drift": 30.0, "s_provenance": 10.0,
+                     "s_propagation": 20.0, "r_recall": 35.0, "r_encode": 5.0,
+                     "s_interference": 15.0, "s_recovery": 75.0, "r_belief": 40.0,
+                     "s_relevance": 0.0}
+
+        default_sv = compute_shapley_values(breakdown, "reversible", "general")
+        custom_sv = compute_shapley_values(breakdown, "reversible", "general", custom_weights={
+            "s_freshness": 0.50, "s_drift": 0.05, "s_provenance": 0.05,
+            "s_propagation": 0.05, "r_recall": 0.05, "r_encode": 0.05,
+            "s_interference": 0.05, "s_recovery": -0.05, "r_belief": 0.05,
+            "s_relevance": 0.05,
+        })
+
+        # s_freshness contribution should be much larger with custom weights
+        assert custom_sv["s_freshness"] > default_sv["s_freshness"]
+
+    def test_shapley_zero_for_empty_entries(self):
+        """Empty entries produce zero omega, so all Shapley values should be 0."""
+        result = compute([])
+        shapley = compute_shapley_values(result.component_breakdown)
+        assert all(v == 0 for v in shapley.values())

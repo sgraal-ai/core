@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -338,6 +338,9 @@ def preflight_batch(req: BatchRequest, key_record: dict = Depends(verify_api_key
             "assurance_score": result.assurance_score,
             "explainability_note": result.explainability_note,
             "component_breakdown": result.component_breakdown,
+            "shapley_values": compute_shapley_values(
+                result.component_breakdown, req.action_type, req.domain, req.custom_weights,
+            ),
         })
 
     blocked = sum(1 for r in results if r["recommended_action"] == "BLOCK")
@@ -634,6 +637,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "zk_commitment": zk_commitment,
         "sampled": True,
         "weights_used": "custom" if req.custom_weights else "default",
+        "shapley_values": compute_shapley_values(
+            result.component_breakdown, req.action_type, req.domain, req.custom_weights,
+        ),
     }
     if req.thread_id:
         response["thread_id"] = req.thread_id
