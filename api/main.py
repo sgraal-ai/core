@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1065,15 +1065,30 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "drift_method": drift.drift_method,
     }
 
-    # CUSUM + EWMA trend detection
+    # CUSUM + EWMA trend detection + BOCPD
     if req.score_history and len(req.score_history) >= 2:
         trend = detect_trend(req.score_history)
-        response["trend_detection"] = {
+        td = {
             "cusum_alert": trend.cusum_alert,
             "ewma_alert": trend.ewma_alert,
             "drift_sustained": trend.drift_sustained,
             "consecutive_degradations": trend.consecutive_degradations,
         }
+
+        # BOCPD
+        try:
+            if len(req.score_history) >= 3:
+                bocpd = compute_bocpd(req.score_history)
+                td["bocpd"] = {
+                    "p_changepoint": bocpd.p_changepoint,
+                    "regime_change": bocpd.regime_change,
+                    "current_run_length": bocpd.current_run_length,
+                    "merkle_reset_triggered": bocpd.merkle_reset_triggered,
+                }
+        except Exception:
+            pass  # graceful degradation
+
+        response["trend_detection"] = td
 
     # Calibration metrics
     cal = compute_calibration(omega_out, result.assurance_score, result.component_breakdown)

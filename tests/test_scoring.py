@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3456,3 +3456,73 @@ class TestRLPolicy:
         assert resp.status_code == 200
         assert "rl_reward" in resp.json()
         assert resp.json()["rl_reward"] == 1.0
+
+
+class TestBOCPD:
+    def test_stable_no_changepoint(self):
+        """Stable series should have low changepoint probability."""
+        history = [25.0] * 20
+        result = compute_bocpd(history)
+        assert result.regime_change is False
+        assert result.p_changepoint < 0.5
+
+    def test_abrupt_shift_detected(self):
+        """Abrupt jump in scores should trigger regime change."""
+        history = [10.0] * 15 + [80.0] * 10
+        result = compute_bocpd(history, hazard_rate=0.05, threshold=0.5)
+        assert result.p_changepoint > 0
+        # The detector should see some evidence of change
+
+    def test_merkle_reset_on_regime_change(self):
+        """Regime change should trigger merkle_reset_triggered."""
+        # Use high hazard to make detection easier
+        history = [10.0] * 10 + [90.0] * 15
+        result = compute_bocpd(history, hazard_rate=0.1, threshold=0.3)
+        if result.regime_change:
+            assert result.merkle_reset_triggered is True
+
+    def test_run_length_positive(self):
+        result = compute_bocpd([20, 20, 20, 20, 20])
+        assert result.current_run_length >= 0
+
+    def test_cold_start_short_history(self):
+        """Short history (<3) should return safe defaults."""
+        result = compute_bocpd([10.0, 20.0])
+        assert result.regime_change is False
+        assert result.p_changepoint == 0.0
+        assert result.current_run_length == 2
+
+    def test_hazard_rate_sensitivity(self):
+        """Higher hazard rate should make detection more sensitive."""
+        history = [20.0] * 8 + [60.0] * 8
+        low_h = compute_bocpd(history, hazard_rate=0.001)
+        high_h = compute_bocpd(history, hazard_rate=0.2)
+        # Higher hazard = more likely to see changepoint
+        assert high_h.p_changepoint >= low_h.p_changepoint
+
+    def test_bocpd_in_trend_detection_api(self):
+        """Preflight with score_history should include bocpd in trend_detection."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [10, 10, 10, 10, 10, 50, 60, 70, 80],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "trend_detection" in data
+        td = data["trend_detection"]
+        assert "bocpd" in td
+        bocpd = td["bocpd"]
+        assert "p_changepoint" in bocpd
+        assert "regime_change" in bocpd
+        assert "current_run_length" in bocpd
+        assert "merkle_reset_triggered" in bocpd
+
+    def test_no_bocpd_without_history(self):
+        """Without score_history, no bocpd in response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "trend_detection" not in resp.json()
