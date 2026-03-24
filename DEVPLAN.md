@@ -43,6 +43,7 @@
 | BP-01 | Bayesian Online Change Point Detection (BOCPD) | Done | 8 tests |
 | RMT-01 | Random Matrix Theory signal/noise separation | Done | 9 tests |
 | CG-01 | LiNGAM causal structure discovery | Done | 8 tests |
+| IG-01 | α-Divergence as 4th drift detection method | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -63,7 +64,7 @@
 
 ### Test Summary
 
-- **324 tests passing** (pytest)
+- **332 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -105,6 +106,7 @@
 - BOCPD: 8 tests (stable, abrupt shift, merkle reset, run length, cold start, hazard sensitivity, API, no history)
 - RMT: 9 tests (single/empty null, identical, diverse, signal ratio, Jaccard fallback, performance, API 2+ entries, single entry no rmt)
 - Causal graph: 8 tests (single null, insufficient history, two-entry chain, multi-entry DAG, root cause, explanation, LiNGAM with history, API)
+- α-Divergence: 8 tests (Hellinger α=0.5, KL limit, α=2.0, numerical stability, ensemble_4, score range, API, backward compat)
 
 ### Deployments
 
@@ -116,7 +118,7 @@
 
 ### Commits
 
-147 total (135 in this sprint session)
+149 total (137 in this sprint session)
 
 ### Next Up
 
