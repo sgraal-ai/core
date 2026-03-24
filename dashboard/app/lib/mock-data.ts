@@ -1,3 +1,30 @@
+export interface Calibration {
+  brier_score: number;
+  log_loss: number;
+  meta_score: number;
+  calibrated_scores?: Record<string, number>;
+}
+
+export interface HawkesIntensity {
+  current_lambda: number;
+  baseline_mu: number;
+  excited: boolean;
+  burst_detected: boolean;
+}
+
+export interface CopulaAnalysis {
+  rho: number;
+  joint_risk: number;
+  tail_dependence: boolean;
+}
+
+export interface MEWMA {
+  T2_stat: number;
+  control_limit: number;
+  out_of_control: boolean;
+  monitored_components: string[];
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -12,6 +39,10 @@ export interface Agent {
   repair_plan: RepairAction[];
   at_risk_warnings: AtRiskWarning[];
   compliance_result: ComplianceResult;
+  calibration?: Calibration;
+  hawkes_intensity?: HawkesIntensity;
+  copula_analysis?: CopulaAnalysis;
+  mewma?: MEWMA;
 }
 
 export interface RepairAction {
@@ -54,6 +85,10 @@ export const MOCK_AGENTS: Agent[] = [
     repair_plan: [],
     at_risk_warnings: [],
     compliance_result: { compliant: true, violations: [], audit_required: false, profile_applied: "EU_AI_ACT" },
+    calibration: { brier_score: 0.008, log_loss: 0.04, meta_score: 8.2 },
+    hawkes_intensity: { current_lambda: 0.12, baseline_mu: 0.1, excited: false, burst_detected: false },
+    copula_analysis: { rho: 0.7, joint_risk: 2.1, tail_dependence: false },
+    mewma: { T2_stat: 3.2, control_limit: 12, out_of_control: false, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
   },
   {
     id: "agent-fintech-trade",
@@ -76,6 +111,10 @@ export const MOCK_AGENTS: Agent[] = [
     ],
     at_risk_warnings: [],
     compliance_result: { compliant: true, violations: [], audit_required: false, profile_applied: "EU_AI_ACT" },
+    calibration: { brier_score: 0.12, log_loss: 0.35, meta_score: 42.5 },
+    hawkes_intensity: { current_lambda: 0.18, baseline_mu: 0.1, excited: true, burst_detected: false },
+    copula_analysis: { rho: 0.7, joint_risk: 18.4, tail_dependence: false },
+    mewma: { T2_stat: 8.7, control_limit: 12, out_of_control: false, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
   },
   {
     id: "agent-medical-triage",
@@ -108,6 +147,10 @@ export const MOCK_AGENTS: Agent[] = [
       audit_required: true,
       profile_applied: "EU_AI_ACT",
     },
+    calibration: { brier_score: 0.38, log_loss: 1.2, meta_score: 68.3 },
+    hawkes_intensity: { current_lambda: 0.25, baseline_mu: 0.1, excited: true, burst_detected: true },
+    copula_analysis: { rho: 0.7, joint_risk: 42.8, tail_dependence: true },
+    mewma: { T2_stat: 14.5, control_limit: 12, out_of_control: true, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
   },
   {
     id: "agent-legal-review",
@@ -141,6 +184,10 @@ export const MOCK_AGENTS: Agent[] = [
       audit_required: true,
       profile_applied: "EU_AI_ACT",
     },
+    calibration: { brier_score: 0.81, log_loss: 2.3, meta_score: 89.1 },
+    hawkes_intensity: { current_lambda: 0.35, baseline_mu: 0.1, excited: true, burst_detected: true },
+    copula_analysis: { rho: 0.7, joint_risk: 68.5, tail_dependence: true },
+    mewma: { T2_stat: 28.3, control_limit: 12, out_of_control: true, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
   },
   {
     id: "agent-code-assistant",
@@ -160,6 +207,10 @@ export const MOCK_AGENTS: Agent[] = [
     repair_plan: [],
     at_risk_warnings: [],
     compliance_result: { compliant: true, violations: [], audit_required: false, profile_applied: "GENERAL" },
+    calibration: { brier_score: 0.002, log_loss: 0.02, meta_score: 4.1 },
+    hawkes_intensity: { current_lambda: 0.11, baseline_mu: 0.1, excited: false, burst_detected: false },
+    copula_analysis: { rho: 0.7, joint_risk: 0.8, tail_dependence: false },
+    mewma: { T2_stat: 1.5, control_limit: 12, out_of_control: false, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
   },
 ];
 

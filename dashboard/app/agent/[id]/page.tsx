@@ -10,6 +10,7 @@ import { OmegaMeter } from "../../components/OmegaMeter";
 import { ComponentBreakdown } from "../../components/ComponentBreakdown";
 import { RepairPlanList } from "../../components/RepairPlanList";
 import { AtRiskWarnings } from "../../components/AtRiskWarnings";
+import { AdvancedAnalytics } from "../../components/AdvancedAnalytics";
 
 const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
   USE_MEMORY: { bg: "bg-green-400/10", text: "text-green-400" },
@@ -134,6 +135,16 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           )}
         </h2>
         <AtRiskWarnings warnings={agent.at_risk_warnings} />
+      </div>
+
+      <div className="mb-10">
+        <h2 className="text-lg font-semibold mb-4">Advanced Analytics</h2>
+        <AdvancedAnalytics
+          calibration={agent.calibration}
+          hawkes={agent.hawkes_intensity}
+          copula={agent.copula_analysis}
+          mewma={agent.mewma}
+        />
       </div>
     </div>
   );

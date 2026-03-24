@@ -47,6 +47,10 @@ export async function fetchPreflight(
       audit_required: false,
       profile_applied: "GENERAL",
     },
+    calibration: data.calibration,
+    hawkes_intensity: data.hawkes_intensity,
+    copula_analysis: data.copula_analysis,
+    mewma: data.mewma,
   };
 }
 
