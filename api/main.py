@@ -60,7 +60,7 @@ def _increment_gsv() -> int:
     return 0
 
 
-app = FastAPI(title="Sgraal API", version="0.1.0")
+app = FastAPI(title="Sgraal API", version="0.1.0", servers=[{"url": "https://api.sgraal.com"}])
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # In-memory API key store: api_key -> stripe_customer_id
