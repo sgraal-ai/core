@@ -37,6 +37,7 @@
 | ML-03–06 | Calibration: Brier, log loss, softmax temperature, logistic meta-layer | Done | 10 tests |
 | T-38 | Hawkes self-exciting process for temporal burst detection | Done | 8 tests |
 | T-39 | Gaussian copula dependence modeling for joint risk | Done | 7 tests |
+| T-40 | Multivariate EWMA (MEWMA) joint trend monitoring | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -57,7 +58,7 @@
 
 ### Test Summary
 
-- **271 tests passing** (pytest)
+- **279 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -93,6 +94,7 @@
 - Calibration: 10 tests (Brier perfect/overconfident, log loss correct/wrong, softmax sum/keys, meta range/safe, API, empty)
 - Hawkes process: 8 tests (baseline, excitation, burst, decay, from_entries, old entries, API, burst via API)
 - Copula: 7 tests (low/high joint risk, tail dependence, one low, rho, range, API)
+- MEWMA: 8 tests (in control, out of control, T² non-negative, components, custom, history, limit, API)
 
 ### Deployments
 
@@ -104,7 +106,7 @@
 
 ### Commits
 
-128 total (116 in this sprint session)
+130 total (118 in this sprint session)
 
 ### Next Up
 
