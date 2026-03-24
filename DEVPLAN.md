@@ -24,6 +24,7 @@
 | T-25 | Graceful Fallback Engine — circuit breaker + offline mode | Done | 9 tests |
 | T-26 | Batch scoring + custom weights + self-hosting docs | Done | 8 tests |
 | T-27 | Shapley value explainability for Ω_MEM scoring | Done | 8 tests |
+| T-28 | Lyapunov stability guarantee for heal loop | Done | 7 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -44,7 +45,7 @@
 
 ### Test Summary
 
-- **175 tests passing** (pytest)
+- **182 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -66,6 +67,7 @@
 - Batch scoring: 5 tests (all results, summary, max 100, empty, auth)
 - Custom weights: 3 tests (override, batch, bad sum)
 - Shapley values: 8 tests (sum to omega, all components, dominance, negative recovery, API, batch, custom weights, empty)
+- Lyapunov stability: 7 tests (V positive, V̇ negative, guaranteed, convergence, decay rates, equilibrium, API)
 
 ### Deployments
 
@@ -77,7 +79,7 @@
 
 ### Commits
 
-101 total (89 in this sprint session)
+103 total (91 in this sprint session)
 
 ### Next Up
 
