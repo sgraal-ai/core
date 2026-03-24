@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2432,3 +2432,91 @@ class TestValueOfInformation:
         warning = data["at_risk_warnings"][0]
         assert "voi_score" in warning
         assert warning["voi_score"] >= 0
+
+
+class TestDifferentialPrivacy:
+    def test_laplace_adds_noise(self):
+        """Noised value should differ from original."""
+        dp = LaplaceMechanism(epsilon=1.0)
+        noised, noise = dp.add_noise(50.0, sensitivity=10.0, seed="test_seed")
+        assert noise != 0
+        assert noised != 50.0
+
+    def test_laplace_deterministic(self):
+        """Same seed should produce same noise (A2 axiom)."""
+        dp = LaplaceMechanism(epsilon=1.0)
+        n1, _ = dp.add_noise(50.0, sensitivity=10.0, seed="same_seed")
+        n2, _ = dp.add_noise(50.0, sensitivity=10.0, seed="same_seed")
+        assert n1 == n2
+
+    def test_laplace_different_seeds(self):
+        """Different seeds should produce different noise."""
+        dp = LaplaceMechanism(epsilon=1.0)
+        n1, _ = dp.add_noise(50.0, sensitivity=10.0, seed="seed_a")
+        n2, _ = dp.add_noise(50.0, sensitivity=10.0, seed="seed_b")
+        assert n1 != n2
+
+    def test_smaller_epsilon_more_noise(self):
+        """Smaller ε should add more noise (stronger privacy)."""
+        dp_strong = LaplaceMechanism(epsilon=0.1)
+        dp_weak = LaplaceMechanism(epsilon=10.0)
+        # Expected noise scale = sensitivity / epsilon
+        check_strong = dp_strong.check_guarantee(5, "test")
+        check_weak = dp_weak.check_guarantee(5, "test")
+        assert check_strong.noise_added > check_weak.noise_added
+
+    def test_sensitivity_scales_with_entries(self):
+        """More entries = lower sensitivity (averaging effect)."""
+        dp = LaplaceMechanism(epsilon=1.0)
+        s1 = dp.compute_sensitivity(1)
+        s10 = dp.compute_sensitivity(10)
+        assert s1 > s10
+
+    def test_dp_guarantee_always_satisfied(self):
+        """Laplace mechanism always satisfies ε-DP by construction."""
+        dp = LaplaceMechanism(epsilon=1.0)
+        result = dp.check_guarantee(5, "test")
+        assert result.dp_satisfied is True
+        assert result.mechanism == "laplace"
+        assert result.epsilon == 1.0
+
+    def test_invalid_epsilon_raises(self):
+        with pytest.raises(ValueError):
+            LaplaceMechanism(epsilon=0)
+        with pytest.raises(ValueError):
+            LaplaceMechanism(epsilon=-1)
+
+    def test_privacy_guarantee_in_api_response(self):
+        """dp_epsilon in request should return privacy_guarantee."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "dp_epsilon": 1.0,
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "privacy_guarantee" in data
+        pg = data["privacy_guarantee"]
+        assert pg["epsilon"] == 1.0
+        assert pg["mechanism"] == "laplace"
+        assert pg["dp_satisfied"] is True
+
+    def test_no_privacy_guarantee_without_epsilon(self):
+        """Without dp_epsilon, no privacy_guarantee in response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "privacy_guarantee" not in resp.json()
+
+    def test_dp_omega_clamped(self):
+        """Noised omega should stay within 0-100."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "dp_epsilon": 0.01,  # very strong privacy = lots of noise
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        omega = resp.json()["omega_mem_final"]
+        assert 0 <= omega <= 100

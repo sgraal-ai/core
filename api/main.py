@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -127,6 +127,7 @@ class PreflightRequest(BaseModel):
     detail_level: Optional[str] = "obfuscated"  # "obfuscated" (default) or "full"
     thread_id: Optional[str] = None
     custom_weights: Optional[dict[str, float]] = None
+    dp_epsilon: Optional[float] = None  # enable ε-DP with Laplace noise (default: off, set to e.g. 1.0)
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -626,8 +627,22 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Layer 3: ZK commitment
     zk_commitment = ZKAssurance.commit(result.omega_mem_final, all_entry_ids)
 
+    # ε-Differential Privacy: add calibrated Laplace noise
+    omega_out = result.omega_mem_final
+    privacy_guarantee = None
+    if req.dp_epsilon is not None and req.dp_epsilon > 0:
+        dp = LaplaceMechanism(epsilon=req.dp_epsilon)
+        dp_check = dp.check_guarantee(len(entries), session_key)
+        noised, _ = dp.add_noise(result.omega_mem_final, dp_check.sensitivity, session_key)
+        omega_out = round(max(0, min(100, noised)), 1)
+        privacy_guarantee = {
+            "epsilon": dp_check.epsilon,
+            "mechanism": dp_check.mechanism,
+            "dp_satisfied": dp_check.dp_satisfied,
+        }
+
     response = {
-        "omega_mem_final": result.omega_mem_final,
+        "omega_mem_final": omega_out,
         "recommended_action": result.recommended_action,
         "assurance_score": result.assurance_score,
         "explainability_note": result.explainability_note,
@@ -658,6 +673,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["thread_id"] = req.thread_id
         response["bucket_id"] = thread_bucket_id
         response["sample_rate"] = thread_sample_rate
+    if privacy_guarantee:
+        response["privacy_guarantee"] = privacy_guarantee
     if optimizer_version:
         response["optimizer_version"] = optimizer_version
     if at_risk_warnings:

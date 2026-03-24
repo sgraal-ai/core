@@ -12,3 +12,4 @@ from .thread_manager import ThreadManager, ThreadBucket
 from .fallback_engine import FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, FallbackResult
 from .shapley_explain import compute_shapley_values
 from .lyapunov import compute_lyapunov, LyapunovResult
+from .differential_privacy import LaplaceMechanism, DPResult
