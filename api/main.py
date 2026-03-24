@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -293,6 +293,12 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
         except Exception:
             pass
 
+    lyap = compute_lyapunov(
+        healing_counter=prev + 1,
+        projected_improvement=projected,
+        action=req.action,
+    )
+
     return {
         "healed": True,
         "healing_counter": prev + 1,
@@ -300,6 +306,12 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
         "action_taken": req.action,
         "entry_id": req.entry_id,
         "timestamp": now.isoformat(),
+        "lyapunov_stability": {
+            "V": lyap.V,
+            "V_dot": lyap.V_dot,
+            "converging": lyap.converging,
+            "guaranteed": lyap.guaranteed,
+        },
     }
 
 

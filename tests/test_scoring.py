@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2285,3 +2285,62 @@ class TestShapleyValues:
         result = compute([])
         shapley = compute_shapley_values(result.component_breakdown)
         assert all(v == 0 for v in shapley.values())
+
+
+class TestLyapunovStability:
+    def test_V_positive_definite(self):
+        """V(x) must be > 0 for non-equilibrium state."""
+        lyap = compute_lyapunov(healing_counter=1, projected_improvement=8.0, action="REFETCH")
+        assert lyap.V > 0
+
+    def test_V_dot_negative(self):
+        """V̇(x) must be < 0 for convergence."""
+        lyap = compute_lyapunov(healing_counter=1, projected_improvement=8.0, action="REFETCH")
+        assert lyap.V_dot < 0
+
+    def test_guaranteed_stability(self):
+        """First heal should guarantee stability: V > 0 and V̇ < 0."""
+        lyap = compute_lyapunov(healing_counter=1, projected_improvement=8.0, action="REFETCH")
+        assert lyap.guaranteed is True
+        assert lyap.converging is True
+
+    def test_convergence_over_iterations(self):
+        """V should decrease with each heal iteration."""
+        values = []
+        for i in range(1, 6):
+            lyap = compute_lyapunov(healing_counter=i, projected_improvement=8.0, action="REFETCH")
+            values.append(lyap.V)
+        # Each V should be less than or equal to the previous
+        for j in range(1, len(values)):
+            assert values[j] <= values[j - 1]
+
+    def test_different_actions_different_decay(self):
+        """REFETCH should converge faster than REBUILD_WORKING_SET."""
+        lyap_refetch = compute_lyapunov(healing_counter=3, projected_improvement=8.0, action="REFETCH")
+        lyap_rebuild = compute_lyapunov(healing_counter=3, projected_improvement=3.5, action="REBUILD_WORKING_SET")
+        # REFETCH has higher decay, so V should be smaller (more converged)
+        assert lyap_refetch.V < lyap_rebuild.V
+
+    def test_equilibrium_after_many_heals(self):
+        """After many heals, V should approach 0 (equilibrium)."""
+        lyap = compute_lyapunov(healing_counter=20, projected_improvement=8.0, action="REFETCH")
+        assert lyap.V < 1.0  # near equilibrium
+
+    def test_lyapunov_in_heal_api_response(self):
+        """POST /v1/heal should include lyapunov_stability."""
+        resp = client.post("/v1/heal", json={
+            "entry_id": "lyap_test_001",
+            "action": "REFETCH",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "lyapunov_stability" in data
+        ls = data["lyapunov_stability"]
+        assert "V" in ls
+        assert "V_dot" in ls
+        assert "converging" in ls
+        assert "guaranteed" in ls
+        assert ls["V"] > 0
+        assert ls["V_dot"] < 0
+        assert ls["guaranteed"] is True
