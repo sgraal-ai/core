@@ -41,6 +41,7 @@
 | SH-01 | Sheaf Cohomology consistency checker — auto source_conflict | Done | 9 tests |
 | RL-01 | Causal Q-learning for outcome learning loop | Done | 11 tests |
 | BP-01 | Bayesian Online Change Point Detection (BOCPD) | Done | 8 tests |
+| RMT-01 | Random Matrix Theory signal/noise separation | Done | 9 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -61,7 +62,7 @@
 
 ### Test Summary
 
-- **307 tests passing** (pytest)
+- **316 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -101,6 +102,7 @@
 - Sheaf cohomology: 9 tests (zero, single, consistent, inconsistent, cycles, Jaccard fallback, backward compat, performance, API)
 - RL policy: 11 tests (cold start, rewards, Q-update, domain separation, episodes, override, discretization, API, outcome trigger)
 - BOCPD: 8 tests (stable, abrupt shift, merkle reset, run length, cold start, hazard sensitivity, API, no history)
+- RMT: 9 tests (single/empty null, identical, diverse, signal ratio, Jaccard fallback, performance, API 2+ entries, single entry no rmt)
 
 ### Deployments
 
@@ -112,7 +114,7 @@
 
 ### Commits
 
-136 total (124 in this sprint session)
+138 total (126 in this sprint session)
 
 ### Next Up
 
