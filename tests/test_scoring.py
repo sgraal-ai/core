@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3173,3 +3173,76 @@ class TestCopula:
         assert "joint_risk" in ca
         assert "tail_dependence" in ca
         assert 0 <= ca["joint_risk"] <= 100
+
+
+class TestMEWMA:
+    def test_in_control_healthy_scores(self):
+        """Scores near baseline (25) should be in control."""
+        breakdown = {"s_freshness": 25, "s_drift": 25, "s_provenance": 25,
+                     "s_relevance": 25, "r_belief": 25}
+        result = compute_mewma(breakdown)
+        assert result.T2_stat >= 0
+        assert result.out_of_control is False
+
+    def test_out_of_control_extreme_scores(self):
+        """Extreme scores far from baseline should trigger out_of_control."""
+        breakdown = {"s_freshness": 95, "s_drift": 90, "s_provenance": 85,
+                     "s_relevance": 80, "r_belief": 90}
+        result = compute_mewma(breakdown)
+        assert result.T2_stat > 12
+        assert result.out_of_control is True
+
+    def test_T2_non_negative(self):
+        """T² should always be non-negative."""
+        for f in [0, 25, 50, 75, 100]:
+            breakdown = {"s_freshness": f, "s_drift": f, "s_provenance": f,
+                         "s_relevance": f, "r_belief": f}
+            result = compute_mewma(breakdown)
+            assert result.T2_stat >= 0
+
+    def test_monitored_components_default(self):
+        """Default should monitor 5 key components."""
+        result = compute_mewma({"s_freshness": 10})
+        assert len(result.monitored_components) == 5
+        assert "s_freshness" in result.monitored_components
+        assert "r_belief" in result.monitored_components
+
+    def test_custom_components(self):
+        """Custom component list should be used."""
+        result = compute_mewma(
+            {"s_freshness": 50, "s_drift": 40},
+            components=["s_freshness", "s_drift"],
+        )
+        assert result.monitored_components == ["s_freshness", "s_drift"]
+
+    def test_with_history(self):
+        """EWMA with history should smooth values."""
+        history = [
+            {"s_freshness": 10, "s_drift": 10, "s_provenance": 10, "s_relevance": 0, "r_belief": 10},
+            {"s_freshness": 12, "s_drift": 11, "s_provenance": 10, "s_relevance": 0, "r_belief": 12},
+        ]
+        current = {"s_freshness": 15, "s_drift": 14, "s_provenance": 12, "s_relevance": 5, "r_belief": 15}
+        result = compute_mewma(current, history=history)
+        assert result.T2_stat >= 0
+        assert "s_freshness" in result.ewma_vector
+
+    def test_control_limit_default(self):
+        result = compute_mewma({"s_freshness": 50})
+        assert result.control_limit == 12.0
+
+    def test_mewma_in_api_response(self):
+        """Preflight response should include mewma."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "mewma" in data
+        m = data["mewma"]
+        assert "T2_stat" in m
+        assert "control_limit" in m
+        assert "out_of_control" in m
+        assert "monitored_components" in m
+        assert m["T2_stat"] >= 0
+        assert m["control_limit"] == 12.0
