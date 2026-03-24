@@ -21,3 +21,4 @@ from .hawkes_process import compute_hawkes_intensity, hawkes_from_entries, Hawke
 from .copula import compute_copula, CopulaResult
 from .mewma import compute_mewma, MEWMAResult
 from .sheaf_cohomology import compute_sheaf_consistency, ConsistencyResult
+from .rl_policy import get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, RLAdjustment

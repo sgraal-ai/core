@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -754,11 +754,27 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
         except Exception:
             pass
 
-    return {
+    # RL Q-table update
+    rl_reward = None
+    try:
+        rl_reward = update_from_outcome(
+            omega_mem_final=outcome.get("omega_mem_final", 0),
+            component_breakdown=outcome.get("component_breakdown", {}),
+            action=outcome.get("recommended_action", "USE_MEMORY"),
+            outcome_status=req.status,
+            domain=outcome.get("domain", "general"),
+        )
+    except Exception:
+        pass
+
+    resp = {
         "outcome_id": req.outcome_id,
         "status": req.status,
         "closed_at": now.isoformat(),
     }
+    if rl_reward is not None:
+        resp["rl_reward"] = rl_reward
+    return resp
 
 
 @app.post("/v1/preflight")
@@ -831,6 +847,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "created_at": datetime.now(timezone.utc).isoformat(),
         "closed_at": None,
         "component_attribution": [],
+        "omega_mem_final": result.omega_mem_final,
+        "component_breakdown": dict(result.component_breakdown),
+        "recommended_action": result.recommended_action,
+        "domain": req.domain,
     }
 
     # Increment Global State Vector
@@ -1101,6 +1121,18 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "inconsistent_pairs": [list(p) for p in sheaf_result.inconsistent_pairs],
             "auto_source_conflict": sheaf_result.auto_source_conflict,
         }
+
+    # RL Q-learning adjustment
+    try:
+        rl = get_rl_adjustment(omega_out, result.component_breakdown, result.recommended_action, req.domain)
+        response["rl_adjustment"] = {
+            "q_value": rl.q_value,
+            "rl_adjusted_action": rl.rl_adjusted_action,
+            "learning_episodes": rl.learning_episodes,
+            "confidence": rl.confidence,
+        }
+    except Exception:
+        pass  # graceful degradation
 
     if req.thread_id:
         response["thread_id"] = req.thread_id

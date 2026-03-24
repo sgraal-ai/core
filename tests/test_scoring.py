@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3351,3 +3351,108 @@ class TestSheafCohomology:
         assert "h1_rank" in ca
         assert "inconsistent_pairs" in ca
         assert "auto_source_conflict" in ca
+
+
+class TestRLPolicy:
+    def setup_method(self):
+        reset_q_table()
+
+    def test_cold_start_no_override(self):
+        """Before 10 episodes, rl_adjusted_action = recommended_action."""
+        rl = get_rl_adjustment(30.0, {"s_freshness": 30, "s_drift": 20, "s_provenance": 10}, "WARN", "general")
+        assert rl.rl_adjusted_action == "WARN"
+        assert rl.learning_episodes == 0
+        assert rl.confidence == 0.0
+
+    def test_reward_success(self):
+        assert compute_reward("success", "USE_MEMORY") == 1.0
+        assert compute_reward("success", "BLOCK") == 1.0
+
+    def test_reward_failure_use_memory_penalty(self):
+        """USE_MEMORY + failure = -2.0 (should have blocked)."""
+        assert compute_reward("failure", "USE_MEMORY") == -2.0
+
+    def test_reward_failure_other(self):
+        assert compute_reward("failure", "BLOCK") == -1.0
+
+    def test_q_table_update(self):
+        """Q-value should change after update."""
+        q = get_q_table()
+        before = q.get_q_values("general", "0:0:0:0")[0]
+        update_from_outcome(10, {"s_freshness": 10, "s_drift": 5, "s_provenance": 5}, "USE_MEMORY", "success", "general")
+        after = q.get_q_values("general", "0:0:0:0")[0]
+        assert after > before  # positive reward should increase Q
+
+    def test_domain_separation(self):
+        """Different domains should have independent Q-tables."""
+        update_from_outcome(80, {"s_freshness": 80, "s_drift": 60, "s_provenance": 40}, "BLOCK", "success", "fintech")
+        update_from_outcome(80, {"s_freshness": 80, "s_drift": 60, "s_provenance": 40}, "USE_MEMORY", "failure", "medical")
+
+        q = get_q_table()
+        fintech_q = q.get_q_values("fintech", "3:3:2:1")
+        medical_q = q.get_q_values("medical", "3:3:2:1")
+        # BLOCK should have positive Q in fintech, USE_MEMORY negative in medical
+        assert fintech_q[3] > 0  # BLOCK=3 was success
+        assert medical_q[0] < 0  # USE_MEMORY=0 was failure
+
+    def test_episodes_increment(self):
+        q = get_q_table()
+        assert q.get_episodes("general") == 0
+        update_from_outcome(10, {"s_freshness": 10}, "USE_MEMORY", "success", "general")
+        assert q.get_episodes("general") == 1
+        update_from_outcome(10, {"s_freshness": 10}, "WARN", "success", "general")
+        assert q.get_episodes("general") == 2
+
+    def test_after_threshold_can_override(self):
+        """After 10+ episodes, RL can suggest different action."""
+        # Train with 10+ successes for BLOCK in high-risk state
+        for _ in range(12):
+            update_from_outcome(80, {"s_freshness": 80, "s_drift": 70, "s_provenance": 50}, "BLOCK", "success", "general")
+
+        rl = get_rl_adjustment(80, {"s_freshness": 80, "s_drift": 70, "s_provenance": 50}, "WARN", "general")
+        assert rl.learning_episodes >= 10
+        assert rl.confidence > 0
+        assert rl.rl_adjusted_action == "BLOCK"  # RL learned BLOCK is better
+
+    def test_discretization_edge_cases(self):
+        """Boundary values should discretize correctly."""
+        from scoring_engine.rl_policy import _discretize
+        assert _discretize(0) == 0
+        assert _discretize(25) == 0
+        assert _discretize(25.1) == 1
+        assert _discretize(50) == 1
+        assert _discretize(75) == 2
+        assert _discretize(100) == 3
+
+    def test_rl_adjustment_in_api_response(self):
+        """Preflight response should include rl_adjustment."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "rl_adjustment" in data
+        rl = data["rl_adjustment"]
+        assert "q_value" in rl
+        assert "rl_adjusted_action" in rl
+        assert "learning_episodes" in rl
+        assert "confidence" in rl
+
+    def test_outcome_triggers_rl_update(self):
+        """Closing an outcome should return rl_reward."""
+        # Create preflight
+        preflight_resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        outcome_id = preflight_resp.json()["outcome_id"]
+
+        # Close with success
+        resp = client.post("/v1/outcome", json={
+            "outcome_id": outcome_id,
+            "status": "success",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "rl_reward" in resp.json()
+        assert resp.json()["rl_reward"] == 1.0
