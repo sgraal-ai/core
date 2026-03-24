@@ -1,5 +1,7 @@
 import sys
 import os
+import hmac as _hmac
+import hashlib
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -2703,3 +2705,84 @@ class TestMetrics:
         data = client.get("/metrics?accept=json").json()
         assert "USE_MEMORY" in data["decisions"]
         assert data["decisions"]["USE_MEMORY"] > 0
+
+
+class TestWebhooks:
+    def test_register_webhook(self):
+        resp = client.post("/v1/webhooks", json={
+            "url": "https://hooks.example.com/sgraal",
+            "events": ["BLOCK", "WARN"],
+            "secret": "test_secret_123",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["registered"] is True
+        assert "webhook_id" in data
+        assert data["events"] == ["BLOCK", "WARN"]
+        assert data["target"] == "generic"
+
+    def test_register_slack_webhook(self):
+        resp = client.post("/v1/webhooks", json={
+            "url": "https://hooks.slack.com/services/T00/B00/xxx",
+            "events": ["BLOCK"],
+            "secret": "slack_secret",
+            "target": "slack",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert resp.json()["target"] == "slack"
+
+    def test_register_pagerduty_webhook(self):
+        resp = client.post("/v1/webhooks", json={
+            "url": "https://events.pagerduty.com/v2/enqueue",
+            "events": ["BLOCK"],
+            "secret": "pd_secret",
+            "target": "pagerduty",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert resp.json()["target"] == "pagerduty"
+
+    def test_list_webhooks(self):
+        resp = client.get("/v1/webhooks", headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "webhooks" in data
+        assert "total" in data
+        assert data["total"] >= 1
+
+    def test_delete_webhook(self):
+        # Register
+        reg = client.post("/v1/webhooks", json={
+            "url": "https://delete-me.example.com",
+            "events": ["WARN"],
+            "secret": "del_secret",
+        }, headers=AUTH)
+        wid = reg.json()["webhook_id"]
+
+        # Delete
+        resp = client.delete(f"/v1/webhooks/{wid}", headers=AUTH)
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is True
+
+    def test_delete_nonexistent_webhook(self):
+        resp = client.delete("/v1/webhooks/nonexistent-id", headers=AUTH)
+        assert resp.status_code == 404
+
+    def test_webhook_requires_auth(self):
+        resp = client.post("/v1/webhooks", json={
+            "url": "https://example.com",
+            "events": ["BLOCK"],
+            "secret": "s",
+        })
+        assert resp.status_code in (401, 403)
+
+    def test_hmac_signature_correct(self):
+        """Verify HMAC signature computation."""
+        from api.main import _sign_payload
+        secret = "my_secret"
+        payload = '{"test": true}'
+        sig = _sign_payload(payload, secret)
+        expected = _hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        assert sig == expected

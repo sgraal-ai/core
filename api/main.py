@@ -6,6 +6,9 @@ from typing import Literal, Optional
 import sys, os
 import secrets
 import hashlib
+import hmac as _hmac
+import json as _json
+import threading
 import uuid
 from datetime import datetime, timezone
 import stripe
@@ -146,6 +149,12 @@ class BatchRequest(BaseModel):
     action_type: Literal["informational","reversible","irreversible","destructive"] = "reversible"
     domain: Literal["general","customer_support","coding","legal","fintech","medical"] = "general"
     custom_weights: Optional[dict[str, float]] = None
+
+class WebhookRegisterRequest(BaseModel):
+    url: str
+    events: list[Literal["BLOCK", "WARN", "ASK_USER"]]
+    secret: str
+    target: Optional[Literal["generic", "slack", "pagerduty"]] = "generic"
 
 class SignupRequest(BaseModel):
     email: str
@@ -449,6 +458,84 @@ class _Metrics:
 
 _metrics = _Metrics()
 
+# --- Webhook registry ---
+_webhooks: list[dict] = []
+
+
+def _sign_payload(payload: str, secret: str) -> str:
+    return _hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _format_slack(payload: dict) -> dict:
+    decision = payload["decision"]
+    emoji = ":red_circle:" if decision == "BLOCK" else ":warning:"
+    return {
+        "text": f"{emoji} Sgraal {decision}: Ω={payload['omega_score']} | request={payload['request_id']}",
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": (
+                f"*{decision}* — Ω_MEM = {payload['omega_score']}\n"
+                f"Request: `{payload['request_id']}`\n"
+                f"Time: {payload['timestamp']}"
+            )}},
+        ],
+    }
+
+
+def _format_pagerduty(payload: dict) -> dict:
+    return {
+        "routing_key": "",  # user provides in webhook URL
+        "event_action": "trigger",
+        "payload": {
+            "summary": f"Sgraal {payload['decision']}: Ω={payload['omega_score']}",
+            "severity": "critical" if payload["decision"] == "BLOCK" else "warning",
+            "source": "sgraal",
+            "custom_details": payload,
+        },
+    }
+
+
+def _dispatch_webhooks(decision: str, request_id: str, omega: float, entry_ids: list[str]):
+    """Fire webhooks matching the decision. Runs in background thread."""
+    now = datetime.now(timezone.utc).isoformat()
+    base_payload = {
+        "request_id": request_id,
+        "decision": decision,
+        "omega_score": omega,
+        "memory_ids": entry_ids,
+        "timestamp": now,
+    }
+
+    for hook in _webhooks:
+        if decision not in hook["events"]:
+            continue
+
+        target = hook.get("target", "generic")
+        if target == "slack":
+            body = _format_slack(base_payload)
+        elif target == "pagerduty":
+            body = _format_pagerduty(base_payload)
+        else:
+            body = base_payload
+
+        payload_str = _json.dumps(body, sort_keys=True)
+        signature = _sign_payload(payload_str, hook["secret"])
+
+        def _send(url=hook["url"], data=payload_str, sig=signature):
+            try:
+                http_requests.post(
+                    url,
+                    data=data,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Sgraal-Signature": sig,
+                    },
+                    timeout=5,
+                )
+            except Exception:
+                pass
+
+        threading.Thread(target=_send, daemon=True).start()
+
 
 def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str, omega: float, extra: dict = None):
     """Log audit event to Supabase."""
@@ -537,6 +624,45 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
             "guaranteed": lyap.guaranteed,
         },
     }
+
+
+@app.post("/v1/webhooks")
+def register_webhook(req: WebhookRegisterRequest, key_record: dict = Depends(verify_api_key)):
+    webhook = {
+        "id": str(uuid.uuid4()),
+        "url": req.url,
+        "events": req.events,
+        "secret": req.secret,
+        "target": req.target,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _webhooks.append(webhook)
+    return {
+        "webhook_id": webhook["id"],
+        "url": req.url,
+        "events": req.events,
+        "target": req.target,
+        "registered": True,
+    }
+
+@app.get("/v1/webhooks")
+def list_webhooks(key_record: dict = Depends(verify_api_key)):
+    return {
+        "webhooks": [
+            {"id": w["id"], "url": w["url"], "events": w["events"], "target": w["target"]}
+            for w in _webhooks
+        ],
+        "total": len(_webhooks),
+    }
+
+@app.delete("/v1/webhooks/{webhook_id}")
+def delete_webhook(webhook_id: str, key_record: dict = Depends(verify_api_key)):
+    global _webhooks
+    before = len(_webhooks)
+    _webhooks = [w for w in _webhooks if w["id"] != webhook_id]
+    if len(_webhooks) == before:
+        raise HTTPException(status_code=404, detail=f"Webhook {webhook_id} not found")
+    return {"deleted": True, "webhook_id": webhook_id}
 
 
 @app.post("/v1/preflight/batch")
@@ -919,6 +1045,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Audit log
     _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out)
+
+    # Webhook dispatch
+    entry_ids = [e.id for e in entries]
+    _dispatch_webhooks(result.recommended_action, request_id, omega_out, entry_ids)
 
     # Metrics + tracing
     _duration = _time.monotonic() - _t_start
