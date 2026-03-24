@@ -60,7 +60,12 @@ def _increment_gsv() -> int:
     return 0
 
 
-app = FastAPI(title="Sgraal API", version="0.1.0", servers=[{"url": "https://api.sgraal.com"}])
+app = FastAPI(
+    title="Sgraal API",
+    version="0.1.0",
+    servers=[{"url": "https://api.sgraal.com"}],
+    description="Memory governance protocol for AI agents. Quickstart: /docs/quickstart | Compliance: /v1/compliance/docs | Batch scoring: up to 100 entries per call, <10ms p95.",
+)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # In-memory API key store: api_key -> stripe_customer_id
@@ -308,6 +313,92 @@ def compliance_docs():
         },
         "usage": "Add compliance_profile field to POST /v1/preflight (e.g. 'EU_AI_ACT')",
         "docs_url": "https://sgraal.com/docs/compliance",
+    }
+
+@app.get("/docs/quickstart")
+def quickstart():
+    return {
+        "title": "Sgraal Quickstart Examples",
+        "perplexity_note": "Batch scoring: up to 100 entries per call, <10ms p95 — ideal for long context query chains.",
+        "examples": {
+            "python_batch_scoring": {
+                "title": "Fintech Batch Scoring (Python SDK)",
+                "install": "pip install sgraal",
+                "code": """from sgraal import SgraalClient
+
+client = SgraalClient(api_key="sg_live_...")
+
+result = client.preflight(
+    memory_state=[
+        {"id": "mem_001", "content": "User credit score updated to 720", "type": "tool_state", "timestamp_age_days": 2, "source_trust": 0.95, "source_conflict": 0.05, "downstream_count": 4},
+        {"id": "mem_002", "content": "User income verified at $85k", "type": "tool_state", "timestamp_age_days": 45, "source_trust": 0.8, "source_conflict": 0.2, "downstream_count": 3},
+        {"id": "mem_003", "content": "Previous loan default in 2019", "type": "episodic", "timestamp_age_days": 180, "source_trust": 0.99, "source_conflict": 0.0, "downstream_count": 6}
+    ],
+    action_type="irreversible",
+    domain="fintech"
+)
+print(result.recommended_action)  # USE_MEMORY / WARN / ASK_USER / BLOCK
+print(result.omega_mem_final)     # 0-100 risk score""",
+                "batch_variant": """# Batch scoring (up to 100 entries)
+import requests
+resp = requests.post("https://api.sgraal.com/v1/preflight/batch",
+    headers={"Authorization": "Bearer sg_live_..."},
+    json={
+        "entries": [
+            {"id": "mem_001", "content": "Credit score 720", "type": "tool_state", "timestamp_age_days": 2, "source_trust": 0.95, "source_conflict": 0.05, "downstream_count": 4},
+            {"id": "mem_002", "content": "Income $85k", "type": "tool_state", "timestamp_age_days": 45, "source_trust": 0.8, "source_conflict": 0.2, "downstream_count": 3},
+        ],
+        "action_type": "irreversible",
+        "domain": "fintech"
+    })
+print(resp.json()["batch_summary"])""",
+            },
+            "langchain_guard": {
+                "title": "LangChain / LangGraph Integration",
+                "install": "pip install langchain-sgraal",
+                "code": """from langchain_sgraal import SgraalMemoryGuard, sgraal_guard
+
+# Option 1: As a LangChain tool
+tool = SgraalMemoryGuard(api_key="sg_live_...")
+result = tool.invoke({
+    "memory_state": [{"id": "m1", "content": "User address", "type": "preference", "timestamp_age_days": 30}],
+    "action_type": "irreversible",
+    "domain": "fintech"
+})
+
+# Option 2: Guard decorator for LangGraph nodes
+@sgraal_guard(
+    memory_state=lambda state: state["memories"],
+    action_type="irreversible",
+    domain="fintech",
+    block_on="BLOCK"
+)
+def process_trade(state):
+    return execute_trade(state)""",
+            },
+            "claude_mcp": {
+                "title": "Claude Desktop (MCP Server)",
+                "install": "npm install @sgraal/mcp",
+                "config": """{
+  "mcpServers": {
+    "sgraal": {
+      "command": "npx",
+      "args": ["@sgraal/mcp"],
+      "env": { "SGRAAL_API_KEY": "sg_live_..." }
+    }
+  }
+}""",
+                "description": "Add to claude_desktop_config.json. Claude will have access to sgraal_preflight tool to check memory reliability before acting.",
+            },
+        },
+        "links": {
+            "docs": "https://sgraal.com/docs/compliance",
+            "signup": "https://api.sgraal.com/v1/signup",
+            "github": "https://github.com/sgraal-ai/core",
+            "pypi_sgraal": "https://pypi.org/project/sgraal/",
+            "pypi_langchain": "https://pypi.org/project/langchain-sgraal/",
+            "npm_mcp": "https://www.npmjs.com/package/@sgraal/mcp",
+        },
     }
 
 @app.get("/v1/verify")
