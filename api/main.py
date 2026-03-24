@@ -132,6 +132,7 @@ class PreflightRequest(BaseModel):
     custom_weights: Optional[dict[str, float]] = None
     dp_epsilon: Optional[float] = None  # enable ε-DP with Laplace noise (default: off, set to e.g. 1.0)
     thresholds: Optional[dict[str, float]] = None  # custom WARN/ASK_USER/BLOCK thresholds
+    use_pagerank: bool = False  # opt-in PageRank authority scoring
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -808,7 +809,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         action_context=e.action_context)
         for e in req.memory_state]
 
-    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, req.custom_weights, req.thresholds)
+    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, req.custom_weights, req.thresholds, req.use_pagerank)
 
     # Generate IDs for tracking
     request_id = str(uuid.uuid4())
@@ -1018,6 +1019,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "sampled": True,
         "weights_used": "custom" if req.custom_weights else "default",
         "request_id": request_id,
+        "use_pagerank": req.use_pagerank,
         "shapley_values": compute_shapley_values(
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
@@ -1026,6 +1028,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["thread_id"] = req.thread_id
         response["bucket_id"] = thread_bucket_id
         response["sample_rate"] = thread_sample_rate
+    if req.use_pagerank:
+        from scoring_engine import compute_authority_scores
+        auth_scores = compute_authority_scores([e.id for e in entries])
+        response["authority_scores"] = auth_scores
     if privacy_guarantee:
         response["privacy_guarantee"] = privacy_guarantee
     if optimizer_version:

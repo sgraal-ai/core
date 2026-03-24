@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2786,3 +2786,69 @@ class TestWebhooks:
         sig = _sign_payload(payload, secret)
         expected = _hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
         assert sig == expected
+
+
+class TestPageRankAuthority:
+    def test_pagerank_basic(self):
+        """PageRank should produce valid scores summing to ~1.0."""
+        adj = {"A": ["B", "C"], "B": ["C"], "C": ["A"]}
+        pr = compute_pagerank(adj)
+        assert len(pr) == 3
+        assert abs(sum(pr.values()) - 1.0) < 0.01
+
+    def test_authority_scores_range(self):
+        """Authority scores should be 0–10."""
+        scores = compute_authority_scores(["m1", "m2", "m3"])
+        assert all(0 <= s <= 10 for s in scores.values())
+
+    def test_authority_scores_empty(self):
+        assert compute_authority_scores([]) == {}
+
+    def test_pagerank_opt_in_adds_component(self):
+        """use_pagerank=True should add r_importance to component_breakdown."""
+        entries = [
+            MemoryEntry(id="pr_1", content="A", type="tool_state",
+                        timestamp_age_days=30, source_trust=0.8,
+                        source_conflict=0.2, downstream_count=3),
+            MemoryEntry(id="pr_2", content="B", type="semantic",
+                        timestamp_age_days=10, source_trust=0.9,
+                        source_conflict=0.1, downstream_count=1),
+        ]
+        result = compute(entries, use_pagerank=True)
+        assert "r_importance" in result.component_breakdown
+
+    def test_pagerank_opt_out_no_component(self):
+        """Without use_pagerank, r_importance should not be in breakdown."""
+        entries = [
+            MemoryEntry(id="pr_3", content="A", type="semantic",
+                        timestamp_age_days=5, source_trust=0.9,
+                        source_conflict=0.1, downstream_count=1),
+        ]
+        result = compute(entries, use_pagerank=False)
+        assert "r_importance" not in result.component_breakdown
+
+    def test_pagerank_in_api_response(self):
+        """use_pagerank=true should include authority_scores and r_importance."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="api_pr_1", type="tool_state", timestamp_age_days=20),
+                _fresh_entry(id="api_pr_2"),
+            ],
+            "use_pagerank": True,
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["use_pagerank"] is True
+        assert "authority_scores" in data
+        assert "api_pr_1" in data["authority_scores"]
+        assert "r_importance" in data["component_breakdown"]
+
+    def test_no_authority_scores_without_flag(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "authority_scores" not in resp.json()
+        assert resp.json()["use_pagerank"] is False

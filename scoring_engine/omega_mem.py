@@ -62,6 +62,7 @@ WEIGHTS = {
     "s_recovery":    -0.10,
     "r_belief":       0.05,
     "s_relevance":    0.06,
+    "r_importance":   0.04,  # PageRank authority (opt-in via use_pagerank)
 }
 
 # Weibull decay parameters per memory type (lambda, k=1 for exponential)
@@ -173,6 +174,7 @@ def compute(
     current_goal_embedding: Optional[list[float]] = None,
     custom_weights: Optional[dict[str, float]] = None,
     thresholds: Optional[dict[str, float]] = None,
+    use_pagerank: bool = False,
 ) -> PreflightResult:
 
     if not entries:
@@ -207,6 +209,19 @@ def compute(
         if drift_penalties:
             s_relevance = min(100, sum(drift_penalties) / len(drift_penalties))
 
+    # R_importance: PageRank authority (opt-in)
+    r_importance = 0.0
+    if use_pagerank and len(entries) >= 2:
+        from .pagerank import compute_authority_scores
+        entry_ids = [e.id for e in entries]
+        auth_scores = compute_authority_scores(entry_ids)
+        # High authority entries are more critical — invert to risk
+        # (high authority + stale = high risk)
+        avg_auth = sum(auth_scores.get(e.id, 0) for e in entries) / len(entries)
+        # Scale: authority 0-10 maps to risk contribution 0-100
+        # Weight by freshness to amplify risk for stale high-authority entries
+        r_importance = min(100, avg_auth * s_freshness / 10.0)
+
     components = {
         "s_freshness":    s_freshness,
         "s_drift":        s_drift,
@@ -219,6 +234,8 @@ def compute(
         "r_belief":       r_belief_score,
         "s_relevance":    s_relevance,
     }
+    if use_pagerank:
+        components["r_importance"] = r_importance
 
     weights = custom_weights if custom_weights else WEIGHTS
     omega = sum(weights.get(k, WEIGHTS.get(k, 0)) * v for k, v in components.items())
