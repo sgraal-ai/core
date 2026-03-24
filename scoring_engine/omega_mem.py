@@ -172,6 +172,7 @@ def compute(
     domain: str = "general",
     current_goal_embedding: Optional[list[float]] = None,
     custom_weights: Optional[dict[str, float]] = None,
+    thresholds: Optional[dict[str, float]] = None,
 ) -> PreflightResult:
 
     if not entries:
@@ -226,12 +227,16 @@ def compute(
     c = C_ACTION.get(action_type, 1.0) * C_DOMAIN.get(domain, 1.0)
     omega_final = min(100, omega * c)
 
-    # Decision
-    if omega_final < 25:
+    # Decision (configurable thresholds)
+    t_warn = thresholds.get("warn", 25) if thresholds else 25
+    t_ask = thresholds.get("ask_user", 45) if thresholds else 45
+    t_block = thresholds.get("block", 70) if thresholds else 70
+
+    if omega_final < t_warn:
         action = "USE_MEMORY"
-    elif omega_final < 45:
+    elif omega_final < t_ask:
         action = "WARN"
-    elif omega_final < 70:
+    elif omega_final < t_block:
         action = "ASK_USER"
     else:
         action = "BLOCK"

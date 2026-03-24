@@ -128,6 +128,7 @@ class PreflightRequest(BaseModel):
     thread_id: Optional[str] = None
     custom_weights: Optional[dict[str, float]] = None
     dp_epsilon: Optional[float] = None  # enable ε-DP with Laplace noise (default: off, set to e.g. 1.0)
+    thresholds: Optional[dict[str, float]] = None  # custom WARN/ASK_USER/BLOCK thresholds
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -251,6 +252,26 @@ def signup(req: SignupRequest):
     }
 
 
+def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str, omega: float, extra: dict = None):
+    """Log audit event to Supabase."""
+    if not supabase_client:
+        return
+    try:
+        record = {
+            "event_type": event_type,
+            "request_id": request_id,
+            "api_key_id": key_record.get("key_hash", "in_memory"),
+            "decision": decision,
+            "omega_mem_final": omega,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if extra:
+            record.update(extra)
+        supabase_client.table("audit_log").insert(record).execute()
+    except Exception:
+        pass
+
+
 # In-memory healing counter store (per entry_id)
 _healing_counters: dict[str, int] = {}
 
@@ -299,6 +320,9 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
         projected_improvement=projected,
         action=req.action,
     )
+
+    heal_request_id = str(uuid.uuid4())
+    _audit_log("heal", heal_request_id, key_record, req.action, 0, {"entry_id": req.entry_id})
 
     return {
         "healed": True,
@@ -457,9 +481,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         action_context=e.action_context)
         for e in req.memory_state]
 
-    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, req.custom_weights)
+    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, req.custom_weights, req.thresholds)
 
-    # Generate outcome_id for tracking
+    # Generate IDs for tracking
+    request_id = str(uuid.uuid4())
     outcome_id = str(uuid.uuid4())
     _outcomes[outcome_id] = {
         "status": "open",
@@ -665,6 +690,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "zk_commitment": zk_commitment,
         "sampled": True,
         "weights_used": "custom" if req.custom_weights else "default",
+        "request_id": request_id,
         "shapley_values": compute_shapley_values(
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
@@ -689,5 +715,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if surgical_result:
         response["surgical_result"] = surgical_result
         response["auto_tracked"] = auto_tracked
+
+    # Audit log
+    _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out)
 
     return response

@@ -2520,3 +2520,72 @@ class TestDifferentialPrivacy:
         assert resp.status_code == 200
         omega = resp.json()["omega_mem_final"]
         assert 0 <= omega <= 100
+
+
+class TestCustomThresholds:
+    def test_custom_thresholds_change_decision(self):
+        """Custom thresholds should change USE_MEMORY to WARN."""
+        entries = [MemoryEntry(
+            id="ct_1", content="Test", type="semantic",
+            timestamp_age_days=10, source_trust=0.9,
+            source_conflict=0.1, downstream_count=2,
+        )]
+        # Default thresholds: score ~0 → USE_MEMORY
+        default = compute(entries)
+        assert default.recommended_action == "USE_MEMORY"
+
+        # Very strict thresholds: warn at 0 → everything is WARN or higher
+        strict = compute(entries, thresholds={"warn": 0, "ask_user": 5, "block": 10})
+        assert strict.recommended_action != "USE_MEMORY"
+
+    def test_relaxed_thresholds_allow_more(self):
+        """Relaxed thresholds should keep USE_MEMORY for higher scores."""
+        entries = [MemoryEntry(
+            id="ct_2", content="Moderate risk", type="tool_state",
+            timestamp_age_days=20, source_trust=0.7,
+            source_conflict=0.3, downstream_count=3,
+        )]
+        result = compute(entries, action_type="reversible", domain="general",
+                         thresholds={"warn": 80, "ask_user": 90, "block": 95})
+        assert result.recommended_action == "USE_MEMORY"
+
+    def test_custom_thresholds_via_api(self):
+        """API should accept and apply custom thresholds."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(type="tool_state", timestamp_age_days=20)],
+            "thresholds": {"warn": 0, "ask_user": 1, "block": 2},
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        # With thresholds this strict, even moderate scores trigger higher actions
+        assert data["recommended_action"] in ("WARN", "ASK_USER", "BLOCK")
+
+    def test_default_thresholds_without_field(self):
+        """Without thresholds field, default behavior unchanged."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert resp.json()["recommended_action"] == "USE_MEMORY"
+
+
+class TestAuditLog:
+    def test_request_id_in_preflight_response(self):
+        """Preflight response should include request_id."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "request_id" in data
+        assert len(data["request_id"]) == 36  # UUID format
+
+    def test_request_id_unique_per_call(self):
+        """Each preflight call should get a unique request_id."""
+        r1 = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        r2 = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+
+        assert r1.json()["request_id"] != r2.json()["request_id"]
