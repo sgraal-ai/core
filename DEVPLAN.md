@@ -29,6 +29,7 @@
 | T-30 | ε-Differential Privacy with Laplace mechanism | Done | 10 tests |
 | T-31 | Custom thresholds + audit logging + request_id | Done | 6 tests |
 | T-32 | GDPR/DPA, SLA tiers, and compliance docs endpoints | Done | 5 tests |
+| T-33 | Prometheus metrics export + OpenTelemetry tracing | Done | 6 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -49,7 +50,7 @@
 
 ### Test Summary
 
-- **209 tests passing** (pytest)
+- **215 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -77,6 +78,7 @@
 - Custom thresholds: 4 tests (strict, relaxed, API, default)
 - Audit log: 2 tests (request_id present, unique per call)
 - Compliance endpoints: 5 tests (GDPR fields, SLA tiers, docs profiles, sub-processors, credit policy)
+- Metrics/tracing: 6 tests (Prometheus format, JSON format, preflight increment, heal increment, trace attributes, decision distribution)
 
 ### Deployments
 
@@ -88,7 +90,7 @@
 
 ### Commits
 
-111 total (99 in this sprint session)
+113 total (101 in this sprint session)
 
 ### Next Up
 
