@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -133,6 +133,7 @@ class PreflightRequest(BaseModel):
     dp_epsilon: Optional[float] = None  # enable ε-DP with Laplace noise (default: off, set to e.g. 1.0)
     thresholds: Optional[dict[str, float]] = None  # custom WARN/ASK_USER/BLOCK thresholds
     use_pagerank: bool = False  # opt-in PageRank authority scoring
+    score_history: Optional[list[float]] = None  # recent omega scores for CUSUM/EWMA trend detection
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -1034,6 +1035,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "jsd": drift.jsd,
         "drift_method": drift.drift_method,
     }
+
+    # CUSUM + EWMA trend detection
+    if req.score_history and len(req.score_history) >= 2:
+        trend = detect_trend(req.score_history)
+        response["trend_detection"] = {
+            "cusum_alert": trend.cusum_alert,
+            "ewma_alert": trend.ewma_alert,
+            "drift_sustained": trend.drift_sustained,
+            "consecutive_degradations": trend.consecutive_degradations,
+        }
 
     if req.thread_id:
         response["thread_id"] = req.thread_id

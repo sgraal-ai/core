@@ -15,3 +15,4 @@ from .lyapunov import compute_lyapunov, LyapunovResult
 from .differential_privacy import LaplaceMechanism, DPResult
 from .pagerank import compute_pagerank, compute_authority_scores
 from .drift_detector import compute_drift_metrics, DriftMetrics
+from .trend_detection import detect_trend, TrendResult, CUSUMDetector, EWMADetector

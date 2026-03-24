@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2903,3 +2903,79 @@ class TestDriftDetector:
         assert "wasserstein" in dd
         assert "jsd" in dd
         assert dd["drift_method"] == "ensemble"
+
+
+class TestTrendDetection:
+    def test_cusum_detects_upward_shift(self):
+        """CUSUM should alert on sustained upward shift."""
+        # Stable then sudden jump
+        history = [10, 10, 10, 10, 10, 50, 55, 60, 65, 70]
+        cusum = CUSUMDetector(k=0.5, h=5.0)
+        alert, s_pos, s_neg = cusum.detect(history)
+        assert alert is True
+        assert s_pos > 5.0
+
+    def test_cusum_no_alert_stable(self):
+        """CUSUM should not alert on stable series."""
+        history = [20, 20, 20, 20, 20, 20, 20, 20]
+        cusum = CUSUMDetector(k=0.5, h=5.0)
+        alert, _, _ = cusum.detect(history)
+        assert alert is False
+
+    def test_ewma_detects_drift(self):
+        """EWMA should alert when values deviate >3σ."""
+        history = [10, 10, 10, 10, 10, 80, 85, 90, 95]
+        ewma = EWMADetector(lam=0.2, L=3.0)
+        alert, _ = ewma.detect(history)
+        assert alert is True
+
+    def test_ewma_no_alert_stable(self):
+        """EWMA should not alert on stable series."""
+        history = [25, 25, 25, 25, 25, 25]
+        ewma = EWMADetector(lam=0.2, L=3.0)
+        alert, _ = ewma.detect(history)
+        assert alert is False
+
+    def test_drift_sustained_requires_both(self):
+        """drift_sustained requires 4+ consecutive degradations AND both alerts."""
+        history = [10, 10, 10, 10, 50, 60, 70, 80, 90]
+        trend = detect_trend(history)
+        assert trend.consecutive_degradations >= 4
+        assert trend.cusum_alert is True
+        assert trend.drift_sustained is True
+
+    def test_no_sustained_for_stable(self):
+        history = [25, 25, 25, 25, 25]
+        trend = detect_trend(history)
+        assert trend.drift_sustained is False
+        assert trend.consecutive_degradations == 0
+
+    def test_consecutive_degradation_count(self):
+        history = [10, 20, 30, 40, 35, 45, 55]
+        trend = detect_trend(history)
+        assert trend.consecutive_degradations == 3  # 10→20→30→40
+
+    def test_trend_detection_in_api_response(self):
+        """Preflight with score_history should include trend_detection."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [10, 20, 30, 40, 50, 60, 70, 80],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "trend_detection" in data
+        td = data["trend_detection"]
+        assert "cusum_alert" in td
+        assert "ewma_alert" in td
+        assert "drift_sustained" in td
+        assert "consecutive_degradations" in td
+
+    def test_no_trend_without_history(self):
+        """Without score_history, no trend_detection in response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "trend_detection" not in resp.json()
