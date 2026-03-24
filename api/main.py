@@ -12,7 +12,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -521,12 +521,13 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         except Exception as e:
             pass
 
-    # Importance detection — find at-risk entries
-    importance_results = [compute_importance(e) for e in entries]
+    # Importance detection with VoI — find at-risk entries sorted by ROI
+    importance_results = compute_importance_with_voi(entries, req.action_type, req.domain)
     at_risk_warnings = [
         {
             "entry_id": ir.entry_id,
             "importance_score": ir.importance_score,
+            "voi_score": ir.voi_score,
             "warning": ir.warning,
             "signal_breakdown": ir.signal_breakdown,
         }

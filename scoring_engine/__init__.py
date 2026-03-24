@@ -1,5 +1,5 @@
 from .omega_mem import compute, MemoryEntry, PreflightResult, HealingAction, HealingPolicy, load_healing_policies
-from .importance_detector import compute_importance, ImportanceResult
+from .importance_detector import compute_importance, compute_importance_with_voi, ImportanceResult
 from .client_optimizer import ClientOptimizer, ClientOptimizerResult
 from .compliance_engine import ComplianceEngine, ComplianceProfile, ComplianceResult
 from .healing_policy_matrix import HealingPolicyMatrix, PolicyMatrixEntry

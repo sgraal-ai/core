@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2344,3 +2344,91 @@ class TestLyapunovStability:
         assert ls["V"] > 0
         assert ls["V_dot"] < 0
         assert ls["guaranteed"] is True
+
+
+class TestValueOfInformation:
+    def test_voi_positive_for_stale_entry(self):
+        """Stale entry should have positive VoI (healing it improves omega)."""
+        entries = [
+            MemoryEntry(id="voi_stale", content="Stale data", type="tool_state",
+                        timestamp_age_days=30, source_trust=0.5, source_conflict=0.6,
+                        downstream_count=5, r_belief=0.4),
+            MemoryEntry(id="voi_fresh", content="Fresh data", type="semantic",
+                        timestamp_age_days=1, source_trust=0.95, source_conflict=0.05,
+                        downstream_count=1),
+        ]
+        results = compute_importance_with_voi(entries, "irreversible", "fintech")
+        stale = next(r for r in results if r.entry_id == "voi_stale")
+        assert stale.voi_score > 0
+
+    def test_voi_zero_for_fresh_entry(self):
+        """Fresh trusted entry should have ~0 VoI (nothing to improve)."""
+        entries = [
+            MemoryEntry(id="voi_f1", content="Fresh", type="semantic",
+                        timestamp_age_days=0, source_trust=1.0, source_conflict=0.0,
+                        downstream_count=1, r_belief=1.0),
+        ]
+        results = compute_importance_with_voi(entries)
+        assert results[0].voi_score == 0
+
+    def test_voi_sorted_descending(self):
+        """Results should be sorted by VoI descending (highest ROI first)."""
+        entries = [
+            MemoryEntry(id="voi_low", content="Slightly stale", type="semantic",
+                        timestamp_age_days=10, source_trust=0.8, source_conflict=0.2,
+                        downstream_count=2),
+            MemoryEntry(id="voi_high", content="Very stale", type="tool_state",
+                        timestamp_age_days=60, source_trust=0.4, source_conflict=0.7,
+                        downstream_count=8, r_belief=0.2),
+        ]
+        results = compute_importance_with_voi(entries, "irreversible", "fintech")
+        assert results[0].voi_score >= results[1].voi_score
+        assert results[0].entry_id == "voi_high"
+
+    def test_voi_higher_for_more_impactful_entry(self):
+        """Entry with worse metrics should have higher VoI."""
+        entries = [
+            MemoryEntry(id="voi_bad", content="Bad", type="tool_state",
+                        timestamp_age_days=90, source_trust=0.3, source_conflict=0.8,
+                        downstream_count=10, r_belief=0.1),
+            MemoryEntry(id="voi_ok", content="OK", type="semantic",
+                        timestamp_age_days=5, source_trust=0.9, source_conflict=0.1,
+                        downstream_count=1),
+        ]
+        results = compute_importance_with_voi(entries, "irreversible", "fintech")
+        bad = next(r for r in results if r.entry_id == "voi_bad")
+        ok = next(r for r in results if r.entry_id == "voi_ok")
+        assert bad.voi_score > ok.voi_score
+
+    def test_voi_empty_entries(self):
+        """Empty entries list returns empty results."""
+        results = compute_importance_with_voi([])
+        assert results == []
+
+    def test_voi_in_api_at_risk_warnings(self):
+        """API at_risk_warnings should include voi_score."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [{
+                "id": "voi_api_test",
+                "content": "Budapest office: Váci út 47, open 9-18",
+                "type": "tool_state",
+                "timestamp_age_days": 94,
+                "source_trust": 0.9,
+                "source_conflict": 0.1,
+                "downstream_count": 4,
+                "source": "user_stated",
+                "has_backup_source": False,
+                "action_context": "irreversible",
+                "reference_count": 6,
+            }],
+            "action_type": "irreversible",
+            "domain": "fintech",
+            "detail_level": "full",
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "at_risk_warnings" in data
+        warning = data["at_risk_warnings"][0]
+        assert "voi_score" in warning
+        assert warning["voi_score"] >= 0

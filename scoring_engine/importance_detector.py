@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Optional
 
-from .omega_mem import MemoryEntry
+from .omega_mem import MemoryEntry, compute as _compute
 
 
 @dataclass
@@ -13,6 +14,7 @@ class ImportanceResult:
     at_risk: bool
     warning: Optional[str]
     signal_breakdown: dict
+    voi_score: float = 0.0  # Value of Information: expected Ω_MEM improvement if healed
 
 
 # Freshness thresholds per memory type (days).
@@ -117,4 +119,56 @@ def compute_importance(entry: MemoryEntry) -> ImportanceResult:
         at_risk=at_risk,
         warning=warning,
         signal_breakdown=signals,
+        voi_score=0.0,  # computed by compute_importance_with_voi when full context available
     )
+
+
+def compute_importance_with_voi(
+    entries: list[MemoryEntry],
+    action_type: str = "reversible",
+    domain: str = "general",
+) -> list[ImportanceResult]:
+    """Compute importance + Value of Information for all entries.
+
+    VoI = E[U(act|healed)] - E[U(act)] = omega_current - omega_with_entry_healed
+
+    Higher VoI means healing this entry gives the biggest Ω_MEM improvement.
+    Results sorted by VoI descending (highest ROI first).
+    """
+    if not entries:
+        return []
+
+    # Current Ω_MEM with all entries as-is
+    current = _compute(entries, action_type, domain)
+    omega_current = current.omega_mem_final
+
+    results: list[ImportanceResult] = []
+    for i, entry in enumerate(entries):
+        base = compute_importance(entry)
+
+        # Compute VoI: score with this entry "healed" (fresh, trusted, no conflict)
+        healed_entry = copy.copy(entry)
+        healed_entry.timestamp_age_days = 0
+        healed_entry.source_trust = 1.0
+        healed_entry.source_conflict = 0.0
+        healed_entry.r_belief = 1.0
+
+        healed_entries = list(entries)
+        healed_entries[i] = healed_entry
+        healed_result = _compute(healed_entries, action_type, domain)
+        omega_healed = healed_result.omega_mem_final
+
+        voi = round(max(0, omega_current - omega_healed), 2)
+
+        results.append(ImportanceResult(
+            entry_id=base.entry_id,
+            importance_score=base.importance_score,
+            at_risk=base.at_risk,
+            warning=base.warning,
+            signal_breakdown=base.signal_breakdown,
+            voi_score=voi,
+        ))
+
+    # Sort by VoI descending (highest ROI first)
+    results.sort(key=lambda r: -r.voi_score)
+    return results
