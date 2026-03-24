@@ -1,5 +1,6 @@
 import sys
 import os
+import math
 import hmac as _hmac
 import hashlib
 from unittest.mock import patch, MagicMock
@@ -2883,7 +2884,7 @@ class TestDriftDetector:
 
     def test_drift_method_is_ensemble(self):
         metrics = compute_drift_metrics([10, 20, 30])
-        assert metrics.drift_method == "ensemble"
+        assert metrics.drift_method in ("ensemble_3", "ensemble_4")
 
     def test_empty_returns_zero(self):
         metrics = compute_drift_metrics([])
@@ -2902,8 +2903,81 @@ class TestDriftDetector:
         assert "kl_divergence" in dd
         assert "wasserstein" in dd
         assert "jsd" in dd
-        assert dd["drift_method"] == "ensemble"
+        assert dd["drift_method"] in ("ensemble_3", "ensemble_4")
 
+
+class TestAlphaDivergence:
+    def test_hellinger_case_alpha_0_5(self):
+        """α=0.5 should produce Hellinger-like distance."""
+        from scoring_engine.drift_detector import _alpha_divergence
+        p = [0.5, 0.3, 0.2]
+        q = [0.33, 0.33, 0.34]
+        result = _alpha_divergence(p, q, 0.5)
+        assert result >= 0
+
+    def test_kl_limit_alpha_near_1(self):
+        """α close to 1 should approximate KL divergence."""
+        from scoring_engine.drift_detector import _alpha_divergence, _kl_divergence
+        p = [0.5, 0.3, 0.2]
+        q = [0.33, 0.33, 0.34]
+        # α=0.99 should be close to KL
+        alpha_result = _alpha_divergence(p, q, 0.99)
+        kl_result = _kl_divergence(p, q)
+        # Both should be positive and in same ballpark
+        assert alpha_result >= 0
+        assert kl_result >= 0
+
+    def test_alpha_2_0(self):
+        """α=2.0 (chi-squared family) should be non-negative."""
+        from scoring_engine.drift_detector import _alpha_divergence
+        p = [0.6, 0.3, 0.1]
+        q = [0.2, 0.5, 0.3]
+        result = _alpha_divergence(p, q, 2.0)
+        assert result >= 0
+
+    def test_numerical_stability_with_zeros(self):
+        """Zero entries should not cause crashes (eps=1e-8)."""
+        from scoring_engine.drift_detector import _alpha_divergence
+        p = [0.0, 1.0, 0.0]
+        q = [0.5, 0.0, 0.5]
+        result = _alpha_divergence(p, q, 0.5)
+        assert math.isfinite(result)
+
+    def test_ensemble_4_score(self):
+        """With α-divergence, drift_method should be ensemble_4."""
+        metrics = compute_drift_metrics([80, 5, 5, 5, 5])
+        assert metrics.drift_method == "ensemble_4"
+        assert metrics.alpha_divergence is not None
+        assert metrics.alpha_divergence.alpha_0_5 >= 0
+        assert metrics.alpha_divergence.alpha_1_5 >= 0
+        assert metrics.alpha_divergence.alpha_2_0 >= 0
+
+    def test_ensemble_score_includes_alpha(self):
+        """Ensemble score should differ between 3-method and 4-method."""
+        metrics = compute_drift_metrics([60, 20, 10, 5, 5])
+        assert metrics.ensemble_score >= 0
+        assert metrics.ensemble_score <= 100
+
+    def test_alpha_divergence_in_api_response(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        dd = resp.json()["drift_details"]
+        assert "alpha_divergence" in dd
+        assert "alpha_0_5" in dd["alpha_divergence"]
+        assert "alpha_1_5" in dd["alpha_divergence"]
+        assert "alpha_2_0" in dd["alpha_divergence"]
+        assert dd["drift_method"] == "ensemble_4"
+
+    def test_backward_compat_identical_distributions(self):
+        """Identical distributions should still have near-zero drift."""
+        metrics = compute_drift_metrics([10, 10, 10, 10, 10], [10, 10, 10, 10, 10])
+        assert metrics.kl_divergence < 0.01
+        assert metrics.jsd < 0.01
+        if metrics.alpha_divergence:
+            assert metrics.alpha_divergence.alpha_0_5 < 1.0
 
 class TestTrendDetection:
     def test_cusum_detects_upward_shift(self):

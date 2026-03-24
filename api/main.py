@@ -1058,12 +1058,20 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Drift details — ensemble of KL, Wasserstein, JSD
     component_scores = list(result.component_breakdown.values())
     drift = compute_drift_metrics(component_scores)
-    response["drift_details"] = {
+    dd = {
         "kl_divergence": drift.kl_divergence,
         "wasserstein": drift.wasserstein,
         "jsd": drift.jsd,
         "drift_method": drift.drift_method,
+        "ensemble_score": drift.ensemble_score,
     }
+    if drift.alpha_divergence:
+        dd["alpha_divergence"] = {
+            "alpha_0_5": drift.alpha_divergence.alpha_0_5,
+            "alpha_1_5": drift.alpha_divergence.alpha_1_5,
+            "alpha_2_0": drift.alpha_divergence.alpha_2_0,
+        }
+    response["drift_details"] = dd
 
     # CUSUM + EWMA trend detection + BOCPD
     if req.score_history and len(req.score_history) >= 2:
