@@ -26,6 +26,7 @@
 | T-27 | Shapley value explainability for Ω_MEM scoring | Done | 8 tests |
 | T-28 | Lyapunov stability guarantee for heal loop | Done | 7 tests |
 | T-29 | Value of Information (VoI) scoring in importance detector | Done | 6 tests |
+| T-30 | ε-Differential Privacy with Laplace mechanism | Done | 10 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -46,7 +47,7 @@
 
 ### Test Summary
 
-- **188 tests passing** (pytest)
+- **198 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -70,6 +71,7 @@
 - Shapley values: 8 tests (sum to omega, all components, dominance, negative recovery, API, batch, custom weights, empty)
 - Lyapunov stability: 7 tests (V positive, V̇ negative, guaranteed, convergence, decay rates, equilibrium, API)
 - Value of Information: 6 tests (positive for stale, zero for fresh, sorted descending, impact correlation, empty, API)
+- Differential privacy: 10 tests (noise, determinism, seeds, epsilon scaling, sensitivity, guarantee, API, clamping)
 
 ### Deployments
 
@@ -81,7 +83,7 @@
 
 ### Commits
 
-105 total (93 in this sprint session)
+107 total (95 in this sprint session)
 
 ### Next Up
 
