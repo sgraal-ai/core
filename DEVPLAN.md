@@ -35,6 +35,7 @@
 | T-36 | Jensen-Shannon divergence ensemble drift detection | Done | 7 tests |
 | T-37 | CUSUM + EWMA drift trend detection | Done | 9 tests |
 | ML-03–06 | Calibration: Brier, log loss, softmax temperature, logistic meta-layer | Done | 10 tests |
+| T-38 | Hawkes self-exciting process for temporal burst detection | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -55,7 +56,7 @@
 
 ### Test Summary
 
-- **256 tests passing** (pytest)
+- **264 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -89,6 +90,7 @@
 - Drift detector: 7 tests (identical zero, different positive, JSD bounded, ensemble range, method, empty, API)
 - Trend detection: 9 tests (CUSUM upward/stable, EWMA drift/stable, sustained, count, API with/without history)
 - Calibration: 10 tests (Brier perfect/overconfident, log loss correct/wrong, softmax sum/keys, meta range/safe, API, empty)
+- Hawkes process: 8 tests (baseline, excitation, burst, decay, from_entries, old entries, API, burst via API)
 
 ### Deployments
 
@@ -100,7 +102,7 @@
 
 ### Commits
 
-124 total (112 in this sprint session)
+126 total (114 in this sprint session)
 
 ### Next Up
 
