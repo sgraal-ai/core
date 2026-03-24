@@ -33,6 +33,7 @@
 | T-34 | Webhook notifications (BLOCK/WARN) — Slack + PagerDuty | Done | 8 tests |
 | T-35 | PageRank authority scoring — opt-in 13th component | Done | 7 tests |
 | T-36 | Jensen-Shannon divergence ensemble drift detection | Done | 7 tests |
+| T-37 | CUSUM + EWMA drift trend detection | Done | 9 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -53,7 +54,7 @@
 
 ### Test Summary
 
-- **237 tests passing** (pytest)
+- **246 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -85,6 +86,7 @@
 - Webhooks: 8 tests (register generic/slack/pagerduty, list, delete, 404, auth, HMAC signature)
 - PageRank authority: 7 tests (basic PR, score range, empty, opt-in component, opt-out, API with flag, API without)
 - Drift detector: 7 tests (identical zero, different positive, JSD bounded, ensemble range, method, empty, API)
+- Trend detection: 9 tests (CUSUM upward/stable, EWMA drift/stable, sustained, count, API with/without history)
 
 ### Deployments
 
@@ -96,7 +98,7 @@
 
 ### Commits
 
-119 total (107 in this sprint session)
+121 total (109 in this sprint session)
 
 ### Next Up
 
