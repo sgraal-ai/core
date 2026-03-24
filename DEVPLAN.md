@@ -32,6 +32,7 @@
 | T-33 | Prometheus metrics export + OpenTelemetry tracing | Done | 6 tests |
 | T-34 | Webhook notifications (BLOCK/WARN) — Slack + PagerDuty | Done | 8 tests |
 | T-35 | PageRank authority scoring — opt-in 13th component | Done | 7 tests |
+| T-36 | Jensen-Shannon divergence ensemble drift detection | Done | 7 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -52,7 +53,7 @@
 
 ### Test Summary
 
-- **230 tests passing** (pytest)
+- **237 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -83,6 +84,7 @@
 - Metrics/tracing: 6 tests (Prometheus format, JSON format, preflight increment, heal increment, trace attributes, decision distribution)
 - Webhooks: 8 tests (register generic/slack/pagerduty, list, delete, 404, auth, HMAC signature)
 - PageRank authority: 7 tests (basic PR, score range, empty, opt-in component, opt-out, API with flag, API without)
+- Drift detector: 7 tests (identical zero, different positive, JSD bounded, ensemble range, method, empty, API)
 
 ### Deployments
 
@@ -94,7 +96,7 @@
 
 ### Commits
 
-117 total (105 in this sprint session)
+119 total (107 in this sprint session)
 
 ### Next Up
 
