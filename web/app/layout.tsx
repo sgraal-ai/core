@@ -63,7 +63,7 @@ export default function RootLayout({
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <a href="https://sgraal-dashboard.vercel.app" className="text-sm text-gold hover:text-gold-dim transition font-semibold">
+            <a href="https://app.sgraal.com" className="text-sm text-gold hover:text-gold-dim transition font-semibold">
               Open Dashboard &rarr;
             </a>
             <a href="https://github.com/sgraal-ai/core" target="_blank" rel="noopener noreferrer" className="text-muted hover:text-foreground transition" title="GitHub">
