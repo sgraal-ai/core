@@ -36,6 +36,7 @@
 | T-37 | CUSUM + EWMA drift trend detection | Done | 9 tests |
 | ML-03–06 | Calibration: Brier, log loss, softmax temperature, logistic meta-layer | Done | 10 tests |
 | T-38 | Hawkes self-exciting process for temporal burst detection | Done | 8 tests |
+| T-39 | Gaussian copula dependence modeling for joint risk | Done | 7 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -56,7 +57,7 @@
 
 ### Test Summary
 
-- **264 tests passing** (pytest)
+- **271 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -91,6 +92,7 @@
 - Trend detection: 9 tests (CUSUM upward/stable, EWMA drift/stable, sustained, count, API with/without history)
 - Calibration: 10 tests (Brier perfect/overconfident, log loss correct/wrong, softmax sum/keys, meta range/safe, API, empty)
 - Hawkes process: 8 tests (baseline, excitation, burst, decay, from_entries, old entries, API, burst via API)
+- Copula: 7 tests (low/high joint risk, tail dependence, one low, rho, range, API)
 
 ### Deployments
 
@@ -102,7 +104,7 @@
 
 ### Commits
 
-126 total (114 in this sprint session)
+128 total (116 in this sprint session)
 
 ### Next Up
 
