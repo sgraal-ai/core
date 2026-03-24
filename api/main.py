@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1045,6 +1045,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "drift_sustained": trend.drift_sustained,
             "consecutive_degradations": trend.consecutive_degradations,
         }
+
+    # Calibration metrics
+    cal = compute_calibration(omega_out, result.assurance_score, result.component_breakdown)
+    response["calibration"] = {
+        "brier_score": cal.brier_score,
+        "log_loss": cal.log_loss,
+        "calibrated_scores": cal.calibrated_scores,
+        "meta_score": cal.meta_score,
+    }
 
     if req.thread_id:
         response["thread_id"] = req.thread_id

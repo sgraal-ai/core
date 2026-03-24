@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2979,3 +2979,78 @@ class TestTrendDetection:
 
         assert resp.status_code == 200
         assert "trend_detection" not in resp.json()
+
+
+class TestCalibration:
+    def test_brier_score_perfect_safe(self):
+        """High assurance + low omega → low Brier score (good calibration)."""
+        cal = compute_calibration(omega_mem_final=10, assurance_score=95, component_breakdown={"s_freshness": 5})
+        assert cal.brier_score < 0.01  # near perfect
+
+    def test_brier_score_overconfident(self):
+        """High assurance + high omega → high Brier score (bad calibration)."""
+        cal = compute_calibration(omega_mem_final=80, assurance_score=90, component_breakdown={"s_freshness": 80})
+        assert cal.brier_score > 0.5
+
+    def test_log_loss_correct_prediction(self):
+        """Correct confident prediction → low log loss."""
+        cal = compute_calibration(omega_mem_final=10, assurance_score=95, component_breakdown={"s_freshness": 5})
+        assert cal.log_loss < 0.1
+
+    def test_log_loss_wrong_prediction(self):
+        """Wrong confident prediction → high log loss."""
+        cal = compute_calibration(omega_mem_final=80, assurance_score=90, component_breakdown={"s_freshness": 80})
+        assert cal.log_loss > 1.0
+
+    def test_calibrated_scores_sum_to_100(self):
+        """Softmax calibrated scores should sum to ~100."""
+        breakdown = {"s_freshness": 50, "s_drift": 30, "s_provenance": 20}
+        cal = compute_calibration(50, 50, breakdown)
+        total = sum(cal.calibrated_scores.values())
+        assert abs(total - 100) < 1.0
+
+    def test_calibrated_scores_same_keys(self):
+        breakdown = {"s_freshness": 50, "s_drift": 30, "r_belief": 40}
+        cal = compute_calibration(50, 50, breakdown)
+        assert set(cal.calibrated_scores.keys()) == set(breakdown.keys())
+
+    def test_meta_score_range(self):
+        """Meta score should be 0–100."""
+        breakdown = {"s_freshness": 50, "s_drift": 30, "s_provenance": 20,
+                     "s_propagation": 15, "r_recall": 35, "r_encode": 10,
+                     "s_interference": 25, "s_recovery": 80, "r_belief": 40,
+                     "s_relevance": 5}
+        cal = compute_calibration(45, 68, breakdown)
+        assert 0 <= cal.meta_score <= 100
+
+    def test_meta_score_low_for_safe(self):
+        """Low-risk components → low meta score."""
+        safe = {"s_freshness": 2, "s_drift": 1, "s_provenance": 3,
+                "s_propagation": 5, "r_recall": 2, "r_encode": 1,
+                "s_interference": 2, "s_recovery": 99, "r_belief": 5,
+                "s_relevance": 0}
+        cal = compute_calibration(5, 96, safe)
+        assert cal.meta_score < 30
+
+    def test_calibration_in_api_response(self):
+        """Preflight response should include calibration."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "calibration" in data
+        c = data["calibration"]
+        assert "brier_score" in c
+        assert "log_loss" in c
+        assert "calibrated_scores" in c
+        assert "meta_score" in c
+        assert 0 <= c["brier_score"] <= 1
+        assert c["log_loss"] >= 0
+        assert 0 <= c["meta_score"] <= 100
+
+    def test_empty_breakdown_calibration(self):
+        cal = compute_calibration(0, 100, {})
+        assert cal.calibrated_scores == {}
+        assert cal.brier_score == 0.0
