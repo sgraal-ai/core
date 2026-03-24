@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3124,3 +3124,52 @@ class TestHawkesProcess:
         assert resp.status_code == 200
         h = resp.json()["hawkes_intensity"]
         assert h["current_lambda"] > h["baseline_mu"]
+
+
+class TestCopula:
+    def test_low_scores_low_joint_risk(self):
+        """Low freshness + low drift → low joint risk."""
+        result = compute_copula(5.0, 3.0)
+        assert result.joint_risk < 20
+        assert result.tail_dependence is False
+
+    def test_high_scores_high_joint_risk(self):
+        """High freshness + high drift → elevated joint risk."""
+        result = compute_copula(90.0, 85.0)
+        assert result.joint_risk > 0
+
+    def test_tail_dependence_detected(self):
+        """Both elevated simultaneously with high rho → tail dependence."""
+        result = compute_copula(90.0, 85.0, rho=0.9)
+        assert result.tail_dependence is True
+
+    def test_no_tail_dependence_one_very_low(self):
+        """One very low score → independent risk too small for tail dependence."""
+        result = compute_copula(50.0, 0.5)
+        assert result.tail_dependence is False
+
+    def test_rho_preserved(self):
+        result = compute_copula(50.0, 50.0, rho=0.8)
+        assert result.rho == 0.8
+
+    def test_joint_risk_range(self):
+        """Joint risk should be 0–100."""
+        for f in [0, 25, 50, 75, 100]:
+            for d in [0, 25, 50, 75, 100]:
+                result = compute_copula(float(f), float(d))
+                assert 0 <= result.joint_risk <= 100
+
+    def test_copula_in_api_response(self):
+        """Preflight response should include copula_analysis."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "copula_analysis" in data
+        ca = data["copula_analysis"]
+        assert "rho" in ca
+        assert "joint_risk" in ca
+        assert "tail_dependence" in ca
+        assert 0 <= ca["joint_risk"] <= 100

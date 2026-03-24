@@ -18,3 +18,4 @@ from .drift_detector import compute_drift_metrics, DriftMetrics
 from .trend_detection import detect_trend, TrendResult, CUSUMDetector, EWMADetector
 from .calibration import compute_calibration, CalibrationResult
 from .hawkes_process import compute_hawkes_intensity, hawkes_from_entries, HawkesResult
+from .copula import compute_copula, CopulaResult

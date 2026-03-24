@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1063,6 +1063,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "baseline_mu": hawkes.baseline_mu,
         "excited": hawkes.excited,
         "burst_detected": hawkes.burst_detected,
+    }
+
+    # Copula dependence analysis
+    s_fresh = result.component_breakdown.get("s_freshness", 0)
+    s_drft = result.component_breakdown.get("s_drift", 0)
+    copula = compute_copula(s_fresh, s_drft)
+    response["copula_analysis"] = {
+        "rho": copula.rho,
+        "joint_risk": copula.joint_risk,
+        "tail_dependence": copula.tail_dependence,
     }
 
     if req.thread_id:
