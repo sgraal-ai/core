@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3054,3 +3054,73 @@ class TestCalibration:
         cal = compute_calibration(0, 100, {})
         assert cal.calibrated_scores == {}
         assert cal.brier_score == 0.0
+
+
+class TestHawkesProcess:
+    def test_baseline_no_events(self):
+        """No update events → intensity equals baseline μ."""
+        result = compute_hawkes_intensity([], current_time=0)
+        assert result.current_lambda == 0.1
+        assert result.excited is False
+        assert result.burst_detected is False
+
+    def test_recent_events_excite(self):
+        """Recent events should increase intensity above baseline."""
+        # Events at t=-0.1, -0.2, -0.3 (very recent)
+        result = compute_hawkes_intensity([-0.1, -0.2, -0.3], current_time=0)
+        assert result.current_lambda > result.baseline_mu
+        assert result.excited is True
+
+    def test_burst_detected(self):
+        """Many recent events → burst (lambda > 2×mu)."""
+        # 5 events in last 0.5 days
+        times = [-0.1 * i for i in range(5)]
+        result = compute_hawkes_intensity(times, current_time=0, mu=0.1, alpha=0.5)
+        assert result.burst_detected is True
+        assert result.current_lambda > 0.2  # > 2×0.1
+
+    def test_old_events_decay(self):
+        """Old events should have minimal excitation (decayed)."""
+        # Events 100 days ago
+        result = compute_hawkes_intensity([-100, -101, -102], current_time=0)
+        assert abs(result.current_lambda - result.baseline_mu) < 0.01
+
+    def test_from_entries_convenience(self):
+        """hawkes_from_entries should work with entry ages."""
+        # Very recent entries (age 0.1, 0.2, 0.3 days)
+        result = hawkes_from_entries([0.1, 0.2, 0.3])
+        assert result.current_lambda > result.baseline_mu
+
+    def test_from_entries_old(self):
+        """Old entries should not trigger excitement."""
+        result = hawkes_from_entries([100, 200, 300])
+        assert result.excited is False
+
+    def test_hawkes_in_api_response(self):
+        """Preflight response should include hawkes_intensity."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "hawkes_intensity" in data
+        h = data["hawkes_intensity"]
+        assert "current_lambda" in h
+        assert "baseline_mu" in h
+        assert "excited" in h
+        assert "burst_detected" in h
+        assert h["baseline_mu"] == 0.1
+
+    def test_burst_with_recent_entries_via_api(self):
+        """Multiple very recent entries should trigger burst in API."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id=f"hawkes_{i}", timestamp_age_days=0.1 * (i + 1))
+                for i in range(5)
+            ],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        h = resp.json()["hawkes_intensity"]
+        assert h["current_lambda"] > h["baseline_mu"]

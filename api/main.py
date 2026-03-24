@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1053,6 +1053,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "log_loss": cal.log_loss,
         "calibrated_scores": cal.calibrated_scores,
         "meta_score": cal.meta_score,
+    }
+
+    # Hawkes self-exciting process
+    entry_ages = [e.timestamp_age_days for e in entries]
+    hawkes = hawkes_from_entries(entry_ages)
+    response["hawkes_intensity"] = {
+        "current_lambda": hawkes.current_lambda,
+        "baseline_mu": hawkes.baseline_mu,
+        "excited": hawkes.excited,
+        "burst_detected": hawkes.burst_detected,
     }
 
     if req.thread_id:
