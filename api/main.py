@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1127,6 +1127,21 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "out_of_control": mewma.out_of_control,
         "monitored_components": mewma.monitored_components,
     }
+
+    # RMT signal/noise separation
+    try:
+        rmt_entries = [{"id": e.id, "content": e.content, "prompt_embedding": e.prompt_embedding} for e in entries]
+        rmt_result = compute_rmt(rmt_entries)
+        if rmt_result:
+            response["rmt_analysis"] = {
+                "signal_eigenvalues": rmt_result.signal_eigenvalues,
+                "noise_threshold": rmt_result.noise_threshold,
+                "true_interference_count": rmt_result.true_interference_count,
+                "noise_interference_count": rmt_result.noise_interference_count,
+                "signal_ratio": rmt_result.signal_ratio,
+            }
+    except Exception:
+        pass  # graceful degradation
 
     # Sheaf consistency analysis
     if sheaf_result:

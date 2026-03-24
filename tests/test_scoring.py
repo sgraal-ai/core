@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3526,3 +3526,92 @@ class TestBOCPD:
 
         assert resp.status_code == 200
         assert "trend_detection" not in resp.json()
+
+
+class TestRMT:
+    def test_single_entry_returns_none(self):
+        """n_entries < 2 should return None."""
+        result = compute_rmt([{"id": "m1", "content": "hello"}])
+        assert result is None
+
+    def test_empty_returns_none(self):
+        result = compute_rmt([])
+        assert result is None
+
+    def test_two_identical_entries(self):
+        """Identical entries → high similarity, signal detected."""
+        entries = [
+            {"id": "m1", "content": "Budapest office open weekdays 9 to 18"},
+            {"id": "m2", "content": "Budapest office open weekdays 9 to 18"},
+        ]
+        result = compute_rmt(entries)
+        assert result is not None
+        assert result.noise_threshold > 0
+        assert 0 <= result.signal_ratio <= 1
+
+    def test_diverse_entries_some_noise(self):
+        """Diverse unrelated entries → mostly noise."""
+        entries = [
+            {"id": "m1", "content": "Budapest office open weekdays"},
+            {"id": "m2", "content": "Python programming language tutorial"},
+            {"id": "m3", "content": "Mediterranean diet recipe ideas"},
+        ]
+        result = compute_rmt(entries)
+        assert result is not None
+        assert result.noise_interference_count >= 0
+        assert result.true_interference_count >= 0
+
+    def test_signal_ratio_range(self):
+        entries = [
+            {"id": f"r_{i}", "content": f"memory entry {i} about topic alpha"}
+            for i in range(5)
+        ]
+        result = compute_rmt(entries)
+        assert result is not None
+        assert 0 <= result.signal_ratio <= 1
+
+    def test_jaccard_fallback(self):
+        """Without embeddings, should use Jaccard and still compute."""
+        entries = [
+            {"id": "j1", "content": "the quick brown fox jumps"},
+            {"id": "j2", "content": "the slow brown dog sleeps"},
+        ]
+        result = compute_rmt(entries)
+        assert result is not None
+        assert result.noise_threshold > 0
+
+    def test_performance_20_entries(self):
+        entries = [{"id": f"p_{i}", "content": f"entry {i} about alpha beta gamma"} for i in range(20)]
+        import time
+        start = time.monotonic()
+        result = compute_rmt(entries)
+        elapsed_ms = (time.monotonic() - start) * 1000
+        assert elapsed_ms < 100  # generous CI tolerance (10ms target)
+        assert result is not None
+
+    def test_rmt_in_api_response(self):
+        """Preflight with 2+ entries should include rmt_analysis."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="rmt_a"),
+                _fresh_entry(id="rmt_b"),
+            ],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "rmt_analysis" in data
+        rmt = data["rmt_analysis"]
+        assert "signal_eigenvalues" in rmt
+        assert "noise_threshold" in rmt
+        assert "true_interference_count" in rmt
+        assert "signal_ratio" in rmt
+
+    def test_no_rmt_single_entry(self):
+        """Single entry should not include rmt_analysis."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "rmt_analysis" not in resp.json()

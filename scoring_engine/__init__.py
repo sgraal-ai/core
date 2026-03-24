@@ -23,3 +23,4 @@ from .mewma import compute_mewma, MEWMAResult
 from .sheaf_cohomology import compute_sheaf_consistency, ConsistencyResult
 from .rl_policy import get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, RLAdjustment
 from .bocpd import compute_bocpd, BOCPDResult, BOCPDetector
+from .rmt import compute_rmt, RMTResult
