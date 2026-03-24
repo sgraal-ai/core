@@ -28,6 +28,7 @@
 | T-29 | Value of Information (VoI) scoring in importance detector | Done | 6 tests |
 | T-30 | ε-Differential Privacy with Laplace mechanism | Done | 10 tests |
 | T-31 | Custom thresholds + audit logging + request_id | Done | 6 tests |
+| T-32 | GDPR/DPA, SLA tiers, and compliance docs endpoints | Done | 5 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -48,7 +49,7 @@
 
 ### Test Summary
 
-- **204 tests passing** (pytest)
+- **209 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -75,6 +76,7 @@
 - Differential privacy: 10 tests (noise, determinism, seeds, epsilon scaling, sensitivity, guarantee, API, clamping)
 - Custom thresholds: 4 tests (strict, relaxed, API, default)
 - Audit log: 2 tests (request_id present, unique per call)
+- Compliance endpoints: 5 tests (GDPR fields, SLA tiers, docs profiles, sub-processors, credit policy)
 
 ### Deployments
 
@@ -86,7 +88,7 @@
 
 ### Commits
 
-109 total (97 in this sprint session)
+111 total (99 in this sprint session)
 
 ### Next Up
 
