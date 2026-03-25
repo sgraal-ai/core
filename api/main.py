@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -885,6 +885,30 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
     except Exception:
         pass
 
+    # Temperature decay for policy gradient
+    pg_temp_decayed = False
+    try:
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            _domain = outcome.get("domain", "general")
+            _pg_temp_key = f"pg_temperature:{key_record.get('key_hash', 'default')}:{_domain}"
+            _ptr = http_requests.get(
+                f"{UPSTASH_REDIS_URL}/GET/{_pg_temp_key}",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                timeout=2,
+            )
+            _cur_temp = 1.0
+            if _ptr.ok and _ptr.json().get("result") is not None:
+                _cur_temp = float(_ptr.json()["result"])
+            _new_temp = decay_temperature(_cur_temp)
+            http_requests.post(
+                f"{UPSTASH_REDIS_URL}/SET/{_pg_temp_key}/{_new_temp}/EX/86400",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                timeout=2,
+            )
+            pg_temp_decayed = True
+    except Exception:
+        pass
+
     resp = {
         "outcome_id": req.outcome_id,
         "status": req.status,
@@ -894,6 +918,8 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
         resp["rl_reward"] = rl_reward
     if lv4_updated:
         resp["lv4_geodesic_updated"] = True
+    if pg_temp_decayed:
+        resp["pg_temperature_decayed"] = True
     return resp
 
 
@@ -1597,6 +1623,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         pass  # graceful degradation
 
     # RL Q-learning adjustment
+    rl = None
     try:
         rl = get_rl_adjustment(omega_out, result.component_breakdown, result.recommended_action, req.domain)
         response["rl_adjustment"] = {
@@ -1605,6 +1632,53 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "learning_episodes": rl.learning_episodes,
             "confidence": rl.confidence,
         }
+    except Exception:
+        pass  # graceful degradation
+
+    # Policy Gradient with Advantage (RL-02)
+    try:
+        from scoring_engine.rl_policy import _q_table, _state_key, _discretize, ACTIONS as RL_ACTIONS, ACTION_MAP
+        _fresh = result.component_breakdown.get("s_freshness", 0)
+        _drft = result.component_breakdown.get("s_drift", 0)
+        _prov = result.component_breakdown.get("s_provenance", 0)
+        _st = _state_key(omega_out, _fresh, _drft, _prov)
+        _qv = _q_table.get_q_values(req.domain, _st)
+
+        # Fetch temperature from Redis
+        _pg_temp_key = f"pg_temperature:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _pg_temp = 1.0
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _ptr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/GET/{_pg_temp_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _ptr.ok and _ptr.json().get("result") is not None:
+                    _pg_temp = float(_ptr.json()["result"])
+            except Exception:
+                pass
+
+        _current_idx = ACTION_MAP.get(result.recommended_action, 0)
+        pg = compute_policy_gradient(_qv, _current_idx, _pg_temp)
+
+        response["policy_gradient"] = {
+            "action_probabilities": pg.action_probabilities,
+            "advantage": pg.advantage,
+            "temperature": pg.temperature,
+            "policy_entropy": pg.policy_entropy,
+            "exploration_mode": pg.exploration_mode,
+        }
+
+        # PG Override: consistent action across recommended_action and rl_adjusted_action
+        _episodes = rl.learning_episodes if rl else 0
+        if (_episodes >= 20
+            and pg.advantage > 0.1
+            and not pg.exploration_mode):
+            response["recommended_action"] = pg.best_action
+            if "rl_adjustment" in response:
+                response["rl_adjustment"]["rl_adjusted_action"] = pg.best_action
+            response["pg_override"] = True
     except Exception:
         pass  # graceful degradation
 

@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4966,3 +4966,82 @@ class TestUnifiedLoss:
         assert "geodesic_update_count" in ul
         assert len(ul["lambda_weights"]) == 11
         assert len(ul["components"]) == 11
+
+
+class TestPolicyGradient:
+    """Tests for RL-02 Policy Gradient with Advantage."""
+
+    def test_cold_start_no_override(self):
+        """With < 20 episodes, pg_override should not appear."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "policy_gradient" in data
+        # Cold start: no override
+        assert "pg_override" not in data or data.get("pg_override") is not True
+
+    def test_advantage_computation(self):
+        """Advantage should be Q(s,a) - V(s) where V = max Q."""
+        q = [1.0, 2.0, 0.5, 3.0]
+        pg = compute_policy_gradient(q, current_action_idx=1)
+        # V(s) = max(q) = 3.0, Q(s,WARN) = 2.0, advantage = 2.0 - 3.0 = -1.0
+        assert pg.advantage == -1.0
+
+    def test_softmax_probabilities_sum_to_1(self):
+        """Action probabilities should sum to 1.0."""
+        q = [1.0, 2.0, 0.5, 3.0]
+        pg = compute_policy_gradient(q, current_action_idx=0)
+        total = sum(pg.action_probabilities.values())
+        assert abs(total - 1.0) < 0.01
+
+    def test_exploration_mode_trigger(self):
+        """High entropy (uniform Q) should trigger exploration_mode."""
+        # Equal Q-values → uniform softmax → high entropy
+        q = [1.0, 1.0, 1.0, 1.0]
+        pg = compute_policy_gradient(q, current_action_idx=0)
+        assert pg.policy_entropy > 1.0
+        assert pg.exploration_mode is True
+
+    def test_no_exploration_peaked_q(self):
+        """Peaked Q-values should not trigger exploration."""
+        q = [0.0, 0.0, 0.0, 10.0]
+        pg = compute_policy_gradient(q, current_action_idx=3, temperature=0.5)
+        assert pg.exploration_mode is False
+
+    def test_temperature_decay(self):
+        """Temperature should decay by 0.99 per step, min 0.1."""
+        t1 = decay_temperature(1.0)
+        assert t1 == 0.99
+        t2 = decay_temperature(0.1)
+        assert t2 == 0.1  # at minimum, stays
+        t3 = decay_temperature(0.105)
+        assert t3 >= 0.1
+
+    def test_policy_entropy_bounds(self):
+        """Entropy should be >= 0 and <= log(4) ≈ 1.386."""
+        import math
+        q = [5.0, 0.0, 0.0, 0.0]
+        pg = compute_policy_gradient(q, current_action_idx=0, temperature=0.1)
+        assert pg.policy_entropy >= 0
+        q_uniform = [1.0, 1.0, 1.0, 1.0]
+        pg2 = compute_policy_gradient(q_uniform, current_action_idx=0)
+        assert pg2.policy_entropy <= math.log(4) + 0.01
+
+    def test_policy_gradient_in_api(self):
+        """Preflight should include policy_gradient."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "policy_gradient" in data
+        pg = data["policy_gradient"]
+        assert "action_probabilities" in pg
+        assert "advantage" in pg
+        assert "temperature" in pg
+        assert "policy_entropy" in pg
+        assert "exploration_mode" in pg
+        probs = pg["action_probabilities"]
+        assert abs(sum(probs.values()) - 1.0) < 0.01
