@@ -43,6 +43,8 @@ export interface Agent {
   hawkes_intensity?: HawkesIntensity;
   copula_analysis?: CopulaAnalysis;
   mewma?: MEWMA;
+  r_total_normalized?: number;
+  stability_score?: { score: number; components: Record<string, number>; interpretation: string };
 }
 
 export interface RepairAction {
@@ -89,6 +91,8 @@ export const MOCK_AGENTS: Agent[] = [
     hawkes_intensity: { current_lambda: 0.12, baseline_mu: 0.1, excited: false, burst_detected: false },
     copula_analysis: { rho: 0.7, joint_risk: 2.1, tail_dependence: false },
     mewma: { T2_stat: 3.2, control_limit: 12, out_of_control: false, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
+    r_total_normalized: 0.82,
+    stability_score: { score: 0.88, components: { delta_alpha: 0.05, p_transition: 0.1, omega_drift: 0.05, omega_0: 0.12, lambda_2: 0.2, hurst: 0.05, h1_rank: 0, tau_mix: 2.0, d_geo_causal: 0.1 }, interpretation: "stable" },
   },
   {
     id: "agent-fintech-trade",
@@ -115,6 +119,8 @@ export const MOCK_AGENTS: Agent[] = [
     hawkes_intensity: { current_lambda: 0.18, baseline_mu: 0.1, excited: true, burst_detected: false },
     copula_analysis: { rho: 0.7, joint_risk: 18.4, tail_dependence: false },
     mewma: { T2_stat: 8.7, control_limit: 12, out_of_control: false, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
+    r_total_normalized: 1.94,
+    stability_score: { score: 0.55, components: { delta_alpha: 0.3, p_transition: 0.4, omega_drift: 0.35, omega_0: 0.39, lambda_2: 1.0, hurst: 0.3, h1_rank: 1, tau_mix: 8.0, d_geo_causal: 0.5 }, interpretation: "degrading" },
   },
   {
     id: "agent-medical-triage",
@@ -151,6 +157,8 @@ export const MOCK_AGENTS: Agent[] = [
     hawkes_intensity: { current_lambda: 0.25, baseline_mu: 0.1, excited: true, burst_detected: true },
     copula_analysis: { rho: 0.7, joint_risk: 42.8, tail_dependence: true },
     mewma: { T2_stat: 14.5, control_limit: 12, out_of_control: true, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
+    r_total_normalized: 3.12,
+    stability_score: { score: 0.35, components: { delta_alpha: 0.8, p_transition: 0.7, omega_drift: 0.6, omega_0: 0.62, lambda_2: 2.5, hurst: 0.6, h1_rank: 3, tau_mix: 30.0, d_geo_causal: 1.2 }, interpretation: "critical" },
   },
   {
     id: "agent-legal-review",
@@ -188,6 +196,8 @@ export const MOCK_AGENTS: Agent[] = [
     hawkes_intensity: { current_lambda: 0.35, baseline_mu: 0.1, excited: true, burst_detected: true },
     copula_analysis: { rho: 0.7, joint_risk: 68.5, tail_dependence: true },
     mewma: { T2_stat: 28.3, control_limit: 12, out_of_control: true, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
+    r_total_normalized: 4.51,
+    stability_score: { score: 0.12, components: { delta_alpha: 1.5, p_transition: 0.9, omega_drift: 0.85, omega_0: 0.87, lambda_2: 4.0, hurst: 0.8, h1_rank: 7, tau_mix: 80.0, d_geo_causal: 1.8 }, interpretation: "critical" },
   },
   {
     id: "agent-code-assistant",
@@ -211,6 +221,8 @@ export const MOCK_AGENTS: Agent[] = [
     hawkes_intensity: { current_lambda: 0.11, baseline_mu: 0.1, excited: false, burst_detected: false },
     copula_analysis: { rho: 0.7, joint_risk: 0.8, tail_dependence: false },
     mewma: { T2_stat: 1.5, control_limit: 12, out_of_control: false, monitored_components: ["s_freshness", "s_drift", "s_provenance", "s_relevance", "r_belief"] },
+    r_total_normalized: 0.45,
+    stability_score: { score: 0.94, components: { delta_alpha: 0.02, p_transition: 0.05, omega_drift: 0.03, omega_0: 0.06, lambda_2: 0.1, hurst: 0.02, h1_rank: 0, tau_mix: 1.0, d_geo_causal: 0.05 }, interpretation: "stable" },
   },
 ];
 

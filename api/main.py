@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1603,6 +1603,59 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if surgical_result:
         response["surgical_result"] = surgical_result
         response["auto_tracked"] = auto_tracked
+
+    # R_total normalized + StabilityScore (RD-01+)
+    try:
+        # Gather components from response (fallback 0.0 for missing)
+        _dd = response.get("drift_details", {})
+        _ad = _dd.get("alpha_divergence", {})
+        _alpha_score = (_ad.get("alpha_0_5", 0) + _ad.get("alpha_1_5", 0) + _ad.get("alpha_2_0", 0)) / 3.0 / 100.0 if _ad else 0.0
+        _s_drift = result.component_breakdown.get("s_drift", 0) / 100.0
+        _s_interf = result.component_breakdown.get("s_interference", 0) / 100.0
+        _sp = response.get("spectral_analysis", {})
+        _fiedler = _sp.get("fiedler_value", 0)
+        _mix_time = _sp.get("mixing_time_estimate", 0)
+
+        response["r_total_normalized"] = compute_r_total(
+            alpha_divergence_score=_alpha_score,
+            s_drift=_s_drift,
+            s_interference=_s_interf,
+            omega_mem_final=omega_out,
+            fiedler_value=_fiedler,
+        )
+
+        # StabilityScore 9 components
+        _hmm = response.get("hmm_regime", {})
+        _tp = _hmm.get("transition_probs", {})
+        _p_trans = 1.0 - _tp.get("to_stable", 1.0) if _tp else 0.0
+        _td = response.get("trend_detection", {})
+        _bocpd = _td.get("bocpd", {})
+        _run_len = _bocpd.get("current_run_length", 0)
+        _hurst = min(1.0, _run_len / 50.0) if _run_len > 0 else 0.0
+        _ca = response.get("consistency_analysis", {})
+        _h1 = _ca.get("h1_rank", 0)
+        _cg = response.get("causal_graph", {})
+        _cg_edges = len(_cg.get("edges", [])) if _cg else 0
+        _d_geo = min(2.0, _cg_edges / 5.0)
+
+        ss = compute_stability_score(
+            delta_alpha=_alpha_score,
+            p_transition=_p_trans,
+            omega_drift=_s_drift,
+            omega_0=omega_out / 100.0,
+            lambda_2=_fiedler,
+            hurst=_hurst,
+            h1_rank=float(_h1),
+            tau_mix=_mix_time,
+            d_geo_causal=_d_geo,
+        )
+        response["stability_score"] = {
+            "score": ss.score,
+            "components": ss.components,
+            "interpretation": ss.interpretation,
+        }
+    except Exception:
+        pass  # graceful degradation
 
     # Audit log
     _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out)

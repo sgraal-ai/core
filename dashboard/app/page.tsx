@@ -94,6 +94,30 @@ export default function DashboardHome() {
         </div>
       </div>
 
+      {/* Stability Overview */}
+      {(() => {
+        const avgStability = total > 0 ? agents.reduce((s, a) => s + (a.stability_score?.score ?? 0), 0) / total : 0;
+        const avgRTotal = total > 0 ? agents.reduce((s, a) => s + (a.r_total_normalized ?? 0), 0) / total : 0;
+        const stabColor = avgStability > 0.7 ? "text-green-400" : avgStability >= 0.4 ? "text-yellow-400" : "text-red-400";
+        const rColor = avgRTotal > 3 ? "bg-red-400" : avgRTotal > 1.5 ? "bg-yellow-400" : "bg-green-400";
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
+            <div className="bg-surface border border-surface-light rounded-xl p-5">
+              <p className="text-xs text-muted mb-2">StabilityScore (fleet avg)</p>
+              <p className={`text-4xl font-bold ${stabColor}`}>{(avgStability * 100).toFixed(0)}%</p>
+              <p className="text-xs text-muted mt-1">{avgStability > 0.7 ? "Stable" : avgStability >= 0.4 ? "Degrading" : "Critical"}</p>
+            </div>
+            <div className="bg-surface border border-surface-light rounded-xl p-5">
+              <p className="text-xs text-muted mb-2">R_total (fleet avg, 0-5 scale)</p>
+              <p className="text-2xl font-bold font-mono mb-2">{avgRTotal.toFixed(2)}</p>
+              <div className="w-full h-2 bg-surface-light rounded-full overflow-hidden">
+                <div className={`h-full ${rColor} rounded-full transition-all`} style={{ width: `${Math.min(100, avgRTotal / 5 * 100)}%` }} />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Agent Fleet</h2>
         <span className="text-xs text-muted font-mono">Avg Ω_MEM: {avgOmega}</span>

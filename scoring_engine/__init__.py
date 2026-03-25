@@ -35,3 +35,4 @@ from .free_energy import compute_free_energy, FreeEnergyResult
 from .levy_flight import compute_levy_flight, LevyFlightResult
 from .sinkhorn import sinkhorn_distance, SinkhornResult
 from .rate_distortion import compute_rate_distortion, RateDistortionResult
+from .stability_score import compute_r_total, compute_stability_score, StabilityResult

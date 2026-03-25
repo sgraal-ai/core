@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4801,3 +4801,93 @@ class TestRateDistortion:
     def test_graceful_degradation_empty(self):
         """Empty entries should return None."""
         assert compute_rate_distortion([], 30.0, {}) is None
+
+
+class TestStabilityScore:
+    """Tests for R_total normalized and StabilityScore 9-component formula."""
+
+    def test_all_components_available(self):
+        """StabilityScore with all components should produce valid result."""
+        ss = compute_stability_score(
+            delta_alpha=0.5, p_transition=0.3, omega_drift=0.4,
+            omega_0=0.35, lambda_2=1.0, hurst=0.2,
+            h1_rank=2.0, tau_mix=10.0, d_geo_causal=0.5,
+        )
+        assert 0 <= ss.score <= 1.0
+        assert len(ss.components) == 9
+        assert ss.interpretation in ("stable", "degrading", "critical")
+
+    def test_missing_components_fallback(self):
+        """All zeros (missing data) should still produce a valid score."""
+        ss = compute_stability_score()
+        assert ss.score == 1.0  # all zero components → all (1 - 0/max) = 1
+        assert ss.interpretation == "stable"
+
+    def test_stable_interpretation(self):
+        """Low component values should give stable interpretation."""
+        ss = compute_stability_score(
+            delta_alpha=0.1, p_transition=0.05, omega_drift=0.1,
+            omega_0=0.1, lambda_2=0.2, hurst=0.05,
+            h1_rank=0, tau_mix=2.0, d_geo_causal=0.1,
+        )
+        assert ss.score > 0.7
+        assert ss.interpretation == "stable"
+
+    def test_degrading_interpretation(self):
+        """Moderate component values should give degrading."""
+        ss = compute_stability_score(
+            delta_alpha=1.0, p_transition=0.5, omega_drift=0.5,
+            omega_0=0.5, lambda_2=2.5, hurst=0.5,
+            h1_rank=5.0, tau_mix=50.0, d_geo_causal=1.0,
+        )
+        assert 0.4 <= ss.score <= 0.7
+        assert ss.interpretation == "degrading"
+
+    def test_critical_interpretation(self):
+        """Max component values should give critical."""
+        ss = compute_stability_score(
+            delta_alpha=2.0, p_transition=1.0, omega_drift=1.0,
+            omega_0=1.0, lambda_2=5.0, hurst=1.0,
+            h1_rank=10.0, tau_mix=100.0, d_geo_causal=2.0,
+        )
+        assert ss.score < 0.01
+        assert ss.interpretation == "critical"
+
+    def test_r_total_cap_at_5(self):
+        """R_total should be capped at 5.0."""
+        r = compute_r_total(
+            alpha_divergence_score=10.0,
+            s_drift=10.0,
+            s_interference=10.0,
+            omega_mem_final=100.0,
+            fiedler_value=50.0,
+        )
+        assert r == 5.0
+
+    def test_stability_score_bounds(self):
+        """StabilityScore should always be in [0, 1]."""
+        # Even with extreme values
+        ss = compute_stability_score(
+            delta_alpha=100.0, p_transition=100.0, omega_drift=100.0,
+            omega_0=100.0, lambda_2=100.0, hurst=100.0,
+            h1_rank=100.0, tau_mix=1000.0, d_geo_causal=100.0,
+        )
+        assert 0 <= ss.score <= 1.0
+
+    def test_dashboard_field_presence(self):
+        """Preflight should include r_total_normalized and stability_score."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "r_total_normalized" in data
+        assert isinstance(data["r_total_normalized"], float)
+        assert data["r_total_normalized"] <= 5.0
+        assert "stability_score" in data
+        ss = data["stability_score"]
+        assert "score" in ss
+        assert "components" in ss
+        assert "interpretation" in ss
+        assert ss["interpretation"] in ("stable", "degrading", "critical")
+        assert 0 <= ss["score"] <= 1.0
