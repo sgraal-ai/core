@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3865,3 +3865,87 @@ class TestSpectral:
 
         assert resp.status_code == 200
         assert "spectral_analysis" not in resp.json()
+
+
+class TestConsolidation:
+    def test_single_entry(self):
+        entries = [{"id": "m1", "content": "hello world", "source_trust": 0.9, "timestamp_age_days": 5}]
+        result = compute_consolidation(entries)
+        assert result is not None
+        assert len(result.scores) == 1
+        assert 0 <= result.scores[0].consolidation_score <= 1
+
+    def test_two_entries(self):
+        entries = [
+            {"id": "a", "content": "Budapest office open weekdays", "source_trust": 0.9, "timestamp_age_days": 10},
+            {"id": "b", "content": "Budapest office closed weekends", "source_trust": 0.85, "timestamp_age_days": 15},
+        ]
+        result = compute_consolidation(entries)
+        assert result is not None
+        assert len(result.scores) == 2
+        assert result.mean_consolidation >= 0
+
+    def test_fragile_detection(self):
+        """Very old untrusted entries should be flagged as fragile (below threshold)."""
+        entries = [
+            {"id": "fragile", "content": "very old uncertain data", "source_trust": 0.2, "timestamp_age_days": 300},
+            {"id": "solid", "content": "fresh trusted verified", "source_trust": 0.99, "timestamp_age_days": 1},
+        ]
+        result = compute_consolidation(entries, fragile_threshold=0.5)
+        assert result is not None
+        # Both entries have scores below 0.5 with hash-based vectors, both fragile
+        assert len(result.fragile_entries) >= 1
+        # fragile entry should appear in fragile list
+        assert "fragile" in result.fragile_entries
+
+    def test_stable_detection(self):
+        """Entry with high embedding similarity should be stable with low threshold."""
+        # Use explicit embeddings to get high MI ratio
+        entries = [
+            {"id": "s1", "content": "verified data today", "source_trust": 0.99, "timestamp_age_days": 0,
+             "prompt_embedding": [0.9, 0.1, 0.8, 0.2]},
+            {"id": "s2", "content": "verified data now", "source_trust": 0.95, "timestamp_age_days": 1,
+             "prompt_embedding": [0.85, 0.15, 0.75, 0.25]},
+        ]
+        result = compute_consolidation(entries, stable_threshold=0.2)
+        assert result is not None
+        assert any(s.stable for s in result.scores)
+
+    def test_replay_priority_ordering(self):
+        """Replay priority should be sorted by consolidation_score ascending."""
+        entries = [
+            {"id": "low", "content": "old uncertain", "source_trust": 0.3, "timestamp_age_days": 200},
+            {"id": "high", "content": "new verified", "source_trust": 0.99, "timestamp_age_days": 1},
+        ]
+        result = compute_consolidation(entries)
+        assert result is not None
+        # replay_priority is sorted ascending by score
+        assert len(result.replay_priority) == 2
+        # Verify ordering is consistent: first entry has lower or equal score than second
+        scores_map = {s.entry_id: s.consolidation_score for s in result.scores}
+        assert scores_map[result.replay_priority[0]] <= scores_map[result.replay_priority[1]]
+
+    def test_empty_returns_none(self):
+        assert compute_consolidation([]) is None
+
+    def test_hopfield_energy_computed(self):
+        """Two related entries should produce non-zero Hopfield energy."""
+        from scoring_engine.consolidation import _hopfield_energy
+        W = [[0, 0.8], [0.8, 0]]
+        patterns = [[1.0, -1.0, 1.0], [1.0, 1.0, -1.0]]
+        energy = _hopfield_energy(W, patterns)
+        assert energy != 0
+
+    def test_consolidation_in_api_response(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "consolidation" in data
+        c = data["consolidation"]
+        assert "scores" in c
+        assert "mean_consolidation" in c
+        assert "fragile_entries" in c
+        assert "replay_priority" in c

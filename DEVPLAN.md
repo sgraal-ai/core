@@ -45,6 +45,7 @@
 | CG-01 | LiNGAM causal structure discovery | Done | 8 tests |
 | IG-01 | α-Divergence as 4th drift detection method | Done | 8 tests |
 | SP-01 | Spectral Graph Laplacian for interference analysis | Done | 9 tests |
+| MC-01 | Memory Consolidation Score (Hopfield + MI) | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -65,7 +66,7 @@
 
 ### Test Summary
 
-- **341 tests passing** (pytest)
+- **349 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -109,6 +110,7 @@
 - Causal graph: 8 tests (single null, insufficient history, two-entry chain, multi-entry DAG, root cause, explanation, LiNGAM with history, API)
 - α-Divergence: 8 tests (Hellinger α=0.5, KL limit, α=2.0, numerical stability, ensemble_4, score range, API, backward compat)
 - Spectral: 9 tests (single/empty null, two entries, fragmented, dense, Cheeger bound, mixing time, API 2+ entries, single entry no spectral)
+- Consolidation: 8 tests (single entry, two entries, fragile detection, stable detection, replay ordering, empty, Hopfield energy, API)
 
 ### Deployments
 

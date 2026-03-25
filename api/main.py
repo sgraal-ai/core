@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1272,6 +1272,22 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             }
     except Exception:
         pass  # graceful degradation
+
+    # Memory consolidation (Hopfield + MI)
+    try:
+        cons_entries = [{"id": e.id, "content": e.content, "prompt_embedding": e.prompt_embedding,
+                         "source_trust": e.source_trust, "timestamp_age_days": e.timestamp_age_days}
+                        for e in entries]
+        cons = compute_consolidation(cons_entries)
+        if cons:
+            response["consolidation"] = {
+                "scores": [{"entry_id": s.entry_id, "consolidation_score": s.consolidation_score, "stable": s.stable} for s in cons.scores],
+                "mean_consolidation": cons.mean_consolidation,
+                "fragile_entries": cons.fragile_entries,
+                "replay_priority": cons.replay_priority,
+            }
+    except Exception:
+        pass
 
     # Sheaf consistency analysis
     if sheaf_result:
