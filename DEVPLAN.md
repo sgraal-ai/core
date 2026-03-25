@@ -71,7 +71,7 @@
 
 ### Test Summary
 
-- **397 tests passing** (pytest)
+- **402 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -119,7 +119,7 @@
 - Jump-Diffusion: 10 tests (insufficient history, no jumps, single jump, flash crash risk, cascade_risk top-level, expected_next_jump, no jump high expected, API response, graceful degradation, cascade requires both)
 - HMM Regime: 10 tests (insufficient history, stable state, degrading, critical, Viterbi decoding, regime_collapse_risk top-level, API with history, graceful degradation, regime duration, transition probs)
 - ZK Sheaf proof: 9 tests (null when sheaf unavailable, proof valid, proof invalid h1_rank>0, commitment uniqueness, EU AI Act compliance, n_edges count, timestamp format, graceful degradation, API response)
-- Ornstein-Uhlenbeck: 10 tests (insufficient history, mean-reverting, non-reverting trend, convergence to μ, half-life, theta non-negative, current deviation, API response, graceful degradation, identical scores)
+- Ornstein-Uhlenbeck: 15 tests (insufficient history, mean-reverting, non-reverting trend, convergence to μ, half-life, theta non-negative, current deviation, API response, graceful degradation, identical scores, repair_plan wait, repair_plan heal, null no history, equilibrium field, Redis fallback)
 - Free Energy: 9 tests (basic computation, ELBO relation, KL non-negative, surprise normalization, first-run init, max tracking, API response, graceful degradation, importance integration)
 
 ### Deployments

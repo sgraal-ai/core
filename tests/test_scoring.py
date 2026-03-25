@@ -4341,7 +4341,7 @@ class TestOrnsteinUhlenbeck:
         assert abs(result.current_deviation - (50.0 - result.mu)) < 0.01
 
     def test_ou_in_api_response(self):
-        """Preflight with 10+ score_history should include ou_process."""
+        """Preflight with 10+ score_history should include ornstein_uhlenbeck."""
         history = [30 + ((-1) ** i) * 5 for i in range(12)]
         resp = client.post("/v1/preflight", json={
             "memory_state": [_fresh_entry()],
@@ -4349,26 +4349,24 @@ class TestOrnsteinUhlenbeck:
         }, headers=AUTH)
         assert resp.status_code == 200
         data = resp.json()
-        assert "ou_process" in data
-        ou = data["ou_process"]
-        assert "theta" in ou
-        assert "mu" in ou
-        assert "sigma" in ou
+        assert "ornstein_uhlenbeck" in data
+        ou = data["ornstein_uhlenbeck"]
+        assert "mean_reverting" in ou
         assert "half_life" in ou
-        assert "current_deviation" in ou
         assert "expected_value_5" in ou
         assert "expected_value_10" in ou
-        assert "mean_reverting" in ou
+        assert "equilibrium" in ou
+        assert "current_deviation" in ou
 
     def test_graceful_degradation_short_history(self):
-        """Without 10+ history, ou_process should not appear."""
+        """Without 10+ history, ornstein_uhlenbeck should not appear."""
         resp = client.post("/v1/preflight", json={
             "memory_state": [_fresh_entry()],
             "score_history": [30, 31, 32],
         }, headers=AUTH)
         assert resp.status_code == 200
         data = resp.json()
-        assert "ou_process" not in data
+        assert "ornstein_uhlenbeck" not in data
 
     def test_identical_scores_returns_none(self):
         """All identical scores (zero variance) should return None."""
@@ -4377,6 +4375,70 @@ class TestOrnsteinUhlenbeck:
         # or produce a valid result with theta=0
         if result is not None:
             assert result.sigma == 0.0 or result.theta == 0.0
+
+    def test_repair_plan_wait_message(self):
+        """Mean-reverting with short half-life should add WAIT to repair_plan."""
+        # Oscillating history → mean-reverting with short half-life
+        history = [30 + ((-1) ** i) * 10 for i in range(15)]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        if "ornstein_uhlenbeck" in data and data["ornstein_uhlenbeck"]["mean_reverting"]:
+            if data["ornstein_uhlenbeck"]["half_life"] < 10:
+                wait_actions = [r for r in data["repair_plan"] if r["action"] == "WAIT"]
+                assert len(wait_actions) >= 1
+                assert "Self-recovery expected" in wait_actions[0]["reason"]
+
+    def test_repair_plan_heal_message(self):
+        """Non-mean-reverting should add MANUAL_HEAL to repair_plan."""
+        # Monotonically increasing → not mean-reverting
+        history = [10 + i * 5 for i in range(15)]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        if "ornstein_uhlenbeck" in data and not data["ornstein_uhlenbeck"]["mean_reverting"]:
+            heal_actions = [r for r in data["repair_plan"] if r["action"] == "MANUAL_HEAL"]
+            assert len(heal_actions) >= 1
+            assert "not mean-reverting" in heal_actions[0]["reason"]
+
+    def test_null_on_insufficient_history_api(self):
+        """No score_history → ornstein_uhlenbeck absent from response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "ornstein_uhlenbeck" not in data
+
+    def test_equilibrium_field(self):
+        """Response should include equilibrium (mu) field."""
+        history = [30 + ((-1) ** i) * 5 for i in range(12)]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        if "ornstein_uhlenbeck" in data:
+            assert "equilibrium" in data["ornstein_uhlenbeck"]
+            assert isinstance(data["ornstein_uhlenbeck"]["equilibrium"], float)
+
+    def test_redis_history_fallback(self):
+        """Without Redis, score_history param should still work."""
+        history = [30 + ((-1) ** i) * 3 for i in range(12)]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "ornstein_uhlenbeck" in data
 
 
 class TestFreeEnergy:

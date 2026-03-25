@@ -1393,22 +1393,74 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["regime_collapse_risk"] = regime_collapse_risk
 
     # Ornstein-Uhlenbeck mean-reversion (DS-06)
+    ou_result = None
     try:
-        if req.score_history and len(req.score_history) >= 10:
-            ou = compute_ou_process(req.score_history, omega_out)
-            if ou:
-                response["ou_process"] = {
-                    "theta": ou.theta,
-                    "mu": ou.mu,
-                    "sigma": ou.sigma,
-                    "half_life": ou.half_life,
-                    "current_deviation": ou.current_deviation,
-                    "expected_value_5": ou.expected_value_5,
-                    "expected_value_10": ou.expected_value_10,
-                    "mean_reverting": ou.mean_reverting,
+        # Build history: prefer score_history, fall back to Redis ring buffer
+        ou_history = list(req.score_history) if req.score_history else []
+        if len(ou_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _rk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                _rr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/LRANGE/{_rk}/0/99",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _rr.ok:
+                    redis_hist = _rr.json().get("result", [])
+                    if redis_hist:
+                        ou_history = [float(x) for x in redis_hist]
+            except Exception:
+                pass
+
+        if len(ou_history) >= 10:
+            ou_result = compute_ou_process(ou_history, omega_out)
+            if ou_result:
+                response["ornstein_uhlenbeck"] = {
+                    "mean_reverting": ou_result.mean_reverting,
+                    "half_life": ou_result.half_life,
+                    "expected_value_5": ou_result.expected_value_5,
+                    "expected_value_10": ou_result.expected_value_10,
+                    "equilibrium": ou_result.mu,
+                    "current_deviation": ou_result.current_deviation,
                 }
+
+        # Push current score to Redis ring buffer (keep last 100)
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _rk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                http_requests.post(
+                    f"{UPSTASH_REDIS_URL}/RPUSH/{_rk}/{omega_out}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                http_requests.post(
+                    f"{UPSTASH_REDIS_URL}/LTRIM/{_rk}/-100/-1",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+            except Exception:
+                pass
     except Exception:
         pass  # graceful degradation
+
+    # Wire OU into repair_plan
+    if ou_result:
+        if ou_result.mean_reverting and ou_result.half_life < 10:
+            repair_plan_out.append({
+                "action": "WAIT",
+                "entry_id": "*",
+                "reason": f"Self-recovery expected in {ou_result.half_life:.1f} steps. Consider waiting before manual intervention.",
+                "projected_improvement": round(abs(ou_result.current_deviation) * 0.5, 1),
+                "priority": "low",
+            })
+        elif not ou_result.mean_reverting:
+            repair_plan_out.append({
+                "action": "MANUAL_HEAL",
+                "entry_id": "*",
+                "reason": "Memory state is not mean-reverting — manual healing recommended.",
+                "projected_improvement": 0,
+                "priority": "high",
+            })
 
     # Sheaf consistency analysis
     if sheaf_result:
