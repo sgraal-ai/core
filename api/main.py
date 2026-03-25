@@ -1155,6 +1155,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "jsd": drift.jsd,
         "drift_method": drift.drift_method,
         "ensemble_score": drift.ensemble_score,
+        "sinkhorn_used": drift.sinkhorn_used,
+        "sinkhorn_iterations": drift.sinkhorn_iterations,
     }
     if drift.alpha_divergence:
         dd["alpha_divergence"] = {

@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4622,3 +4622,94 @@ class TestLevyFlight:
         assert resp.status_code == 200
         data = resp.json()
         assert "levy_flight" not in data
+
+
+class TestSinkhorn:
+    """Tests for OT-01 Sinkhorn Optimal Transport."""
+
+    def test_small_payload_exact_wasserstein(self):
+        """n ≤ 5 components should use exact Wasserstein, not Sinkhorn."""
+        # 3 components → exact Wasserstein
+        scores = [30.0, 50.0, 20.0]
+        drift = compute_drift_metrics(scores)
+        assert drift.sinkhorn_used is False
+        assert drift.sinkhorn_iterations == 0
+        assert drift.wasserstein >= 0
+
+    def test_large_payload_sinkhorn(self):
+        """n > 5 components should use Sinkhorn approximation."""
+        # 10 components → Sinkhorn
+        scores = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
+        drift = compute_drift_metrics(scores)
+        assert drift.sinkhorn_used is True
+        assert drift.sinkhorn_iterations > 0
+        assert drift.wasserstein >= 0
+
+    def test_convergence_check(self):
+        """Sinkhorn should converge within 100 iterations for normal inputs."""
+        p = [0.1, 0.2, 0.15, 0.05, 0.1, 0.15, 0.1, 0.05, 0.05, 0.05]
+        q = [0.1] * 10
+        result = sinkhorn_distance(p, q)
+        assert result is not None
+        assert result.converged is True
+        assert result.iterations <= 100
+
+    def test_fallback_on_non_convergence(self):
+        """Non-convergence should fall back gracefully (tested via drift_metrics)."""
+        # Even with extreme distributions, drift_metrics should produce valid output
+        scores = [0.001, 0.001, 0.001, 0.001, 0.001, 99.995]
+        drift = compute_drift_metrics(scores)
+        assert drift.wasserstein >= 0
+        # Either Sinkhorn converged or fell back to exact
+
+    def test_sinkhorn_iterations_count(self):
+        """sinkhorn_iterations should be positive when Sinkhorn used."""
+        result = sinkhorn_distance([0.2, 0.3, 0.5], [0.33, 0.33, 0.34])
+        assert result is not None
+        assert result.iterations > 0
+
+    def test_performance_bound(self):
+        """Sinkhorn should complete in reasonable time for n > 10."""
+        import time
+        scores = [float(i * 10) for i in range(1, 16)]  # 15 components
+        start = time.time()
+        drift = compute_drift_metrics(scores)
+        elapsed = time.time() - start
+        assert elapsed < 1.0  # must complete within 1 second
+        assert drift.sinkhorn_used is True
+
+    def test_cost_matrix_normalization(self):
+        """Cost matrix normalization should handle large magnitude differences."""
+        # Very different scales
+        p = [0.01, 0.99]
+        q = [0.5, 0.5]
+        p_vals = [0.0, 1000.0]
+        q_vals = [0.0, 1.0]
+        result = sinkhorn_distance(p, q, p_vals, q_vals)
+        assert result is not None
+        assert result.distance >= 0
+        assert result.converged is True
+
+    def test_backward_compatibility_drift_details(self):
+        """API drift_details should include sinkhorn_used and sinkhorn_iterations."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        dd = data["drift_details"]
+        assert "wasserstein" in dd
+        assert "sinkhorn_used" in dd
+        assert "sinkhorn_iterations" in dd
+        assert isinstance(dd["sinkhorn_used"], bool)
+        assert isinstance(dd["sinkhorn_iterations"], int)
+
+    def test_identical_distributions_low_distance(self):
+        """Identical distributions should give low distance (ε-regularized, not exact zero)."""
+        p = [0.25, 0.25, 0.25, 0.25]
+        q = [0.05, 0.15, 0.3, 0.5]  # different distribution
+        r_same = sinkhorn_distance(p, p)
+        r_diff = sinkhorn_distance(p, q)
+        assert r_same is not None and r_diff is not None
+        # Same distribution should have strictly lower distance than different
+        assert r_same.distance < r_diff.distance

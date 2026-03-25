@@ -20,6 +20,8 @@ class DriftMetrics:
     drift_method: str = "ensemble"
     ensemble_score: float = 0.0
     alpha_divergence: Optional[AlphaDivergence] = None
+    sinkhorn_used: bool = False
+    sinkhorn_iterations: int = 0
 
 
 def _kl_divergence(p: list[float], q: list[float]) -> float:
@@ -129,8 +131,23 @@ def compute_drift_metrics(
         q = [1.0 / n] * n
 
     kl = _kl_divergence(p, q)
-    wass = _wasserstein_1d(p, q)
     jsd_val = _jsd(p, q)
+
+    # Wasserstein: Sinkhorn for n > 5, exact for n ≤ 5
+    sinkhorn_used = False
+    sinkhorn_iterations = 0
+    if n > 5:
+        from .sinkhorn import sinkhorn_distance
+        sk = sinkhorn_distance(p, q)
+        if sk is not None and sk.converged:
+            wass = sk.distance
+            sinkhorn_used = True
+            sinkhorn_iterations = sk.iterations
+        else:
+            # Fallback to exact Wasserstein
+            wass = _wasserstein_1d(p, q)
+    else:
+        wass = _wasserstein_1d(p, q)
 
     # Scale to 0–100
     kl_scaled = min(100, kl * 100)
@@ -160,4 +177,6 @@ def compute_drift_metrics(
         drift_method=drift_method,
         ensemble_score=ensemble,
         alpha_divergence=alpha_div,
+        sinkhorn_used=sinkhorn_used,
+        sinkhorn_iterations=sinkhorn_iterations,
     )
