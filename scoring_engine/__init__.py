@@ -32,3 +32,4 @@ from .hmm import compute_hmm_regime, HMMRegimeResult
 from .zk_sheaf import compute_zk_sheaf_proof, ZKSheafProof
 from .ornstein_uhlenbeck import compute_ou_process, OUResult
 from .free_energy import compute_free_energy, FreeEnergyResult
+from .levy_flight import compute_levy_flight, LevyFlightResult

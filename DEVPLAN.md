@@ -51,6 +51,7 @@
 | SH-02 | ZK Sheaf proof (FV-06 ZK + SH-01 Sheaf Cohomology) | Done | 9 tests |
 | DS-06 | Ornstein-Uhlenbeck mean-reversion recovery prediction | Done | 10 tests |
 | FE-01 | Free Energy Functional (variational ELBO) | Done | 9 tests |
+| DS-07 | Lévy Flight tail analysis for extreme events | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -71,7 +72,7 @@
 
 ### Test Summary
 
-- **402 tests passing** (pytest)
+- **410 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -121,6 +122,7 @@
 - ZK Sheaf proof: 9 tests (null when sheaf unavailable, proof valid, proof invalid h1_rank>0, commitment uniqueness, EU AI Act compliance, n_edges count, timestamp format, graceful degradation, API response)
 - Ornstein-Uhlenbeck: 15 tests (insufficient history, mean-reverting, non-reverting trend, convergence to μ, half-life, theta non-negative, current deviation, API response, graceful degradation, identical scores, repair_plan wait, repair_plan heal, null no history, equilibrium field, Redis fallback)
 - Free Energy: 9 tests (basic computation, ELBO relation, KL non-negative, surprise normalization, first-run init, max tracking, API response, graceful degradation, importance integration)
+- Lévy Flight: 8 tests (insufficient history, light tail, heavy tail, cascade_risk integration, repair_plan message, extreme probability bounds, API response, graceful degradation)
 
 ### Deployments
 

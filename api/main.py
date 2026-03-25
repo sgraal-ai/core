@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1356,14 +1356,58 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass  # graceful degradation
 
-    # Cascade risk: jump_detected AND hawkes burst_detected simultaneously
+    # Lévy Flight tail analysis (DS-07)
+    levy_result = None
+    try:
+        levy_history = list(req.score_history) if req.score_history else []
+        if len(levy_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _lk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                _lr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/LRANGE/{_lk}/0/99",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _lr.ok:
+                    _lhist = _lr.json().get("result", [])
+                    if _lhist:
+                        levy_history = [float(x) for x in _lhist]
+            except Exception:
+                pass
+
+        if len(levy_history) >= 10:
+            levy_result = compute_levy_flight(levy_history, omega_out)
+            if levy_result:
+                response["levy_flight"] = {
+                    "alpha": levy_result.alpha,
+                    "scale": levy_result.scale,
+                    "heavy_tail_risk": levy_result.heavy_tail_risk,
+                    "extreme_event_probability": levy_result.extreme_event_probability,
+                    "tail_index": levy_result.tail_index,
+                }
+    except Exception:
+        pass  # graceful degradation
+
+    # Cascade risk: jump_detected AND burst_detected, OR all three (jump + burst + heavy tail)
     cascade_risk = False
     try:
         if jump_diffusion_result and jump_diffusion_result.jump_detected and hawkes.burst_detected:
             cascade_risk = True
+        if levy_result and levy_result.heavy_tail_risk and jump_diffusion_result and jump_diffusion_result.jump_detected and hawkes.burst_detected:
+            cascade_risk = True
     except Exception:
         pass
     response["cascade_risk"] = cascade_risk
+
+    # Wire Lévy into repair_plan
+    if levy_result and levy_result.heavy_tail_risk:
+        repair_plan_out.append({
+            "action": "MONITOR",
+            "entry_id": "*",
+            "reason": "Heavy-tail risk detected — extreme memory state changes possible. Increase monitoring frequency.",
+            "projected_improvement": 0,
+            "priority": "high",
+        })
 
     # HMM Regime-Switching (DS-05)
     hmm_result = None

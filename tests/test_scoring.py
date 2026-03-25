@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4534,3 +4534,91 @@ class TestFreeEnergy:
         # Verify free_energy is present and surprise field exists
         assert "free_energy" in data
         assert "surprise" in data["free_energy"]
+
+
+class TestLevyFlight:
+    """Tests for DS-07 Lévy Flight tail analysis."""
+
+    def test_insufficient_history_returns_none(self):
+        """Less than 10 observations returns None."""
+        assert compute_levy_flight([30] * 5, 30) is None
+        assert compute_levy_flight([30] * 9, 30) is None
+        assert compute_levy_flight([], 30) is None
+
+    def test_light_tail_classification(self):
+        """Smooth Gaussian-like changes should give light/moderate tails."""
+        # Small regular changes → alpha close to 2
+        history = [30 + ((-1) ** i) * 0.5 for i in range(15)]
+        result = compute_levy_flight(history, 30.0)
+        assert result is not None
+        assert result.tail_index in ("light", "moderate")
+        assert result.alpha >= 1.5
+
+    def test_heavy_tail_classification(self):
+        """History with occasional extreme jumps should detect heavy tails."""
+        # Mostly stable with a few huge spikes
+        history = [30, 30.1, 30.2, 80, 30, 30.1, 75, 30, 30.2, 85, 30, 30.1]
+        result = compute_levy_flight(history, 30.0)
+        assert result is not None
+        # Should detect heavier tails due to large jumps
+        assert result.alpha > 0
+        assert result.alpha <= 2.0
+
+    def test_cascade_risk_with_levy(self):
+        """cascade_risk should be top-level bool in preflight response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30 + ((-1) ** i) * 2 for i in range(12)],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "cascade_risk" in data
+        assert isinstance(data["cascade_risk"], bool)
+
+    def test_repair_plan_heavy_tail_message(self):
+        """Heavy-tail risk should add MONITOR to repair_plan."""
+        # Create history likely to trigger heavy_tail_risk
+        history = [30, 30.1, 80, 30, 30.1, 75, 30, 30.2, 85, 30, 30.1, 90]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        if "levy_flight" in data and data["levy_flight"]["heavy_tail_risk"]:
+            monitor_actions = [r for r in data["repair_plan"] if r["action"] == "MONITOR"]
+            assert len(monitor_actions) >= 1
+            assert "Heavy-tail risk" in monitor_actions[0]["reason"]
+
+    def test_extreme_event_probability_bounds(self):
+        """extreme_event_probability should be in [0, 1]."""
+        history = [30 + ((-1) ** i) * 5 for i in range(15)]
+        result = compute_levy_flight(history, 30.0)
+        assert result is not None
+        assert 0 <= result.extreme_event_probability <= 1.0
+
+    def test_levy_in_api_response(self):
+        """Preflight with 10+ score_history should include levy_flight."""
+        history = [30 + ((-1) ** i) * 3 for i in range(12)]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "levy_flight" in data
+        lf = data["levy_flight"]
+        assert "alpha" in lf
+        assert "scale" in lf
+        assert "heavy_tail_risk" in lf
+        assert "extreme_event_probability" in lf
+        assert "tail_index" in lf
+
+    def test_graceful_degradation_no_history(self):
+        """Without score_history, levy_flight should not appear."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "levy_flight" not in data
