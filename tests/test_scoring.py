@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4891,3 +4891,78 @@ class TestStabilityScore:
         assert "interpretation" in ss
         assert ss["interpretation"] in ("stable", "degrading", "critical")
         assert 0 <= ss["score"] <= 1.0
+
+
+class TestUnifiedLoss:
+    """Tests for L_v4 Unified Loss."""
+
+    def test_all_components(self):
+        """Should compute L_v4 from all 11 components."""
+        ul = compute_unified_loss(
+            L_IB=0.5, L_RL=0.3, L_EWC=0.2, L_SH=1.0, L_HG=0.8,
+            L_FE=0.6, L_OT=0.4, T_XY=0.1, L_LDT=0.05, Var_dN=0.02, L_CA=0.3,
+        )
+        assert ul.L_v4 != 0
+        assert len(ul.components) == 11
+        assert len(ul.lambda_weights) == 11
+        assert ul.dominant_loss in ul.components
+
+    def test_missing_component_fallback(self):
+        """All-zero components should produce L_v4 = 0."""
+        ul = compute_unified_loss()
+        assert ul.L_v4 == 0.0
+        assert all(v == 0.0 for v in ul.components.values())
+
+    def test_t_xy_negative_sign(self):
+        """T_XY should subtract from L_v4 (maximize transfer entropy)."""
+        ul_pos = compute_unified_loss(T_XY=1.0)
+        ul_zero = compute_unified_loss(T_XY=0.0)
+        # Higher T_XY → lower L_v4
+        assert ul_pos.L_v4 < ul_zero.L_v4
+
+    def test_dominant_loss_identification(self):
+        """dominant_loss should be the component with highest |λᵢ·Lᵢ|."""
+        ul = compute_unified_loss(L_FE=100.0)
+        assert ul.dominant_loss == "L_FE"
+        ul2 = compute_unified_loss(L_CA=50.0)
+        assert ul2.dominant_loss == "L_CA"
+
+    def test_geodesic_update_direction(self):
+        """Geodesic update should reduce weight of high-loss components."""
+        weights = [1.0] * 11
+        losses = [0.0] * 11
+        losses[5] = 10.0  # L_FE is very high
+        new_w = geodesic_update(weights, losses)
+        # Weight for L_FE (index 5) should decrease
+        assert new_w[5] < weights[5]
+
+    def test_weight_clipping_bounds(self):
+        """Weights should stay in [0.01, 10.0] after geodesic update."""
+        weights = [0.02] * 11  # near minimum
+        losses = [100.0] * 11  # extreme losses
+        new_w = geodesic_update(weights, losses)
+        for w in new_w:
+            assert 0.01 <= w <= 10.0
+
+    def test_equal_weights_fallback(self):
+        """None weights should default to equal 1/11."""
+        ul = compute_unified_loss(L_IB=1.0, lambda_weights=None)
+        expected = round(1.0 / 11, 4)
+        assert ul.lambda_weights[0] == expected
+
+    def test_unified_loss_in_api(self):
+        """Preflight should include unified_loss in response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "unified_loss" in data
+        ul = data["unified_loss"]
+        assert "L_v4" in ul
+        assert "components" in ul
+        assert "lambda_weights" in ul
+        assert "dominant_loss" in ul
+        assert "geodesic_update_count" in ul
+        assert len(ul["lambda_weights"]) == 11
+        assert len(ul["components"]) == 11

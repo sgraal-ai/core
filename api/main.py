@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -858,6 +858,33 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
     except Exception:
         pass
 
+    # Geodesic update of L_v4 weights
+    lv4_updated = False
+    try:
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            _domain = outcome.get("domain", "general")
+            _lv4_key = f"lv4_weights:{key_record.get('key_hash', 'default')}:{_domain}"
+            _lv4r = http_requests.get(
+                f"{UPSTASH_REDIS_URL}/GET/{_lv4_key}",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                timeout=2,
+            )
+            if _lv4r.ok and _lv4r.json().get("result"):
+                _lv4_data = _json.loads(_lv4r.json()["result"])
+                _weights = _lv4_data.get("weights", [1/11]*11)
+                _losses = _lv4_data.get("last_losses", [0.0]*11)
+                _count = _lv4_data.get("update_count", 0)
+                _new_weights = geodesic_update(_weights, _losses)
+                _new_data = _json.dumps({"weights": _new_weights, "last_losses": _losses, "update_count": _count + 1})
+                http_requests.post(
+                    f"{UPSTASH_REDIS_URL}/SET/{_lv4_key}/{_new_data}/EX/86400",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                lv4_updated = True
+    except Exception:
+        pass
+
     resp = {
         "outcome_id": req.outcome_id,
         "status": req.status,
@@ -865,6 +892,8 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
     }
     if rl_reward is not None:
         resp["rl_reward"] = rl_reward
+    if lv4_updated:
+        resp["lv4_geodesic_updated"] = True
     return resp
 
 
@@ -1653,6 +1682,62 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "score": ss.score,
             "components": ss.components,
             "interpretation": ss.interpretation,
+        }
+    except Exception:
+        pass  # graceful degradation
+
+    # Unified Loss L_v4
+    try:
+        # Fetch λ weights from Redis
+        _lv4_key = f"lv4_weights:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _lv4_weights = None
+        _lv4_update_count = 0
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _lv4r = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/GET/{_lv4_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _lv4r.ok and _lv4r.json().get("result"):
+                    import json as _lv4_json
+                    _lv4_data = _lv4_json.loads(_lv4r.json()["result"])
+                    _lv4_weights = _lv4_data.get("weights")
+                    _lv4_update_count = _lv4_data.get("update_count", 0)
+            except Exception:
+                pass
+
+        # Gather loss components from response
+        _fe = response.get("free_energy", {})
+        _rl = response.get("rl_adjustment", {})
+        _cons = response.get("consolidation", {})
+        _zks = response.get("zk_sheaf_proof", {})
+        _ou = response.get("ornstein_uhlenbeck", {})
+        _lf = response.get("levy_flight", {})
+        _jd = response.get("jump_diffusion", {})
+        _ss = response.get("stability_score", {})
+
+        ul = compute_unified_loss(
+            L_IB=_fe.get("elbo", 0.0),
+            L_RL=abs(_rl.get("q_value", 0.0)),
+            L_EWC=_cons.get("mean_consolidation", 0.0),
+            L_SH=float(_zks.get("n_edges_verified", 0)) * (0 if _zks.get("proof_valid", True) else 1),
+            L_HG=abs(_ou.get("current_deviation", 0.0)),
+            L_FE=_fe.get("F", 0.0),
+            L_OT=response.get("drift_details", {}).get("wasserstein", 0.0),
+            T_XY=0.0,  # transfer_entropy not yet implemented
+            L_LDT=_lf.get("extreme_event_probability", 0.0),
+            Var_dN=_jd.get("jump_rate_lambda", 0.0),
+            L_CA=1.0 - _ss.get("score", 1.0),
+            lambda_weights=_lv4_weights,
+            geodesic_update_count=_lv4_update_count,
+        )
+        response["unified_loss"] = {
+            "L_v4": ul.L_v4,
+            "components": ul.components,
+            "lambda_weights": ul.lambda_weights,
+            "dominant_loss": ul.dominant_loss,
+            "geodesic_update_count": ul.geodesic_update_count,
         }
     except Exception:
         pass  # graceful degradation
