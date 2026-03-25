@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4055,3 +4055,109 @@ class TestJumpDiffusion:
         assert result.jump_detected is True
         # Without hawkes burst, cascade should not trigger in isolation
         # (This tests the module; API integration tested separately)
+
+
+class TestHMMRegime:
+    """Tests for DS-05 HMM Regime-Switching."""
+
+    def test_insufficient_history_returns_none(self):
+        """Less than 20 observations returns None."""
+        assert compute_hmm_regime([30] * 10, 30) is None
+        assert compute_hmm_regime([30] * 19, 30) is None
+        assert compute_hmm_regime([], 30) is None
+
+    def test_stable_state(self):
+        """Consistently low scores should classify as STABLE."""
+        history = [15.0 + (i % 3) * 0.5 for i in range(25)]
+        result = compute_hmm_regime(history, 15.0)
+        assert result is not None
+        assert result.current_state in ("STABLE", "DEGRADING", "CRITICAL")
+        assert 0 <= result.state_probability <= 1.0
+        assert result.regime_duration >= 1
+
+    def test_degrading_detection(self):
+        """Gradually increasing scores should show DEGRADING or CRITICAL."""
+        # Ramp from low to mid-range
+        history = [10 + i * 2 for i in range(25)]
+        result = compute_hmm_regime(history, 60.0)
+        assert result is not None
+        # End of ramp should not be STABLE
+        assert result.current_state in ("DEGRADING", "CRITICAL")
+
+    def test_critical_detection(self):
+        """Very high scores should classify as CRITICAL."""
+        # Mostly high, some variation
+        history = [75.0 + (i % 5) for i in range(25)]
+        result = compute_hmm_regime(history, 80.0)
+        assert result is not None
+        assert result.current_state == "CRITICAL"
+
+    def test_viterbi_decoding(self):
+        """Viterbi path should have valid state indices."""
+        history = [20, 22, 21, 23, 20, 50, 55, 60, 58, 62, 80, 85, 82, 88, 90, 20, 22, 21, 23, 20]
+        result = compute_hmm_regime(history, 21.0)
+        assert result is not None
+        assert result.current_state in ("STABLE", "DEGRADING", "CRITICAL")
+        # Transition probs should sum to ~1
+        tp = result.transition_probs
+        assert abs(tp["to_stable"] + tp["to_degrading"] + tp["to_critical"] - 1.0) < 0.01
+
+    def test_regime_collapse_risk_top_level(self):
+        """regime_collapse_risk should be a top-level field in preflight response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30] * 5,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "regime_collapse_risk" in data
+        assert isinstance(data["regime_collapse_risk"], bool)
+
+    def test_hmm_in_api_with_history(self):
+        """Preflight with 20+ score_history should include hmm_regime."""
+        history = [30.0 + i * 0.5 for i in range(22)]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "hmm_regime" in data
+        hmm = data["hmm_regime"]
+        assert "current_state" in hmm
+        assert hmm["current_state"] in ("STABLE", "DEGRADING", "CRITICAL")
+        assert "state_probability" in hmm
+        assert "transition_probs" in hmm
+        assert "regime_duration" in hmm
+        tp = hmm["transition_probs"]
+        assert "to_stable" in tp
+        assert "to_degrading" in tp
+        assert "to_critical" in tp
+
+    def test_graceful_degradation_short_history(self):
+        """Without 20+ history, hmm_regime should not appear."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 31, 32],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "hmm_regime" not in data
+        assert data["regime_collapse_risk"] is False
+
+    def test_regime_duration_counting(self):
+        """regime_duration should count consecutive same-state steps."""
+        # Long stable run
+        history = [15.0] * 25
+        result = compute_hmm_regime(history, 15.0)
+        assert result is not None
+        assert result.regime_duration >= 10  # most steps should be same state
+
+    def test_transition_probs_valid(self):
+        """Transition probabilities should be valid probability distributions."""
+        history = [20, 22, 50, 55, 80, 85, 20, 22, 50, 55, 80, 85, 20, 22, 50, 55, 80, 85, 20, 22]
+        result = compute_hmm_regime(history, 50.0)
+        assert result is not None
+        tp = result.transition_probs
+        for key in ("to_stable", "to_degrading", "to_critical"):
+            assert 0 <= tp[key] <= 1.0

@@ -28,3 +28,4 @@ from .causal_graph import compute_causal_graph, CausalGraphResult, CausalEdge
 from .spectral import compute_spectral, SpectralResult
 from .consolidation import compute_consolidation, ConsolidationResult
 from .jump_diffusion import compute_jump_diffusion, JumpDiffusionResult
+from .hmm import compute_hmm_regime, HMMRegimeResult

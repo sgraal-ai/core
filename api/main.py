@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1314,6 +1314,33 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass
     response["cascade_risk"] = cascade_risk
+
+    # HMM Regime-Switching (DS-05)
+    hmm_result = None
+    try:
+        if req.score_history and len(req.score_history) >= 20:
+            hmm_result = compute_hmm_regime(req.score_history, omega_out)
+            if hmm_result:
+                response["hmm_regime"] = {
+                    "current_state": hmm_result.current_state,
+                    "state_probability": hmm_result.state_probability,
+                    "transition_probs": hmm_result.transition_probs,
+                    "regime_duration": hmm_result.regime_duration,
+                }
+    except Exception:
+        pass  # graceful degradation
+
+    # Regime collapse risk: HMM CRITICAL AND BOCPD regime_change simultaneously
+    regime_collapse_risk = False
+    try:
+        if hmm_result and hmm_result.current_state == "CRITICAL":
+            td = response.get("trend_detection", {})
+            bocpd_data = td.get("bocpd", {})
+            if bocpd_data.get("regime_change", False):
+                regime_collapse_risk = True
+    except Exception:
+        pass
+    response["regime_collapse_risk"] = regime_collapse_risk
 
     # Sheaf consistency analysis
     if sheaf_result:

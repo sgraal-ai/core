@@ -47,6 +47,7 @@
 | SP-01 | Spectral Graph Laplacian for interference analysis | Done | 9 tests |
 | MC-01 | Memory Consolidation Score (Hopfield + MI) | Done | 8 tests |
 | DS-04 | Jump-Diffusion process for flash-crash detection | Done | 10 tests |
+| DS-05 | Regime-Switching HMM for state classification | Done | 10 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -67,7 +68,7 @@
 
 ### Test Summary
 
-- **359 tests passing** (pytest)
+- **369 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -113,6 +114,7 @@
 - Spectral: 9 tests (single/empty null, two entries, fragmented, dense, Cheeger bound, mixing time, API 2+ entries, single entry no spectral)
 - Consolidation: 8 tests (single entry, two entries, fragile detection, stable detection, replay ordering, empty, Hopfield energy, API)
 - Jump-Diffusion: 10 tests (insufficient history, no jumps, single jump, flash crash risk, cascade_risk top-level, expected_next_jump, no jump high expected, API response, graceful degradation, cascade requires both)
+- HMM Regime: 10 tests (insufficient history, stable state, degrading, critical, Viterbi decoding, regime_collapse_risk top-level, API with history, graceful degradation, regime duration, transition probs)
 
 ### Deployments
 
