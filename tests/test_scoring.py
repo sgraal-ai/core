@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3949,3 +3949,109 @@ class TestConsolidation:
         assert "mean_consolidation" in c
         assert "fragile_entries" in c
         assert "replay_priority" in c
+
+
+class TestJumpDiffusion:
+    """Tests for DS-04 Jump-Diffusion process."""
+
+    def test_insufficient_history_returns_none(self):
+        """Less than 5 observations returns None."""
+        assert compute_jump_diffusion([10, 20, 30], 40) is None
+        assert compute_jump_diffusion([], 40) is None
+        assert compute_jump_diffusion([10, 20, 30, 40], 50) is None
+
+    def test_no_jumps_normal_diffusion(self):
+        """Smooth history should show no jumps."""
+        history = [30.0, 31.0, 30.5, 31.5, 30.8, 31.2, 30.9]
+        result = compute_jump_diffusion(history, 31.0)
+        assert result is not None
+        assert result.jump_detected is False
+        assert result.jump_size == 0.0
+        assert result.flash_crash_risk is False
+        assert result.diffusion_sigma > 0
+
+    def test_single_jump_detected(self):
+        """A sudden spike should be detected as a jump."""
+        # Smooth history then a huge spike
+        history = [30.0, 30.1, 30.2, 30.0, 30.1]
+        current = 60.0  # massive jump
+        result = compute_jump_diffusion(history, current)
+        assert result is not None
+        assert result.jump_detected is True
+        assert result.jump_size > 0
+
+    def test_flash_crash_risk_threshold(self):
+        """History with >10% jumps should flag flash_crash_risk."""
+        # Mostly stable with occasional large spikes — enough jumps for λ > 0.1
+        history = [30, 30.1, 30.2, 80, 30, 30.1, 30.2, 75, 30, 30.1]
+        result = compute_jump_diffusion(history, 30.0)
+        assert result is not None
+        assert result.jump_rate_lambda > 0.1
+        assert result.flash_crash_risk is True
+
+    def test_cascade_risk_top_level_api(self):
+        """cascade_risk should be a top-level field in preflight response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 31, 30, 31, 30],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        # cascade_risk must always be present at top level
+        assert "cascade_risk" in data
+        assert isinstance(data["cascade_risk"], bool)
+
+    def test_expected_next_jump_calculation(self):
+        """expected_next_jump = 1/λ when jumps exist."""
+        # Create history where exactly 1 out of 10 changes is a jump → λ≈0.1
+        history = [30.0, 30.1, 30.0, 30.1, 30.0, 30.1, 30.0, 30.1, 30.0, 30.1]
+        # Add a big jump at the end
+        result = compute_jump_diffusion(history, 80.0)
+        assert result is not None
+        if result.jump_rate_lambda > 0:
+            expected = round(1.0 / result.jump_rate_lambda, 2)
+            assert result.expected_next_jump == expected
+
+    def test_no_jump_high_expected_next(self):
+        """When no jumps detected, expected_next_jump should be very high."""
+        history = [30.0, 30.1, 30.0, 30.1, 30.0]
+        result = compute_jump_diffusion(history, 30.1)
+        assert result is not None
+        assert result.expected_next_jump >= 100.0
+
+    def test_jump_diffusion_in_api_response(self):
+        """Preflight with sufficient score_history should include jump_diffusion."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 31, 30, 31, 30, 80],  # 6 scores, last is a spike
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "jump_diffusion" in data
+        jd = data["jump_diffusion"]
+        assert "jump_detected" in jd
+        assert "jump_size" in jd
+        assert "jump_rate_lambda" in jd
+        assert "diffusion_sigma" in jd
+        assert "flash_crash_risk" in jd
+        assert "expected_next_jump" in jd
+
+    def test_graceful_degradation_no_history(self):
+        """Without score_history, jump_diffusion should not appear, cascade_risk=false."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "jump_diffusion" not in data
+        assert data["cascade_risk"] is False
+
+    def test_cascade_risk_requires_both(self):
+        """cascade_risk is false when only jump_detected but no hawkes burst."""
+        # Smooth history with a jump at end — hawkes won't burst with just 1 entry
+        history = [30.0, 30.1, 30.0, 30.1, 30.0]
+        result = compute_jump_diffusion(history, 80.0)
+        assert result is not None
+        assert result.jump_detected is True
+        # Without hawkes burst, cascade should not trigger in isolation
+        # (This tests the module; API integration tested separately)

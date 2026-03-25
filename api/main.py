@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1288,6 +1288,32 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             }
     except Exception:
         pass
+
+    # Jump-Diffusion process (DS-04)
+    jump_diffusion_result = None
+    try:
+        if req.score_history and len(req.score_history) >= 5:
+            jump_diffusion_result = compute_jump_diffusion(req.score_history, omega_out)
+            if jump_diffusion_result:
+                response["jump_diffusion"] = {
+                    "jump_detected": jump_diffusion_result.jump_detected,
+                    "jump_size": jump_diffusion_result.jump_size,
+                    "jump_rate_lambda": jump_diffusion_result.jump_rate_lambda,
+                    "diffusion_sigma": jump_diffusion_result.diffusion_sigma,
+                    "flash_crash_risk": jump_diffusion_result.flash_crash_risk,
+                    "expected_next_jump": jump_diffusion_result.expected_next_jump,
+                }
+    except Exception:
+        pass  # graceful degradation
+
+    # Cascade risk: jump_detected AND hawkes burst_detected simultaneously
+    cascade_risk = False
+    try:
+        if jump_diffusion_result and jump_diffusion_result.jump_detected and hawkes.burst_detected:
+            cascade_risk = True
+    except Exception:
+        pass
+    response["cascade_risk"] = cascade_risk
 
     # Sheaf consistency analysis
     if sheaf_result:
