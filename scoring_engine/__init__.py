@@ -30,3 +30,4 @@ from .consolidation import compute_consolidation, ConsolidationResult
 from .jump_diffusion import compute_jump_diffusion, JumpDiffusionResult
 from .hmm import compute_hmm_regime, HMMRegimeResult
 from .zk_sheaf import compute_zk_sheaf_proof, ZKSheafProof
+from .ornstein_uhlenbeck import compute_ou_process, OUResult

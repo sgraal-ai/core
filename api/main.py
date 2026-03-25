@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1341,6 +1341,24 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass
     response["regime_collapse_risk"] = regime_collapse_risk
+
+    # Ornstein-Uhlenbeck mean-reversion (DS-06)
+    try:
+        if req.score_history and len(req.score_history) >= 10:
+            ou = compute_ou_process(req.score_history, omega_out)
+            if ou:
+                response["ou_process"] = {
+                    "theta": ou.theta,
+                    "mu": ou.mu,
+                    "sigma": ou.sigma,
+                    "half_life": ou.half_life,
+                    "current_deviation": ou.current_deviation,
+                    "expected_value_5": ou.expected_value_5,
+                    "expected_value_10": ou.expected_value_10,
+                    "mean_reverting": ou.mean_reverting,
+                }
+    except Exception:
+        pass  # graceful degradation
 
     # Sheaf consistency analysis
     if sheaf_result:

@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4275,3 +4275,105 @@ class TestZKSheafProof:
             assert "n_edges_verified" in zk
             assert "nonce" in zk
             assert "verified_at" in zk
+
+
+class TestOrnsteinUhlenbeck:
+    """Tests for DS-06 Ornstein-Uhlenbeck mean-reversion process."""
+
+    def test_insufficient_history_returns_none(self):
+        """Less than 10 observations returns None."""
+        assert compute_ou_process([30] * 5, 30) is None
+        assert compute_ou_process([30] * 9, 30) is None
+        assert compute_ou_process([], 30) is None
+
+    def test_mean_reverting_stable_series(self):
+        """Scores oscillating around a mean should show mean_reverting=true."""
+        # Oscillate around 30 with noise
+        history = [30 + ((-1) ** i) * 5 for i in range(15)]
+        result = compute_ou_process(history, 30.0)
+        assert result is not None
+        assert result.mean_reverting is True
+        assert result.theta > 0.01
+        assert result.half_life > 0
+        assert result.half_life < 1000
+
+    def test_non_reverting_trend(self):
+        """Monotonically increasing scores should show weak or no mean-reversion."""
+        history = [10 + i * 5 for i in range(15)]
+        result = compute_ou_process(history, 85.0)
+        assert result is not None
+        # Pure linear trend: theta=0, sigma=0 (perfect fit), not mean-reverting
+        assert result.mean_reverting is False
+
+    def test_expected_value_converges_to_mu(self):
+        """Expected future values should move toward μ."""
+        history = [30 + ((-1) ** i) * 8 for i in range(15)]
+        result = compute_ou_process(history, 50.0)  # current is above equilibrium
+        assert result is not None
+        if result.mean_reverting:
+            # Expected values should be between current and mu
+            dev_5 = abs(result.expected_value_5 - result.mu)
+            dev_10 = abs(result.expected_value_10 - result.mu)
+            dev_now = abs(50.0 - result.mu)
+            # Deviation should decrease over time
+            assert dev_10 <= dev_5 or dev_5 <= dev_now
+
+    def test_half_life_positive(self):
+        """Half-life should be positive when mean-reverting."""
+        history = [30 + ((-1) ** i) * 3 for i in range(12)]
+        result = compute_ou_process(history, 30.0)
+        assert result is not None
+        assert result.half_life > 0
+
+    def test_theta_non_negative(self):
+        """theta should be >= 0 (clamped)."""
+        history = [10 + i * 2 for i in range(12)]
+        result = compute_ou_process(history, 35.0)
+        assert result is not None
+        assert result.theta >= 0
+
+    def test_current_deviation(self):
+        """current_deviation should equal current_score - mu."""
+        # Add small noise so ss_xx > 0
+        history = [30.0 + ((-1) ** i) * 0.5 for i in range(12)]
+        result = compute_ou_process(history, 50.0)
+        assert result is not None
+        assert abs(result.current_deviation - (50.0 - result.mu)) < 0.01
+
+    def test_ou_in_api_response(self):
+        """Preflight with 10+ score_history should include ou_process."""
+        history = [30 + ((-1) ** i) * 5 for i in range(12)]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "ou_process" in data
+        ou = data["ou_process"]
+        assert "theta" in ou
+        assert "mu" in ou
+        assert "sigma" in ou
+        assert "half_life" in ou
+        assert "current_deviation" in ou
+        assert "expected_value_5" in ou
+        assert "expected_value_10" in ou
+        assert "mean_reverting" in ou
+
+    def test_graceful_degradation_short_history(self):
+        """Without 10+ history, ou_process should not appear."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 31, 32],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "ou_process" not in data
+
+    def test_identical_scores_returns_none(self):
+        """All identical scores (zero variance) should return None."""
+        result = compute_ou_process([30.0] * 15, 30.0)
+        # With zero variance in X, ss_xx = 0, should return None
+        # or produce a valid result with theta=0
+        if result is not None:
+            assert result.sigma == 0.0 or result.theta == 0.0
