@@ -50,6 +50,7 @@
 | DS-05 | Regime-Switching HMM for state classification | Done | 10 tests |
 | SH-02 | ZK Sheaf proof (FV-06 ZK + SH-01 Sheaf Cohomology) | Done | 9 tests |
 | DS-06 | Ornstein-Uhlenbeck mean-reversion recovery prediction | Done | 10 tests |
+| FE-01 | Free Energy Functional (variational ELBO) | Done | 9 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -70,7 +71,7 @@
 
 ### Test Summary
 
-- **388 tests passing** (pytest)
+- **397 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -119,6 +120,7 @@
 - HMM Regime: 10 tests (insufficient history, stable state, degrading, critical, Viterbi decoding, regime_collapse_risk top-level, API with history, graceful degradation, regime duration, transition probs)
 - ZK Sheaf proof: 9 tests (null when sheaf unavailable, proof valid, proof invalid h1_rank>0, commitment uniqueness, EU AI Act compliance, n_edges count, timestamp format, graceful degradation, API response)
 - Ornstein-Uhlenbeck: 10 tests (insufficient history, mean-reverting, non-reverting trend, convergence to μ, half-life, theta non-negative, current deviation, API response, graceful degradation, identical scores)
+- Free Energy: 9 tests (basic computation, ELBO relation, KL non-negative, surprise normalization, first-run init, max tracking, API response, graceful degradation, importance integration)
 
 ### Deployments
 

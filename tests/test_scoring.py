@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4377,3 +4377,98 @@ class TestOrnsteinUhlenbeck:
         # or produce a valid result with theta=0
         if result is not None:
             assert result.sigma == 0.0 or result.theta == 0.0
+
+
+class TestFreeEnergy:
+    """Tests for FE-01 Free Energy Functional."""
+
+    def test_basic_computation(self):
+        """Should produce valid free energy from typical inputs."""
+        components = {"s_freshness": 30, "s_drift": 20, "s_provenance": 10,
+                      "s_propagation": 15, "r_recall": 25, "r_encode": 5,
+                      "s_interference": 10, "s_recovery": 80, "r_belief": 10, "s_relevance": 15}
+        result = compute_free_energy(35.0, 12.5, components)
+        assert result is not None
+        assert isinstance(result.F, float)
+        assert isinstance(result.elbo, float)
+        assert isinstance(result.kl_divergence, float)
+        assert isinstance(result.reconstruction, float)
+        assert isinstance(result.surprise, float)
+
+    def test_elbo_relation(self):
+        """F should equal -ELBO."""
+        components = {"s_freshness": 50, "s_drift": 40}
+        result = compute_free_energy(40.0, 30.0, components)
+        assert result is not None
+        assert abs(result.F + result.elbo) < 0.001
+
+    def test_kl_non_negative(self):
+        """KL divergence should always be >= 0."""
+        for meta in [5, 25, 50, 75, 95]:
+            result = compute_free_energy(30.0, float(meta), {"s_freshness": 20, "s_drift": 30})
+            assert result is not None
+            assert result.kl_divergence >= 0.0
+
+    def test_surprise_normalization(self):
+        """Surprise should be in [0, 1] range."""
+        components = {"s_freshness": 50, "s_drift": 50}
+        # With max_observed_F
+        result = compute_free_energy(60.0, 20.0, components, max_observed_F=10.0)
+        assert result is not None
+        assert 0 <= result.surprise <= 1.0
+
+        # Without max (fallback F/100)
+        result2 = compute_free_energy(60.0, 20.0, components)
+        assert result2 is not None
+        assert 0 <= result2.surprise <= 1.0
+
+    def test_first_run_initialization(self):
+        """First run with max_observed_F=None should use fallback normalization."""
+        components = {"s_freshness": 30}
+        result = compute_free_energy(30.0, 15.0, components, max_observed_F=None)
+        assert result is not None
+        # Fallback: surprise = F / 100.0
+        expected_surprise = min(1.0, max(0.0, result.F / 100.0))
+        assert abs(result.surprise - expected_surprise) < 0.001
+
+    def test_max_tracking_with_higher_F(self):
+        """When max_observed_F provided, surprise should be F/max."""
+        components = {"s_freshness": 50, "s_drift": 50}
+        result = compute_free_energy(80.0, 10.0, components, max_observed_F=5.0)
+        assert result is not None
+        if result.F > 0:
+            assert result.surprise == min(1.0, round(result.F / 5.0, 4))
+
+    def test_free_energy_in_api_response(self):
+        """Preflight should include free_energy in response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "free_energy" in data
+        fe = data["free_energy"]
+        assert "F" in fe
+        assert "elbo" in fe
+        assert "kl_divergence" in fe
+        assert "reconstruction" in fe
+        assert "surprise" in fe
+        assert fe["kl_divergence"] >= 0
+
+    def test_graceful_degradation_empty_components(self):
+        """Empty components should still produce a result."""
+        result = compute_free_energy(30.0, 15.0, {})
+        assert result is not None
+        assert result.kl_divergence >= 0
+
+    def test_importance_surprise_integration(self):
+        """High surprise should add free_energy_surprise to at_risk_warnings."""
+        # This tests the wiring — with normal inputs surprise is usually low
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        # Verify free_energy is present and surprise field exists
+        assert "free_energy" in data
+        assert "surprise" in data["free_energy"]

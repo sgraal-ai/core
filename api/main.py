@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1197,6 +1197,56 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "calibrated_scores": cal.calibrated_scores,
         "meta_score": cal.meta_score,
     }
+
+    # Free Energy functional (FE-01)
+    fe_surprise = 0.0
+    try:
+        # Fetch max_observed_F from Redis
+        fe_max_key = f"fe_max:{key_record.get('key_hash', 'default')}:{req.domain}"
+        fe_max = None
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _r = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/GET/{fe_max_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _r.ok and _r.json().get("result") is not None:
+                    fe_max = float(_r.json()["result"])
+            except Exception:
+                pass
+
+        fe = compute_free_energy(omega_out, cal.meta_score, result.component_breakdown, fe_max)
+        if fe:
+            response["free_energy"] = {
+                "F": fe.F,
+                "elbo": fe.elbo,
+                "kl_divergence": fe.kl_divergence,
+                "reconstruction": fe.reconstruction,
+                "surprise": fe.surprise,
+            }
+            fe_surprise = fe.surprise
+
+            # Update max_observed_F in Redis if current F is larger
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                try:
+                    new_max = max(fe.F, fe_max or 1.0)
+                    if fe_max is None or fe.F > fe_max:
+                        http_requests.post(
+                            f"{UPSTASH_REDIS_URL}/SET/{fe_max_key}/{new_max}/EX/7200",
+                            headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                            timeout=2,
+                        )
+                except Exception:
+                    pass
+    except Exception:
+        pass  # graceful degradation
+
+    # Wire surprise into at_risk_warnings: entries with surprise > 0.8 get elevated
+    if fe_surprise > 0.8 and at_risk_warnings:
+        for w in at_risk_warnings:
+            w["free_energy_surprise"] = fe_surprise
+            w["warning"] = w.get("warning", "") + " [HIGH FREE ENERGY SURPRISE]"
 
     # Hawkes self-exciting process
     entry_ages = [e.timestamp_age_days for e in entries]
