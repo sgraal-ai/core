@@ -53,6 +53,7 @@
 | FE-01 | Free Energy Functional (variational ELBO) | Done | 9 tests |
 | DS-07 | Lévy Flight tail analysis for extreme events | Done | 8 tests |
 | OT-01 | Sinkhorn Optimal Transport (accelerated Wasserstein) | Done | 9 tests |
+| RD-01 | Rate-Distortion optimal memory retention | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -73,7 +74,7 @@
 
 ### Test Summary
 
-- **419 tests passing** (pytest)
+- **427 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -125,6 +126,7 @@
 - Free Energy: 9 tests (basic computation, ELBO relation, KL non-negative, surprise normalization, first-run init, max tracking, API response, graceful degradation, importance integration)
 - Lévy Flight: 8 tests (insufficient history, light tail, heavy tail, cascade_risk integration, repair_plan message, extreme probability bounds, API response, graceful degradation)
 - Sinkhorn OT: 9 tests (small payload exact, large payload Sinkhorn, convergence, fallback, iterations count, performance bound, cost normalization, backward compat drift_details, identical distributions)
+- Rate-Distortion: 8 tests (single entry, two entries, recommend_delete trigger, keep_score bounds, dynamic lambda, repair_plan integration, compression ratio, graceful degradation)
 
 ### Deployments
 

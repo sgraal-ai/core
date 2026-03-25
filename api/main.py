@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1340,6 +1340,39 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             }
     except Exception:
         pass
+
+    # Rate-Distortion optimal retention (RD-01)
+    try:
+        rd_entries = [{"id": e.id, "source_trust": e.source_trust,
+                       "timestamp_age_days": e.timestamp_age_days,
+                       "source_conflict": e.source_conflict,
+                       "downstream_count": e.downstream_count} for e in entries]
+        rd = compute_rate_distortion(rd_entries, omega_out, result.component_breakdown,
+                                     system_health=100.0 - omega_out)
+        if rd:
+            response["rate_distortion"] = {
+                "entries": [{"entry_id": r.entry_id, "information_value": r.information_value,
+                             "distortion_cost": r.distortion_cost, "keep_score": r.keep_score,
+                             "recommend_delete": r.recommend_delete} for r in rd.entries],
+                "total_rate": rd.total_rate,
+                "total_distortion": rd.total_distortion,
+                "compression_ratio": rd.compression_ratio,
+                "deletable_count": rd.deletable_count,
+                "lambda_used": rd.lambda_used,
+            }
+            # Wire into repair_plan
+            for r in rd.entries:
+                if r.recommend_delete:
+                    eid = r.entry_id if full_detail else ObfuscatedId.obfuscate(r.entry_id, session_key)
+                    repair_plan_out.append({
+                        "action": "DELETE",
+                        "entry_id": eid,
+                        "reason": f"Consider removing entry {eid} — low information value relative to distortion cost.",
+                        "projected_improvement": round(r.distortion_cost * 0.5, 1),
+                        "priority": "medium",
+                    })
+    except Exception:
+        pass  # graceful degradation
 
     # Jump-Diffusion process (DS-04)
     jump_diffusion_result = None

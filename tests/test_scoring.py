@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4713,3 +4713,91 @@ class TestSinkhorn:
         assert r_same is not None and r_diff is not None
         # Same distribution should have strictly lower distance than different
         assert r_same.distance < r_diff.distance
+
+
+class TestRateDistortion:
+    """Tests for RD-01 Rate-Distortion optimal retention."""
+
+    def test_single_entry(self):
+        """Single entry should produce valid result."""
+        entries = [{"id": "e1", "source_trust": 0.9, "timestamp_age_days": 5,
+                    "source_conflict": 0.1, "downstream_count": 2}]
+        result = compute_rate_distortion(entries, 30.0, {"s_freshness": 20})
+        assert result is not None
+        assert len(result.entries) == 1
+        assert result.entries[0].information_value > 0
+        assert result.entries[0].keep_score > 0
+
+    def test_two_entries(self):
+        """Two entries should compute distortion between them."""
+        entries = [
+            {"id": "e1", "source_trust": 0.95, "timestamp_age_days": 1, "source_conflict": 0.05, "downstream_count": 1},
+            {"id": "e2", "source_trust": 0.3, "timestamp_age_days": 200, "source_conflict": 0.8, "downstream_count": 10},
+        ]
+        result = compute_rate_distortion(entries, 30.0, {"s_freshness": 50})
+        assert result is not None
+        assert len(result.entries) == 2
+        assert result.total_rate > 0
+        assert result.total_distortion > 0
+
+    def test_recommend_delete_trigger(self):
+        """Low keep_score + low omega should recommend delete."""
+        # Entry with very low trust, very old, high conflict → low info, high distortion
+        entries = [
+            {"id": "good", "source_trust": 0.95, "timestamp_age_days": 1, "source_conflict": 0.05, "downstream_count": 1},
+            {"id": "bad", "source_trust": 0.01, "timestamp_age_days": 500, "source_conflict": 0.99, "downstream_count": 50},
+        ]
+        result = compute_rate_distortion(entries, 20.0, {"s_freshness": 80}, keep_threshold=0.5)
+        assert result is not None
+        # At least one entry should have recommend_delete
+        deletable = [e for e in result.entries if e.recommend_delete]
+        assert result.deletable_count == len(deletable)
+
+    def test_keep_score_bounds(self):
+        """keep_score should be non-negative."""
+        entries = [{"id": f"e{i}", "source_trust": 0.5, "timestamp_age_days": 10,
+                    "source_conflict": 0.1, "downstream_count": 1} for i in range(5)]
+        result = compute_rate_distortion(entries, 50.0, {})
+        assert result is not None
+        for e in result.entries:
+            assert e.keep_score >= 0
+            assert e.information_value >= 0
+            assert e.distortion_cost >= 0
+
+    def test_dynamic_lambda_scaling(self):
+        """Lambda should scale with system_health."""
+        entries = [{"id": "e1", "source_trust": 0.9, "timestamp_age_days": 5}]
+        # High health → low lambda
+        r_high = compute_rate_distortion(entries, 30.0, {}, system_health=90.0)
+        # Low health → high lambda
+        r_low = compute_rate_distortion(entries, 30.0, {}, system_health=10.0)
+        assert r_high is not None and r_low is not None
+        assert r_high.lambda_used < r_low.lambda_used
+
+    def test_repair_plan_integration(self):
+        """API should add DELETE to repair_plan for deletable entries."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="keep_me", source_trust=0.99, timestamp_age_days=1),
+            ],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "rate_distortion" in data
+        rd = data["rate_distortion"]
+        assert "entries" in rd
+        assert "compression_ratio" in rd
+        assert "lambda_used" in rd
+        assert "deletable_count" in rd
+
+    def test_compression_ratio_computation(self):
+        """compression_ratio should be deletable_count / total."""
+        entries = [{"id": f"e{i}", "source_trust": 0.5, "timestamp_age_days": 10} for i in range(4)]
+        result = compute_rate_distortion(entries, 50.0, {})
+        assert result is not None
+        expected = result.deletable_count / 4
+        assert abs(result.compression_ratio - expected) < 0.001
+
+    def test_graceful_degradation_empty(self):
+        """Empty entries should return None."""
+        assert compute_rate_distortion([], 30.0, {}) is None
