@@ -25,3 +25,4 @@ from .rl_policy import get_rl_adjustment, update_from_outcome, get_q_table, rese
 from .bocpd import compute_bocpd, BOCPDResult, BOCPDetector
 from .rmt import compute_rmt, RMTResult
 from .causal_graph import compute_causal_graph, CausalGraphResult, CausalEdge
+from .spectral import compute_spectral, SpectralResult

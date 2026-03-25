@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -3777,3 +3777,91 @@ class TestCausalGraph:
             assert "root_cause" in cg
             assert "causal_chain" in cg
             assert "causal_explanation" in cg
+
+
+class TestSpectral:
+    def test_single_entry_returns_none(self):
+        result = compute_spectral([{"id": "m1", "content": "hello"}])
+        assert result is None
+
+    def test_empty_returns_none(self):
+        result = compute_spectral([])
+        assert result is None
+
+    def test_two_entries(self):
+        entries = [
+            {"id": "a", "content": "Budapest office open weekdays"},
+            {"id": "b", "content": "Budapest office closed weekends"},
+        ]
+        result = compute_spectral(entries)
+        assert result is not None
+        assert result.fiedler_value >= 0
+        assert result.graph_connectivity in ("fragmented", "normal", "dense")
+
+    def test_fragmented_graph(self):
+        """Unrelated entries → fragmented (low Fiedler)."""
+        entries = [
+            {"id": "a", "content": "quantum physics experiments"},
+            {"id": "b", "content": "hungarian goulash recipe"},
+        ]
+        result = compute_spectral(entries)
+        assert result is not None
+        # Very different content → weak connection
+
+    def test_dense_graph(self):
+        """Similar entries → connected graph with valid spectral metrics."""
+        entries = [
+            {"id": "a", "content": "Budapest office Vaci ut open 9 to 18"},
+            {"id": "b", "content": "Budapest office Vaci ut open weekdays 9 18"},
+            {"id": "c", "content": "Budapest office address Vaci ut 47"},
+        ]
+        result = compute_spectral(entries)
+        assert result is not None
+        assert result.fiedler_value >= 0
+
+    def test_cheeger_bound_valid(self):
+        entries = [
+            {"id": "a", "content": "alpha beta gamma delta"},
+            {"id": "b", "content": "alpha beta gamma epsilon"},
+            {"id": "c", "content": "alpha beta zeta eta"},
+        ]
+        result = compute_spectral(entries)
+        assert result is not None
+        assert result.cheeger_bound["lower"] <= result.cheeger_bound["upper"]
+        assert result.cheeger_bound["lower"] >= 0
+
+    def test_mixing_time_positive(self):
+        entries = [
+            {"id": "a", "content": "memory entry one about topic"},
+            {"id": "b", "content": "memory entry two about topic"},
+        ]
+        result = compute_spectral(entries)
+        assert result is not None
+        assert result.mixing_time_estimate > 0
+
+    def test_spectral_in_api_response(self):
+        """Preflight with 2+ entries should include spectral_analysis."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="sp_a"),
+                _fresh_entry(id="sp_b"),
+            ],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "spectral_analysis" in data
+        sa = data["spectral_analysis"]
+        assert "fiedler_value" in sa
+        assert "spectral_gap" in sa
+        assert "graph_connectivity" in sa
+        assert "cheeger_bound" in sa
+        assert "mixing_time_estimate" in sa
+
+    def test_no_spectral_single_entry(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+
+        assert resp.status_code == 200
+        assert "spectral_analysis" not in resp.json()

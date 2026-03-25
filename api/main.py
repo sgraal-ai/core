@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1254,6 +1254,21 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "root_cause": cg.root_cause,
                 "causal_chain": cg.causal_chain,
                 "causal_explanation": cg.causal_explanation,
+            }
+    except Exception:
+        pass  # graceful degradation
+
+    # Spectral graph Laplacian analysis
+    try:
+        sp_entries = [{"id": e.id, "content": e.content, "prompt_embedding": e.prompt_embedding} for e in entries]
+        sp = compute_spectral(sp_entries)
+        if sp:
+            response["spectral_analysis"] = {
+                "fiedler_value": sp.fiedler_value,
+                "spectral_gap": sp.spectral_gap,
+                "graph_connectivity": sp.graph_connectivity,
+                "cheeger_bound": sp.cheeger_bound,
+                "mixing_time_estimate": sp.mixing_time_estimate,
             }
     except Exception:
         pass  # graceful degradation
