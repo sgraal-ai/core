@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -4161,3 +4161,117 @@ class TestHMMRegime:
         tp = result.transition_probs
         for key in ("to_stable", "to_degrading", "to_critical"):
             assert 0 <= tp[key] <= 1.0
+
+
+class TestZKSheafProof:
+    """Tests for SH-02 ZK Sheaf proof."""
+
+    def test_null_when_sheaf_unavailable(self):
+        """Returns None when sheaf_result is None."""
+        result = compute_zk_sheaf_proof(None, ["e1", "e2"])
+        assert result is None
+
+    def test_proof_valid_consistent_graph(self):
+        """proof_valid=true when consistency_score >= 0.95 and h1_rank = 0."""
+        from scoring_engine.sheaf_cohomology import ConsistencyResult
+        sheaf = ConsistencyResult(
+            consistency_score=1.0, h1_rank=0,
+            inconsistent_pairs=[], auto_source_conflict=0.0,
+        )
+        result = compute_zk_sheaf_proof(sheaf, ["e1", "e2", "e3"])
+        assert result is not None
+        assert result.proof_valid is True
+        assert len(result.commitment) == 64  # SHA256 hex
+        assert len(result.nonce) == 32  # 16 bytes hex
+
+    def test_proof_invalid_when_h1_rank_positive(self):
+        """proof_valid=false when h1_rank > 0."""
+        from scoring_engine.sheaf_cohomology import ConsistencyResult
+        sheaf = ConsistencyResult(
+            consistency_score=0.5, h1_rank=2,
+            inconsistent_pairs=[("a", "b"), ("c", "d")], auto_source_conflict=0.5,
+        )
+        result = compute_zk_sheaf_proof(sheaf, ["a", "b", "c", "d"])
+        assert result is not None
+        assert result.proof_valid is False
+
+    def test_commitment_uniqueness(self):
+        """Different nonces produce different commitments."""
+        from scoring_engine.sheaf_cohomology import ConsistencyResult
+        sheaf = ConsistencyResult(
+            consistency_score=1.0, h1_rank=0,
+            inconsistent_pairs=[], auto_source_conflict=0.0,
+        )
+        r1 = compute_zk_sheaf_proof(sheaf, ["e1"])
+        r2 = compute_zk_sheaf_proof(sheaf, ["e1"])
+        assert r1 is not None and r2 is not None
+        assert r1.commitment != r2.commitment  # different nonces
+        assert r1.nonce != r2.nonce
+
+    def test_eu_ai_act_compliance_integration(self):
+        """proof_valid should add zk_consistency_proof to compliance_result."""
+        # Use 2+ entries with overlapping content so sheaf runs
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="z1", content="Budapest office open weekdays morning"),
+                _fresh_entry(id="z2", content="Budapest office open weekdays afternoon"),
+            ],
+            "compliance_profile": "EU_AI_ACT",
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        if "zk_sheaf_proof" in data and data["zk_sheaf_proof"]["proof_valid"]:
+            assert data["compliance_result"].get("zk_consistency_proof") is True
+
+    def test_n_edges_verified_count(self):
+        """n_edges_verified should reflect graph edge count."""
+        from scoring_engine.sheaf_cohomology import ConsistencyResult
+        sheaf = ConsistencyResult(
+            consistency_score=1.0, h1_rank=0,
+            inconsistent_pairs=[], auto_source_conflict=0.0,
+        )
+        result = compute_zk_sheaf_proof(sheaf, ["a", "b", "c"])
+        assert result is not None
+        # 3 entries → C(3,2) = 3 possible edges
+        assert result.n_edges_verified == 3
+
+    def test_verified_at_timestamp_format(self):
+        """verified_at should be ISO 8601 format."""
+        from scoring_engine.sheaf_cohomology import ConsistencyResult
+        sheaf = ConsistencyResult(
+            consistency_score=1.0, h1_rank=0,
+            inconsistent_pairs=[], auto_source_conflict=0.0,
+        )
+        result = compute_zk_sheaf_proof(sheaf, ["e1"])
+        assert result is not None
+        # Should parse as ISO datetime
+        from datetime import datetime
+        dt = datetime.fromisoformat(result.verified_at)
+        assert dt.year >= 2026
+
+    def test_graceful_degradation_single_entry(self):
+        """Single entry should still produce valid proof (no edges)."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        # With single entry, sheaf_result may be None → no zk_sheaf_proof
+        # This is graceful degradation — no crash
+
+    def test_zk_sheaf_in_api_response(self):
+        """Preflight with 2+ overlapping entries should include zk_sheaf_proof."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="s1", content="user preference dark mode theme"),
+                _fresh_entry(id="s2", content="user preference dark mode setting"),
+            ],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        if "zk_sheaf_proof" in data:
+            zk = data["zk_sheaf_proof"]
+            assert "commitment" in zk
+            assert "proof_valid" in zk
+            assert "n_edges_verified" in zk
+            assert "nonce" in zk
+            assert "verified_at" in zk

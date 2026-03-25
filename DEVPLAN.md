@@ -48,6 +48,7 @@
 | MC-01 | Memory Consolidation Score (Hopfield + MI) | Done | 8 tests |
 | DS-04 | Jump-Diffusion process for flash-crash detection | Done | 10 tests |
 | DS-05 | Regime-Switching HMM for state classification | Done | 10 tests |
+| SH-02 | ZK Sheaf proof (FV-06 ZK + SH-01 Sheaf Cohomology) | Done | 9 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -68,7 +69,7 @@
 
 ### Test Summary
 
-- **369 tests passing** (pytest)
+- **378 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -115,6 +116,7 @@
 - Consolidation: 8 tests (single entry, two entries, fragile detection, stable detection, replay ordering, empty, Hopfield energy, API)
 - Jump-Diffusion: 10 tests (insufficient history, no jumps, single jump, flash crash risk, cascade_risk top-level, expected_next_jump, no jump high expected, API response, graceful degradation, cascade requires both)
 - HMM Regime: 10 tests (insufficient history, stable state, degrading, critical, Viterbi decoding, regime_collapse_risk top-level, API with history, graceful degradation, regime duration, transition probs)
+- ZK Sheaf proof: 9 tests (null when sheaf unavailable, proof valid, proof invalid h1_rank>0, commitment uniqueness, EU AI Act compliance, n_edges count, timestamp format, graceful degradation, API response)
 
 ### Deployments
 

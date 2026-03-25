@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1350,6 +1350,23 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "inconsistent_pairs": [list(p) for p in sheaf_result.inconsistent_pairs],
             "auto_source_conflict": sheaf_result.auto_source_conflict,
         }
+
+    # ZK Sheaf proof (SH-02): combine FV-06 ZK commitment + SH-01 sheaf cohomology
+    try:
+        zk_sheaf = compute_zk_sheaf_proof(sheaf_result, [e.id for e in entries])
+        if zk_sheaf:
+            response["zk_sheaf_proof"] = {
+                "commitment": zk_sheaf.commitment,
+                "proof_valid": zk_sheaf.proof_valid,
+                "n_edges_verified": zk_sheaf.n_edges_verified,
+                "nonce": zk_sheaf.nonce,
+                "verified_at": zk_sheaf.verified_at,
+            }
+            # Wire into compliance: EU AI Act gets zk_consistency_proof when valid
+            if zk_sheaf.proof_valid and "compliance_result" in response:
+                response["compliance_result"]["zk_consistency_proof"] = True
+    except Exception:
+        pass  # graceful degradation
 
     # RL Q-learning adjustment
     try:
