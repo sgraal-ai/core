@@ -39,3 +39,4 @@ from .stability_score import compute_r_total, compute_stability_score, Stability
 from .unified_loss import compute_unified_loss, geodesic_update, UnifiedLossResult, COMPONENT_NAMES, N_COMPONENTS
 from .policy_gradient import compute_policy_gradient, decay_temperature, PolicyGradientResult
 from .info_thermodynamics import compute_info_thermodynamics, InfoThermodynamicsResult
+from .mahalanobis import compute_mahalanobis, MahalanobisResult

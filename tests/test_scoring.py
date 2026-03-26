@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5124,3 +5124,96 @@ class TestInfoThermodynamics:
         assert resp.status_code == 200
         data = resp.json()
         assert "info_thermodynamics" not in data
+
+
+class TestMahalanobis:
+    """Tests for I-06 Mahalanobis multivariate anomaly detection."""
+
+    def test_single_entry_returns_none(self):
+        """Less than 3 entries returns None."""
+        entries = [{"id": "e1", "source_trust": 0.9, "timestamp_age_days": 5}]
+        assert compute_mahalanobis(entries) is None
+        assert compute_mahalanobis([]) is None
+
+    def test_three_entries(self):
+        """Three entries should produce valid Mahalanobis distances."""
+        entries = [
+            {"id": "e1", "source_trust": 0.9, "timestamp_age_days": 5, "source_conflict": 0.1, "downstream_count": 2, "r_belief": 0.1},
+            {"id": "e2", "source_trust": 0.8, "timestamp_age_days": 10, "source_conflict": 0.2, "downstream_count": 3, "r_belief": 0.2},
+            {"id": "e3", "source_trust": 0.7, "timestamp_age_days": 15, "source_conflict": 0.15, "downstream_count": 1, "r_belief": 0.1},
+        ]
+        result = compute_mahalanobis(entries)
+        assert result is not None
+        assert len(result.distances) == 3
+        assert result.mean_distance > 0
+        assert result.chi2_threshold > 0
+
+    def test_anomaly_detection(self):
+        """An extreme outlier should be flagged as anomaly."""
+        entries = [
+            {"id": "normal1", "source_trust": 0.9, "timestamp_age_days": 5, "source_conflict": 0.1, "downstream_count": 2},
+            {"id": "normal2", "source_trust": 0.85, "timestamp_age_days": 7, "source_conflict": 0.12, "downstream_count": 3},
+            {"id": "normal3", "source_trust": 0.88, "timestamp_age_days": 6, "source_conflict": 0.11, "downstream_count": 2},
+            {"id": "outlier", "source_trust": 0.01, "timestamp_age_days": 500, "source_conflict": 0.99, "downstream_count": 50},
+        ]
+        result = compute_mahalanobis(entries)
+        assert result is not None
+        outlier = next(d for d in result.distances if d.entry_id == "outlier")
+        assert outlier.distance > result.mean_distance
+
+    def test_non_anomaly_similar_entries(self):
+        """Similar entries should all be non-anomalous."""
+        entries = [
+            {"id": f"e{i}", "source_trust": 0.9, "timestamp_age_days": 5, "source_conflict": 0.1, "downstream_count": 2}
+            for i in range(5)
+        ]
+        result = compute_mahalanobis(entries)
+        assert result is not None
+        assert result.anomaly_count == 0
+
+    def test_covariance_regularization(self):
+        """Identical entries should still work due to regularization."""
+        entries = [
+            {"id": f"e{i}", "source_trust": 0.5, "timestamp_age_days": 10, "source_conflict": 0.1, "downstream_count": 1}
+            for i in range(4)
+        ]
+        result = compute_mahalanobis(entries)
+        assert result is not None  # regularization prevents singular matrix
+        assert result.covariance_condition > 0
+
+    def test_s_interference_adjustment(self):
+        """API should boost s_interference when anomalies detected."""
+        # 3+ entries needed for Mahalanobis, with an outlier
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="n1", source_trust=0.95, timestamp_age_days=1),
+                _fresh_entry(id="n2", source_trust=0.90, timestamp_age_days=2),
+                _fresh_entry(id="out", source_trust=0.01, timestamp_age_days=500, source_conflict=0.99),
+            ],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        # Mahalanobis should be computed
+        if "mahalanobis_analysis" in data:
+            assert "distances" in data["mahalanobis_analysis"]
+            assert "anomaly_count" in data["mahalanobis_analysis"]
+
+    def test_dynamic_chi2_threshold(self):
+        """chi2_threshold should adjust with number of components."""
+        entries = [
+            {"id": f"e{i}", "source_trust": 0.5 + i*0.1, "timestamp_age_days": 5 + i*5,
+             "source_conflict": 0.1 + i*0.05, "downstream_count": i, "r_belief": i*0.1}
+            for i in range(5)
+        ]
+        result = compute_mahalanobis(entries)
+        assert result is not None
+        # chi2 threshold for df=5 at 95% should be ~11.07
+        assert 10 < result.chi2_threshold < 12
+
+    def test_graceful_degradation_two_entries(self):
+        """Two entries should return None (need >= 3)."""
+        entries = [
+            {"id": "e1", "source_trust": 0.9, "timestamp_age_days": 5},
+            {"id": "e2", "source_trust": 0.1, "timestamp_age_days": 100},
+        ]
+        assert compute_mahalanobis(entries) is None

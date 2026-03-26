@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1340,6 +1340,33 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "reversibility": it.reversibility,
                 }
                 _it_max_flow = it.max_flow
+    except Exception:
+        pass  # graceful degradation
+
+    # Mahalanobis multivariate anomaly detection (I-06)
+    try:
+        mah_entries = [{"id": e.id, "source_trust": e.source_trust,
+                        "timestamp_age_days": e.timestamp_age_days,
+                        "source_conflict": e.source_conflict,
+                        "downstream_count": e.downstream_count,
+                        "r_belief": e.r_belief} for e in entries]
+        mah = compute_mahalanobis(mah_entries)
+        if mah:
+            response["mahalanobis_analysis"] = {
+                "distances": [{"entry_id": d.entry_id, "distance": d.distance, "is_anomaly": d.is_anomaly} for d in mah.distances],
+                "mean_distance": mah.mean_distance,
+                "anomaly_count": mah.anomaly_count,
+                "covariance_condition": mah.covariance_condition,
+                "chi2_threshold": mah.chi2_threshold,
+            }
+            # Wire into s_interference: add (anomaly_count / n) * 20, cap at 100
+            if mah.anomaly_count > 0:
+                n_e = len(entries)
+                boost = (mah.anomaly_count / max(n_e, 1)) * 20
+                old_interf = response.get("component_breakdown", {}).get("s_interference", 0)
+                new_interf = min(100, old_interf + boost)
+                if "component_breakdown" in response:
+                    response["component_breakdown"]["s_interference"] = round(new_interf, 2)
     except Exception:
         pass  # graceful degradation
 
