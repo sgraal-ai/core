@@ -20,7 +20,6 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - uses: bervProject/railway-deploy@main
+      - uses: railwayapp/railway-github-action@v2
         with:
-          railway_token: ${{ secrets.RAILWAY_TOKEN }}
-          service: ${{ secrets.RAILWAY_SERVICE }}
+          token: ${{ secrets.RAILWAY_TOKEN }}
