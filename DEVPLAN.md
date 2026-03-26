@@ -64,6 +64,7 @@
 | P-03 | Shannon entropy on provenance graph | Done | 9 tests |
 | P-04 | Subjective Logic for uncertainty handling | Done | 8 tests |
 | R-05 | Frechet distance encoding degradation detection | Done | 8 tests |
+| R-06/07 | Mutual Information + NMI encoding efficiency | Done | 9 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -84,7 +85,7 @@
 
 ### Test Summary
 
-- **510 tests passing** (pytest)
+- **519 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -147,6 +148,7 @@
 - Provenance Entropy: 9 tests (single source, multiple sources, conflict threshold, s_provenance adjustment, n=1 edge case, trend stable, trend increasing, graceful degradation, API response)
 - Subjective Logic: 8 tests (single opinion, two-entry fusion, high uncertainty, consensus threshold, projected_prob, s_provenance replacement, division by zero, exceed unit constraint)
 - Frechet: 8 tests (init first call, degradation detection, no degradation, mean shift, covariance shift, sqrtm fallback, r_encode adjustment, graceful degradation)
+- Mutual Information: 9 tests (single null, high MI, low MI, NMI bounds, efficiency classification, info loss, rho clipping, zero variance, API response)
 
 ### Deployments
 

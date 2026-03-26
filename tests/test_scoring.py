@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5635,3 +5635,103 @@ class TestFrechet:
         ref = [[10, 20], [15, 25]]
         result = compute_frechet(vecs, ref)
         assert result is None
+
+
+class TestMutualInformation:
+    """Tests for R-06/R-07 Mutual Information and NMI."""
+
+    def test_single_entry_null(self):
+        """Less than 2 entries returns None."""
+        entries = [{"id": "e1", "source_trust": 0.9}]
+        assert compute_mutual_information(entries) is None
+        assert compute_mutual_information([]) is None
+
+    def test_high_mi_correlated(self):
+        """Highly correlated entries should have high MI."""
+        entries = [
+            {"id": f"e{i}", "source_trust": 0.1 * i, "source_conflict": 0.01 * i, "timestamp_age_days": i}
+            for i in range(1, 8)
+        ]
+        result = compute_mutual_information(entries)
+        assert result is not None
+        assert result.mi_score > 0
+
+    def test_low_mi_uncorrelated(self):
+        """Entries with no correlation should have low MI."""
+        entries = [
+            {"id": "e1", "source_trust": 0.9, "source_conflict": 0.9, "timestamp_age_days": 1},
+            {"id": "e2", "source_trust": 0.1, "source_conflict": 0.01, "timestamp_age_days": 100},
+            {"id": "e3", "source_trust": 0.5, "source_conflict": 0.5, "timestamp_age_days": 50},
+        ]
+        result = compute_mutual_information(entries)
+        assert result is not None
+        assert result.mi_score >= 0
+
+    def test_nmi_bounds(self):
+        """NMI should be in [0, 1]."""
+        entries = [
+            {"id": f"e{i}", "source_trust": 0.5 + 0.05 * i, "timestamp_age_days": i * 10}
+            for i in range(5)
+        ]
+        result = compute_mutual_information(entries)
+        assert result is not None
+        assert 0 <= result.nmi_score <= 1.0
+
+    def test_encoding_efficiency_classification(self):
+        """encoding_efficiency should be high/medium/low."""
+        entries = [
+            {"id": f"e{i}", "source_trust": 0.5, "timestamp_age_days": 10}
+            for i in range(5)
+        ]
+        result = compute_mutual_information(entries)
+        assert result is not None
+        assert result.encoding_efficiency in ("high", "medium", "low")
+
+    def test_information_loss_computation(self):
+        """information_loss = 1.0 - nmi_score."""
+        entries = [
+            {"id": "e1", "source_trust": 0.9, "timestamp_age_days": 5},
+            {"id": "e2", "source_trust": 0.8, "timestamp_age_days": 10},
+        ]
+        result = compute_mutual_information(entries)
+        assert result is not None
+        assert abs(result.information_loss - (1.0 - result.nmi_score)) < 0.001
+
+    def test_rho_clipping_edge_case(self):
+        """Perfect correlation should not cause log(0)."""
+        # All entries with perfectly correlated trust and age
+        entries = [
+            {"id": f"e{i}", "source_trust": 0.1 * i, "source_conflict": 0.0, "timestamp_age_days": 0}
+            for i in range(1, 6)
+        ]
+        result = compute_mutual_information(entries)
+        assert result is not None
+        assert math.isfinite(result.mi_score)
+
+    def test_zero_variance_edge_case(self):
+        """All identical entries should return mi=0, nmi=0."""
+        entries = [
+            {"id": f"e{i}", "source_trust": 0.5, "source_conflict": 0.1, "timestamp_age_days": 10}
+            for i in range(5)
+        ]
+        result = compute_mutual_information(entries)
+        assert result is not None
+        assert result.mi_score == 0.0
+        assert result.nmi_score == 0.0
+
+    def test_mutual_information_in_api(self):
+        """Preflight with 2+ entries should include mutual_information."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="m1", source_trust=0.9, timestamp_age_days=5),
+                _fresh_entry(id="m2", source_trust=0.5, timestamp_age_days=50),
+            ],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "mutual_information" in data
+        mi = data["mutual_information"]
+        assert "mi_score" in mi
+        assert "nmi_score" in mi
+        assert "encoding_efficiency" in mi
+        assert "information_loss" in mi

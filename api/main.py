@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1570,6 +1570,27 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                             )
                         except Exception:
                             pass
+    except Exception:
+        pass  # graceful degradation
+
+    # Mutual Information encoding efficiency (R-06/R-07)
+    try:
+        _mi_entries = [{"id": e.id, "source_trust": e.source_trust,
+                        "source_conflict": e.source_conflict,
+                        "timestamp_age_days": e.timestamp_age_days} for e in entries]
+        mi = compute_mutual_information(_mi_entries)
+        if mi:
+            response["mutual_information"] = {
+                "mi_score": mi.mi_score,
+                "nmi_score": mi.nmi_score,
+                "encoding_efficiency": mi.encoding_efficiency,
+                "information_loss": mi.information_loss,
+            }
+            # Wire into r_encode: (1 - nmi) * 20
+            if "component_breakdown" in response:
+                boost = (1.0 - mi.nmi_score) * 20
+                old_enc = response["component_breakdown"].get("r_encode", 0)
+                response["component_breakdown"]["r_encode"] = round(min(100, old_enc + boost), 2)
     except Exception:
         pass  # graceful degradation
 
