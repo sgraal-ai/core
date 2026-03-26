@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5879,3 +5879,67 @@ class TestMTTR:
         assert "weibull_lambda" in m
         assert "sla_compliant" in m
         assert "data_points" in m
+
+
+class TestCTLVerification:
+    """Tests for FV-07 CTL branching-time verification."""
+
+    def test_ef_recovery_safe_state(self):
+        """SAFE state: recovery already achieved, EF should be True."""
+        result = compute_ctl_verification(10.0)
+        assert result is not None
+        assert result.ef_recovery_possible is True
+
+    def test_ef_recovery_critical_state(self):
+        """CRITICAL state: recovery possible via transitions."""
+        result = compute_ctl_verification(90.0)
+        assert result is not None
+        # Even from CRITICAL, there's a path to recovery
+        assert result.ef_recovery_possible is True
+
+    def test_ag_heal_works_true(self):
+        """From SAFE state, healing should work on all paths."""
+        result = compute_ctl_verification(10.0)
+        assert result is not None
+        assert result.ag_heal_works is True
+
+    def test_ag_heal_works_critical(self):
+        """From CRITICAL, healing should still lead to improvement."""
+        result = compute_ctl_verification(90.0)
+        assert result is not None
+        # Heal transitions give 30% chance of reaching SAFE from CRITICAL
+        assert result.ag_heal_works is True
+
+    def test_eg_stable_possible(self):
+        """From SAFE/WARN, stable operation should be possible."""
+        result = compute_ctl_verification(20.0)
+        assert result is not None
+        assert result.eg_stable_possible is True
+
+    def test_compliance_integration(self):
+        """API should include ctl_verification in response."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "ctl_verification" in data
+        ctl = data["ctl_verification"]
+        assert "ef_recovery_possible" in ctl
+        assert "ag_heal_works" in ctl
+        assert "eg_stable_possible" in ctl
+        assert "bounded_steps" in ctl
+        assert ctl["bounded_steps"] == 10
+
+    def test_timeout_handling(self):
+        """Verification should complete within 100ms."""
+        result = compute_ctl_verification(50.0, timeout_ms=100.0)
+        assert result is not None
+        assert result.verification_time_ms < 100.0
+
+    def test_bounded_steps_in_response(self):
+        """bounded_steps should always be 10."""
+        result = compute_ctl_verification(50.0)
+        assert result is not None
+        assert result.bounded_steps == 10
+        assert len(result.ctl_formulas) == 3

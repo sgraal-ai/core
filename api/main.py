@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1669,6 +1669,36 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "projected_improvement": 0,
                     "priority": "high",
                 })
+    except Exception:
+        pass  # graceful degradation
+
+    # CTL branching-time verification (FV-07)
+    try:
+        # Extract HMM transitions if available
+        _ctl_trans = None
+        _hmm_data = response.get("hmm_regime", {})
+        if _hmm_data.get("transition_probs"):
+            # HMM gives transition from current state only; use defaults for full matrix
+            pass  # use default transitions, HMM single-row insufficient for full CTL
+
+        ctl = compute_ctl_verification(omega_out, hmm_transitions=_ctl_trans)
+        if ctl:
+            response["ctl_verification"] = {
+                "ef_recovery_possible": ctl.ef_recovery_possible,
+                "ag_heal_works": ctl.ag_heal_works,
+                "eg_stable_possible": ctl.eg_stable_possible,
+                "verified_states": ctl.verified_states,
+                "verification_time_ms": ctl.verification_time_ms,
+                "bounded_steps": ctl.bounded_steps,
+                "ctl_formulas": ctl.ctl_formulas,
+            }
+            # Wire into compliance: EU AI Act warning if healing not guaranteed
+            if ctl.ag_heal_works is False and "compliance_result" in response:
+                response["compliance_result"].setdefault("warnings", [])
+                if isinstance(response["compliance_result"].get("warnings"), list):
+                    response["compliance_result"]["warnings"].append(
+                        "CTL_WARNING: healing convergence not guaranteed on all paths"
+                    )
     except Exception:
         pass  # graceful degradation
 

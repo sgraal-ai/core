@@ -47,3 +47,4 @@ from .frechet import compute_frechet, FrechetResult
 from .mutual_information import compute_mutual_information, MutualInformationResult
 from .mdp import compute_mdp, MDPResult
 from .mttr import compute_mttr, MTTRResult
+from .ctl_verification import compute_ctl_verification, CTLResult
