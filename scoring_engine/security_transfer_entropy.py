@@ -2,7 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-SENSITIVE_TYPES = {"personal_data", "pii", "confidential"}
+# MemCube-aligned sensitive types + common aliases
+SENSITIVE_TYPES = {"identity", "episodic", "preference", "personal_data", "pii", "confidential", "user_preference"}
 
 @dataclass
 class SecurityTEResult:

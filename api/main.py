@@ -211,12 +211,12 @@ def gdpr_compliance():
             "memory_state": "not stored — processed in real time and discarded",
         },
         "right_to_erasure": {
-            "endpoint": "DELETE /v1/account",
+            "endpoint": "DELETE /v1/account (planned — contact dpa@sgraal.com)",
             "scope": "All API keys, logs, and associated data permanently deleted within 30 days",
             "contact": "dpa@sgraal.com",
         },
         "data_portability": {
-            "endpoint": "GET /v1/account/export",
+            "endpoint": "GET /v1/account/export (planned — contact dpa@sgraal.com)",
             "format": "JSON",
             "scope": "All preflight logs, audit logs, and API key metadata",
         },
@@ -458,7 +458,7 @@ def signup(req: SignupRequest):
     # 2. Create free tier subscription
     stripe.Subscription.create(
         customer=customer.id,
-        items=[{"price": "price_1TDnSaHIIn2LzB5quygTrclw"}],
+        items=[{"price": os.getenv("STRIPE_PRICE_ID", "price_1TDnSaHIIn2LzB5quygTrclw")}],
     )
 
     # 3. Generate API key
@@ -669,8 +669,17 @@ _HEAL_IMPROVEMENTS = {
 }
 
 
+def _check_rate_limit(key_record: dict):
+    """Shared rate limit check for all mutating endpoints."""
+    tier = key_record.get("tier", "free")
+    calls = key_record.get("calls_this_month", 0)
+    limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    if calls >= limit:
+        raise HTTPException(status_code=429, detail=f"Monthly limit ({limit}) exceeded for {tier} tier")
+
 @app.post("/v1/heal")
 def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
     # Increment healing counter for this entry
     prev = _healing_counters.get(req.entry_id, 0)
     _healing_counters[req.entry_id] = prev + 1
@@ -723,6 +732,7 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
 
 @app.post("/v1/webhooks")
 def register_webhook(req: WebhookRegisterRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
     webhook = {
         "id": str(uuid.uuid4()),
         "url": req.url,
@@ -820,6 +830,7 @@ def preflight_batch(req: BatchRequest, key_record: dict = Depends(verify_api_key
 
 @app.post("/v1/outcome")
 def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
     if req.outcome_id not in _outcomes:
         raise HTTPException(status_code=404, detail=f"Outcome {req.outcome_id} not found")
 
@@ -911,6 +922,100 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
     except Exception:
         pass
 
+    # --- 6 additional outcome learning updates ---
+    _outcome_domain = outcome.get("domain", "general")
+    _outcome_key_hash = key_record.get("key_hash", "default")
+    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        _auth_h = {"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}
+        try:
+            # 1. MTTR: append heal duration (seconds since creation)
+            _created = outcome.get("created_at", "")
+            if _created and req.status in ("success", "partial"):
+                try:
+                    from datetime import datetime as _dt_parse
+                    _c = _dt_parse.fromisoformat(_created.replace("Z", "+00:00"))
+                    _dur = (now - _c).total_seconds() / 60.0  # minutes
+                    _mttr_k = f"mttr_history:{_outcome_key_hash}:{_outcome_domain}"
+                    http_requests.post(f"{UPSTASH_REDIS_URL}/RPUSH/{_mttr_k}/{round(_dur,2)}", headers=_auth_h, timeout=2)
+                    http_requests.post(f"{UPSTASH_REDIS_URL}/LTRIM/{_mttr_k}/-50/-1", headers=_auth_h, timeout=2)
+                    http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_mttr_k}/86400", headers=_auth_h, timeout=2)
+                except Exception:
+                    pass
+
+            # 2. Poisson lambda: failure_count / total from attribution
+            try:
+                _pl_k = f"poisson_lambda:{_outcome_key_hash}:{_outcome_domain}"
+                _plr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_pl_k}", headers=_auth_h, timeout=2)
+                _old_lam_data = {"failures": 0, "total": 0}
+                if _plr.ok and _plr.json().get("result"):
+                    _old_lam_data = _json.loads(_plr.json()["result"])
+                _old_lam_data["total"] = _old_lam_data.get("total", 0) + 1
+                if req.status == "failure":
+                    _old_lam_data["failures"] = _old_lam_data.get("failures", 0) + 1
+                _new_lam = _old_lam_data["failures"] / max(_old_lam_data["total"], 1)
+                _old_lam_data["lambda"] = round(_new_lam, 4)
+                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_pl_k}/{_json.dumps(_old_lam_data)}/EX/86400", headers=_auth_h, timeout=2)
+            except Exception:
+                pass
+
+            # 3. MDP transitions: INCR mdp_transitions state→action→next_state
+            try:
+                _omega = outcome.get("omega_mem_final", 50)
+                _s = "SAFE" if _omega < 25 else "WARN" if _omega < 50 else "DEGRADED" if _omega < 75 else "CRITICAL"
+                _s_next = "SAFE" if req.status == "success" else "DEGRADED" if req.status == "partial" else "CRITICAL"
+                _action = outcome.get("recommended_action", "USE_MEMORY")
+                _mdp_k = f"mdp_transitions:{_outcome_key_hash}:{_outcome_domain}"
+                _mdpr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_mdp_k}", headers=_auth_h, timeout=2)
+                _mdp_data = {"transitions": {}, "n_outcomes": 0}
+                if _mdpr.ok and _mdpr.json().get("result"):
+                    _mdp_data = _json.loads(_mdpr.json()["result"])
+                _mdp_data["n_outcomes"] = _mdp_data.get("n_outcomes", 0) + 1
+                _tk = f"{_s}:{_action}:{_s_next}"
+                _mdp_data["transitions"][_tk] = _mdp_data.get("transitions", {}).get(_tk, 0) + 1
+                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_mdp_k}/{_json.dumps(_mdp_data)}/EX/86400", headers=_auth_h, timeout=2)
+            except Exception:
+                pass
+
+            # 4. ROC history: append (omega_score, outcome_bool)
+            try:
+                _roc_k = f"roc_history:{_outcome_key_hash}:{_outcome_domain}"
+                _rocr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_roc_k}", headers=_auth_h, timeout=2)
+                _roc_data = {"predictions": [], "actuals": []}
+                if _rocr.ok and _rocr.json().get("result"):
+                    _roc_data = _json.loads(_rocr.json()["result"])
+                _roc_data["predictions"].append(round(outcome.get("omega_mem_final", 50) / 100.0, 4))
+                _roc_data["actuals"].append(1.0 if req.status == "success" else 0.0)
+                # Keep last 100
+                _roc_data["predictions"] = _roc_data["predictions"][-100:]
+                _roc_data["actuals"] = _roc_data["actuals"][-100:]
+                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_roc_k}/{_json.dumps(_roc_data)}/EX/86400", headers=_auth_h, timeout=2)
+            except Exception:
+                pass
+
+            # 5. Frontdoor probs: increment n_outcomes
+            try:
+                _fd_k = f"frontdoor_probs:{_outcome_key_hash}:{_outcome_domain}"
+                _fdr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_fd_k}", headers=_auth_h, timeout=2)
+                _fd_data = {"n_outcomes": 0}
+                if _fdr.ok and _fdr.json().get("result"):
+                    _fd_data = _json.loads(_fdr.json()["result"])
+                _fd_data["n_outcomes"] = _fd_data.get("n_outcomes", 0) + 1
+                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_fd_k}/{_json.dumps(_fd_data)}/EX/86400", headers=_auth_h, timeout=2)
+            except Exception:
+                pass
+
+            # 6. Particle filter: save last known particles (if available in outcome)
+            # Particles are transient per-request; storing omega for next PF init
+            try:
+                _pf_k = f"pf_particles:{_outcome_key_hash}:{_outcome_domain}"
+                _omega_pf = outcome.get("omega_mem_final", 50)
+                _pf_init = {"particles": [_omega_pf + (i - 25) * 0.4 for i in range(50)], "weights": [1/50]*50}
+                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_pf_k}/{_json.dumps(_pf_init)}/EX/3600", headers=_auth_h, timeout=2)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     resp = {
         "outcome_id": req.outcome_id,
         "status": req.status,
@@ -984,6 +1089,23 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         for e in req.memory_state]
 
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, req.custom_weights, req.thresholds, req.use_pagerank)
+
+    # Fetch te_history ONCE for all time-series modules (eliminates 10 redundant Redis calls)
+    _te_history_cache = list(req.score_history) if req.score_history else []
+    if len(_te_history_cache) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        try:
+            _te_cache_key = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+            _te_cache_r = http_requests.get(
+                f"{UPSTASH_REDIS_URL}/LRANGE/{_te_cache_key}/0/99",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                timeout=2,
+            )
+            if _te_cache_r.ok:
+                _te_cache_h = _te_cache_r.json().get("result", [])
+                if _te_cache_h:
+                    _te_history_cache = [float(x) for x in _te_cache_h]
+        except Exception:
+            pass
 
     # Generate IDs for tracking
     request_id = str(uuid.uuid4())
@@ -1255,21 +1377,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         # Page-Hinkley change detection
         _ph_alert = False
         try:
-            _ph_history = list(req.score_history) if req.score_history else []
-            if len(_ph_history) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-                try:
-                    _phk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                    _phr = http_requests.get(
-                        f"{UPSTASH_REDIS_URL}/LRANGE/{_phk}/0/99",
-                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
-                        timeout=2,
-                    )
-                    if _phr.ok:
-                        _phh = _phr.json().get("result", [])
-                        if _phh:
-                            _ph_history = [float(x) for x in _phh]
-                except Exception:
-                    pass
+            _ph_history = _te_history_cache[:]
 
             if len(_ph_history) >= 5:
                 _ph_cfg = req.page_hinkley_config or {}
@@ -1362,21 +1470,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Information Thermodynamics (IT-01)
     _it_max_flow = 0.0
     try:
-        _it_history = list(req.score_history) if req.score_history else []
-        if len(_it_history) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _itk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _itr = http_requests.get(
-                    f"{UPSTASH_REDIS_URL}/LRANGE/{_itk}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
-                    timeout=2,
-                )
-                if _itr.ok:
-                    _ith = _itr.json().get("result", [])
-                    if _ith:
-                        _it_history = [float(x) for x in _ith]
-            except Exception:
-                pass
+        _it_history = _te_history_cache[:]
 
         if len(_it_history) >= 5:
             _comp_vals = list(result.component_breakdown.values())
@@ -1705,21 +1799,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Lyapunov Exponent chaos detection (S-03)
     _lyap_lambda = None
     try:
-        _lyap_history = list(req.score_history) if req.score_history else []
-        if len(_lyap_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _lyk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _lyr = http_requests.get(
-                    f"{UPSTASH_REDIS_URL}/LRANGE/{_lyk}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
-                    timeout=2,
-                )
-                if _lyr.ok:
-                    _lyh = _lyr.json().get("result", [])
-                    if _lyh:
-                        _lyap_history = [float(x) for x in _lyh]
-            except Exception:
-                pass
+        _lyap_history = _te_history_cache[:]
 
         if len(_lyap_history) >= 10:
             lyap = compute_lyapunov_exponent(_lyap_history, omega_out)
@@ -1746,21 +1826,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Banach Fixed-Point contraction (S-04)
     try:
-        _ban_history = list(req.score_history) if req.score_history else []
-        if len(_ban_history) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _bk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _br = http_requests.get(
-                    f"{UPSTASH_REDIS_URL}/LRANGE/{_bk}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
-                    timeout=2,
-                )
-                if _br.ok:
-                    _bh = _br.json().get("result", [])
-                    if _bh:
-                        _ban_history = [float(x) for x in _bh]
-            except Exception:
-                pass
+        _ban_history = _te_history_cache[:]
 
         if len(_ban_history) >= 5:
             ban = compute_banach(_ban_history, omega_out)
@@ -1856,21 +1922,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Koopman Operator (OP-01)
     try:
-        _koop_history = list(req.score_history) if req.score_history else []
-        if len(_koop_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _kk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _kr = http_requests.get(
-                    f"{UPSTASH_REDIS_URL}/LRANGE/{_kk}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
-                    timeout=2,
-                )
-                if _kr.ok:
-                    _kh = _kr.json().get("result", [])
-                    if _kh:
-                        _koop_history = [float(x) for x in _kh]
-            except Exception:
-                pass
+        _koop_history = _te_history_cache[:]
 
         if len(_koop_history) >= 10:
             koop = compute_koopman(_koop_history, omega_out)
@@ -1886,21 +1938,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Ergodicity (ET-01)
     try:
-        _erg_history = list(req.score_history) if req.score_history else []
-        if len(_erg_history) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _ek = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _er = http_requests.get(
-                    f"{UPSTASH_REDIS_URL}/LRANGE/{_ek}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
-                    timeout=2,
-                )
-                if _er.ok:
-                    _eh = _er.json().get("result", [])
-                    if _eh:
-                        _erg_history = [float(x) for x in _eh]
-            except Exception:
-                pass
+        _erg_history = _te_history_cache[:]
 
         if len(_erg_history) >= 5:
             _comp_vals = list(result.component_breakdown.values())
@@ -1920,20 +1958,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     try:
         _ef_entries = [{"id": e.id, "type": e.type, "timestamp_age_days": e.timestamp_age_days} for e in entries]
         _ef_history = list(req.score_history) if req.score_history else None
-        if (_ef_history is None or len(_ef_history) < 5) and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _efk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _efr = http_requests.get(
-                    f"{UPSTASH_REDIS_URL}/LRANGE/{_efk}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
-                    timeout=2,
-                )
-                if _efr.ok:
-                    _efh = _efr.json().get("result", [])
-                    if _efh and len(_efh) >= 5:
-                        _ef_history = [float(x) for x in _efh]
-            except Exception:
-                pass
+        if _ef_history is None and len(_te_history_cache) >= 5:
+            _ef_history = _te_history_cache[:]
 
         ef = compute_extended_freshness(_ef_entries, history=_ef_history)
         if ef:
@@ -2194,18 +2220,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # CVaR Risk (C-04)
     try:
-        _cvar_history = list(req.score_history) if req.score_history else []
-        if len(_cvar_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _ck = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _cr = http_requests.get(f"{UPSTASH_REDIS_URL}/LRANGE/{_ck}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
-                if _cr.ok:
-                    _ch = _cr.json().get("result", [])
-                    if _ch:
-                        _cvar_history = [float(x) for x in _ch]
-            except Exception:
-                pass
+        _cvar_history = _te_history_cache[:]
         if len(_cvar_history) >= 10:
             cv = compute_cvar(_cvar_history)
             if cv:
@@ -2290,17 +2305,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Topological Entropy (TDA-03)
     try:
-        _te_history = list(req.score_history) if req.score_history else []
-        if len(_te_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _tek = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _ter = http_requests.get(f"{UPSTASH_REDIS_URL}/LRANGE/{_tek}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
-                if _ter.ok:
-                    _teh = _ter.json().get("result", [])
-                    if _teh: _te_history = [float(x) for x in _teh]
-            except Exception:
-                pass
+        _te_history = _te_history_cache[:]
         if len(_te_history) >= 10:
             te = compute_topological_entropy(_te_history, omega_out)
             if te:
@@ -2557,21 +2562,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Lévy Flight tail analysis (DS-07)
     levy_result = None
     try:
-        levy_history = list(req.score_history) if req.score_history else []
-        if len(levy_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _lk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _lr = http_requests.get(
-                    f"{UPSTASH_REDIS_URL}/LRANGE/{_lk}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
-                    timeout=2,
-                )
-                if _lr.ok:
-                    _lhist = _lr.json().get("result", [])
-                    if _lhist:
-                        levy_history = [float(x) for x in _lhist]
-            except Exception:
-                pass
+        levy_history = _te_history_cache[:]
 
         if len(levy_history) >= 10:
             levy_result = compute_levy_flight(levy_history, omega_out)
@@ -2638,21 +2629,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     ou_result = None
     try:
         # Build history: prefer score_history, fall back to Redis ring buffer
-        ou_history = list(req.score_history) if req.score_history else []
-        if len(ou_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            try:
-                _rk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-                _rr = http_requests.get(
-                    f"{UPSTASH_REDIS_URL}/LRANGE/{_rk}/0/99",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
-                    timeout=2,
-                )
-                if _rr.ok:
-                    redis_hist = _rr.json().get("result", [])
-                    if redis_hist:
-                        ou_history = [float(x) for x in redis_hist]
-            except Exception:
-                pass
+        ou_history = _te_history_cache[:]
 
         if len(ou_history) >= 10:
             ou_result = compute_ou_process(ou_history, omega_out)
