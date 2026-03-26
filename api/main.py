@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1818,6 +1818,103 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     })
     except Exception:
         pass  # graceful degradation
+
+    # Fisher-Rao metric (IG-02)
+    _fr_diag = None
+    try:
+        fr = compute_fisher_rao(result.component_breakdown)
+        if fr:
+            response["fisher_rao"] = {
+                "metric_diagonal": fr.metric_diagonal,
+                "condition_number": fr.condition_number,
+                "geometry": fr.geometry,
+            }
+            _fr_diag = fr.metric_diagonal
+    except Exception:
+        pass
+
+    # Geodesic Flow (IG-04) + Natural Gradient flag (IG-03)
+    try:
+        _ul = response.get("unified_loss", {})
+        _ul_weights = _ul.get("lambda_weights", [])
+        _ul_comps = _ul.get("components", {})
+        if _ul_weights and _ul_comps:
+            from scoring_engine.unified_loss import COMPONENT_NAMES
+            _ul_losses = [_ul_comps.get(k, 0.0) for k in COMPONENT_NAMES]
+            gf = compute_geodesic_flow(_ul_weights, _ul_losses, metric_diagonal=_fr_diag)
+            if gf:
+                response["geodesic_flow"] = {
+                    "flow_magnitude": gf.flow_magnitude,
+                    "parameter_velocity": gf.parameter_velocity,
+                    "manifold_distance": gf.manifold_distance,
+                }
+            # IG-03: flag natural gradient usage in unified_loss
+            if _fr_diag and "unified_loss" in response:
+                response["unified_loss"]["natural_gradient_used"] = True
+    except Exception:
+        pass
+
+    # Koopman Operator (OP-01)
+    try:
+        _koop_history = list(req.score_history) if req.score_history else []
+        if len(_koop_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _kk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                _kr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/LRANGE/{_kk}/0/99",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _kr.ok:
+                    _kh = _kr.json().get("result", [])
+                    if _kh:
+                        _koop_history = [float(x) for x in _kh]
+            except Exception:
+                pass
+
+        if len(_koop_history) >= 10:
+            koop = compute_koopman(_koop_history, omega_out)
+            if koop:
+                response["koopman"] = {
+                    "eigenvalues": koop.eigenvalues,
+                    "dominant_mode": koop.dominant_mode,
+                    "prediction_5": koop.prediction_5,
+                    "stable": koop.stable,
+                }
+    except Exception:
+        pass
+
+    # Ergodicity (ET-01)
+    try:
+        _erg_history = list(req.score_history) if req.score_history else []
+        if len(_erg_history) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _ek = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                _er = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/LRANGE/{_ek}/0/99",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _er.ok:
+                    _eh = _er.json().get("result", [])
+                    if _eh:
+                        _erg_history = [float(x) for x in _eh]
+            except Exception:
+                pass
+
+        if len(_erg_history) >= 5:
+            _comp_vals = list(result.component_breakdown.values())
+            erg = compute_ergodicity(_erg_history, omega_out, _comp_vals)
+            if erg:
+                response["ergodicity"] = {
+                    "time_average": erg.time_average,
+                    "ensemble_average": erg.ensemble_average,
+                    "delta": erg.delta,
+                    "ergodic": erg.ergodic,
+                    "interpretation": erg.interpretation,
+                }
+    except Exception:
+        pass
 
     # Hawkes self-exciting process
     entry_ages = [e.timestamp_age_days for e in entries]

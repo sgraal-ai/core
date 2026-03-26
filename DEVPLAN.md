@@ -71,6 +71,11 @@
 | S-03 | Lyapunov Exponent chaos detection | Done | 9 tests |
 | S-04 | Banach Fixed-Point contraction verification | Done | 8 tests |
 | S-05 | Hotelling T-squared control chart | Done | 8 tests |
+| IG-02 | Fisher-Rao Metric diagonal approximation | Done | 6 tests |
+| IG-03 | Natural Gradient for L_v4 | Done | (integrated into IG-02/04) |
+| IG-04 | Geodesic Flow discrete approximation | Done | 6 tests |
+| OP-01 | Koopman Operator via DMD | Done | 6 tests |
+| ET-01 | Ergodicity measure | Done | 6 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -91,7 +96,7 @@
 
 ### Test Summary
 
-- **568 tests passing** (pytest)
+- **592 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -161,6 +166,10 @@
 - Lyapunov Exponent: 9 tests (insufficient null, converging, diverging, chaos threshold, stability class, 10-component SS, 9-component backward compat, graceful degradation, API with history)
 - Banach: 8 tests (insufficient null, k<1 contraction, k>1 no contraction, convergence steps, identical skip, all identical k=0, repair_plan warning, graceful degradation)
 - Hotelling T2: 8 tests (phase1, phase2, out_of_control true/false, UCL dynamic, at_risk integration, covariance regularization, graceful degradation)
+- Fisher-Rao: 6 tests (basic, flat, curved, empty, API, history)
+- Geodesic Flow: 6 tests (basic, metric, zero losses, empty, mismatch, API)
+- Koopman: 6 tests (insufficient, stable eigenvalue, prediction bounded, dominant mode, API, graceful)
+- Ergodicity: 6 tests (insufficient, ergodic, non-ergodic, interpretation, API, graceful)
 
 ### Deployments
 

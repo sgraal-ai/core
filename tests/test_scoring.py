@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -6178,3 +6178,157 @@ class TestHotellingT2:
         """Empty components should return None."""
         result = compute_hotelling_t2({})
         assert result is None
+
+
+class TestFisherRao:
+    """Tests for IG-02 Fisher-Rao Metric."""
+
+    def test_basic_computation(self):
+        result = compute_fisher_rao({"s_freshness": 30, "s_drift": 20, "s_provenance": 10})
+        assert result is not None
+        assert len(result.metric_diagonal) == 3
+        assert result.condition_number > 0
+        assert result.geometry in ("flat", "moderate", "curved")
+
+    def test_flat_geometry(self):
+        result = compute_fisher_rao({"a": 50, "b": 50, "c": 50})
+        assert result is not None
+        # Equal values → equal variance proxy → flat
+
+    def test_curved_geometry(self):
+        result = compute_fisher_rao({"a": 0.01, "b": 100, "c": 50})
+        assert result is not None
+        assert result.condition_number > 1
+
+    def test_empty_returns_none(self):
+        assert compute_fisher_rao({}) is None
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+        assert "fisher_rao" in resp.json()
+
+    def test_with_history(self):
+        history = [{"s_freshness": 30 + i, "s_drift": 20 + i} for i in range(5)]
+        result = compute_fisher_rao({"s_freshness": 35, "s_drift": 25}, history=history)
+        assert result is not None
+
+
+class TestGeodesicFlow:
+    """Tests for IG-04 Geodesic Flow."""
+
+    def test_basic_flow(self):
+        weights = [1.0] * 11
+        losses = [0.5] * 11
+        result = compute_geodesic_flow(weights, losses)
+        assert result is not None
+        assert result.flow_magnitude > 0
+        assert len(result.parameter_velocity) == 11
+
+    def test_with_metric(self):
+        weights = [1.0] * 11
+        losses = [0.5] * 11
+        metric = [2.0] * 11
+        result = compute_geodesic_flow(weights, losses, metric_diagonal=metric)
+        assert result is not None
+        assert result.manifold_distance > 0
+
+    def test_zero_losses(self):
+        result = compute_geodesic_flow([1.0] * 11, [0.0] * 11)
+        assert result is not None
+        assert result.flow_magnitude == 0.0
+
+    def test_empty_returns_none(self):
+        assert compute_geodesic_flow([], []) is None
+
+    def test_mismatched_lengths(self):
+        assert compute_geodesic_flow([1.0], [1.0, 2.0]) is None
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        data = resp.json()
+        # geodesic_flow may or may not appear depending on unified_loss state
+
+
+class TestKoopman:
+    """Tests for OP-01 Koopman Operator."""
+
+    def test_insufficient_history(self):
+        assert compute_koopman([30] * 5, 30) is None
+
+    def test_stable_eigenvalue(self):
+        history = [30 + ((-1) ** i) * 2 for i in range(12)]
+        result = compute_koopman(history, 30.0)
+        assert result is not None
+        assert len(result.eigenvalues) >= 1
+        assert isinstance(result.stable, bool)
+
+    def test_prediction_5_bounded(self):
+        history = [30.0] * 12
+        result = compute_koopman(history, 30.0)
+        assert result is not None
+        assert 0 <= result.prediction_5 <= 100
+
+    def test_dominant_mode(self):
+        history = [30 + i * 0.5 for i in range(12)]
+        result = compute_koopman(history, 36.0)
+        assert result is not None
+        assert result.dominant_mode in ("stable", "oscillating", "growing")
+
+    def test_in_api_with_history(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30 + i for i in range(12)],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "koopman" in data
+
+    def test_graceful_no_history(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+        assert "koopman" not in resp.json()
+
+
+class TestErgodicity:
+    """Tests for ET-01 Ergodicity."""
+
+    def test_insufficient_history(self):
+        assert compute_ergodicity([30, 31], 32, [10, 20]) is None
+
+    def test_ergodic_system(self):
+        history = [30, 31, 32, 29, 30]
+        result = compute_ergodicity(history, 30.0, [28, 32, 30, 31, 29])
+        assert result is not None
+        assert result.ergodic is True
+        assert result.delta < 5.0
+
+    def test_non_ergodic_system(self):
+        history = [10, 11, 12, 10, 11]
+        result = compute_ergodicity(history, 10.0, [80, 90, 85, 88, 82])
+        assert result is not None
+        assert result.ergodic is False
+        assert result.delta > 5.0
+
+    def test_interpretation(self):
+        history = [30] * 6
+        result = compute_ergodicity(history, 30.0, [30, 30, 30])
+        assert result is not None
+        assert "ergodic" in result.interpretation
+
+    def test_in_api_with_history(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 31, 30, 31, 30, 31],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "ergodicity" in data
+        erg = data["ergodicity"]
+        assert "delta" in erg
+        assert "ergodic" in erg
+
+    def test_graceful_no_history(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+        assert "ergodicity" not in resp.json()

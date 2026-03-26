@@ -51,3 +51,7 @@ from .ctl_verification import compute_ctl_verification, CTLResult
 from .lyapunov_exponent import compute_lyapunov_exponent, LyapunovExponentResult
 from .banach import compute_banach, BanachResult
 from .hotelling_t2 import compute_hotelling_t2, HotellingT2Result
+from .fisher_rao import compute_fisher_rao, FisherRaoResult
+from .geodesic_flow import compute_geodesic_flow, GeodesicFlowResult
+from .koopman import compute_koopman, KoopmanResult
+from .ergodicity import compute_ergodicity, ErgodicityResult
