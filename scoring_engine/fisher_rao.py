@@ -6,6 +6,19 @@ from typing import Optional
 
 
 @dataclass
+class FIMInteraction:
+    param_i: str
+    param_j: str
+    interaction: float
+
+
+@dataclass
+class FIMExtendedResult:
+    top_interactions: list[FIMInteraction]
+    most_sensitive: str
+
+
+@dataclass
 class FisherRaoResult:
     metric_diagonal: list[float]
     condition_number: float
@@ -70,5 +83,43 @@ def compute_fisher_rao(
             condition_number=round(cond, 4),
             geometry=geometry,
         )
+    except Exception:
+        return None
+
+
+def compute_fim_extended(
+    component_breakdown: dict[str, float],
+) -> Optional[FIMExtendedResult]:
+    """Extended FIM with off-diagonal top-3 interactions.
+
+    Interaction(i,j) = |component_i * component_j| / (variance_proxy + eps)
+    """
+    if not component_breakdown or len(component_breakdown) < 2:
+        return None
+
+    try:
+        eps = 1e-8
+        keys = sorted(component_breakdown.keys())
+        n = len(keys)
+        vals = [component_breakdown[k] for k in keys]
+        mean_v = sum(vals) / n
+
+        interactions = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                vi = component_breakdown[keys[i]]
+                vj = component_breakdown[keys[j]]
+                var_proxy = ((vi - mean_v) ** 2 + (vj - mean_v) ** 2) / 2 + eps
+                inter = abs(vi * vj) / var_proxy
+                interactions.append(FIMInteraction(param_i=keys[i], param_j=keys[j], interaction=round(inter, 4)))
+
+        interactions.sort(key=lambda x: x.interaction, reverse=True)
+        top3 = interactions[:3]
+
+        # Most sensitive: component with highest diagonal (largest variance contribution)
+        max_idx = max(range(n), key=lambda i: abs(vals[i] - mean_v))
+        most_sensitive = keys[max_idx]
+
+        return FIMExtendedResult(top_interactions=top3, most_sensitive=most_sensitive)
     except Exception:
         return None

@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -6778,3 +6778,144 @@ class TestROCMonitoring:
 
     def test_empty_none(self):
         assert compute_roc_auc([], []) is None
+
+
+class TestFrontdoor:
+    def test_insufficient_data(self):
+        assert compute_frontdoor(30, "general", "reversible", ["semantic"]) is None
+
+    def test_with_data(self):
+        r = compute_frontdoor(30, "general", "reversible", ["semantic"], {"n_outcomes": 20})
+        assert r is not None and 0 <= r.causal_effect <= 1
+
+    def test_confounders(self):
+        r = compute_frontdoor(50, "medical", "irreversible", ["tool_state"], {"n_outcomes": 15})
+        assert r is not None and len(r.confounders_controlled) == 3
+
+    def test_domain_factor(self):
+        r1 = compute_frontdoor(50, "general", "reversible", ["semantic"], {"n_outcomes": 20})
+        r2 = compute_frontdoor(50, "medical", "reversible", ["semantic"], {"n_outcomes": 20})
+        assert r1 is not None and r2 is not None
+        assert r2.causal_effect >= r1.causal_effect
+
+    def test_do_estimate(self):
+        r = compute_frontdoor(30, "general", "reversible", ["semantic"], {"n_outcomes": 20})
+        assert r is not None and r.do_calculus_estimate >= 0
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+
+
+class TestExpectedUtility:
+    def test_prior_probs(self):
+        r = compute_expected_utility()
+        assert r.utility_using_prior_probabilities is True
+        assert r.optimal_action in ("USE_MEMORY", "WARN", "ASK_USER", "BLOCK")
+
+    def test_with_q_values(self):
+        r = compute_expected_utility([1.0, 0.5, 0.3, 0.1], learning_episodes=20)
+        assert r.utility_using_prior_probabilities is False
+
+    def test_all_actions_present(self):
+        r = compute_expected_utility()
+        assert len(r.utilities) == 4
+
+    def test_margin_positive(self):
+        r = compute_expected_utility()
+        assert r.utility_margin >= 0
+
+    def test_cold_start_uses_prior(self):
+        r = compute_expected_utility([0.5, 0.5, 0.5, 0.5], learning_episodes=5)
+        assert r.utility_using_prior_probabilities is True
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "expected_utility" in resp.json()
+
+
+class TestCVaR:
+    def test_insufficient_history(self):
+        assert compute_cvar([30] * 5) is None
+
+    def test_low_risk(self):
+        r = compute_cvar([10, 12, 11, 13, 10, 14, 11, 12, 10, 13])
+        assert r is not None and r.tail_risk == "low"
+
+    def test_high_risk(self):
+        r = compute_cvar([70, 80, 75, 85, 90, 65, 80, 75, 88, 92])
+        assert r is not None and r.tail_risk == "high"
+
+    def test_var_less_than_cvar(self):
+        r = compute_cvar([10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
+        assert r is not None and r.var_5 <= r.cvar_5
+
+    def test_in_api_with_history(self):
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 31, 32, 33, 34, 35, 30, 31, 32, 33],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        assert "cvar_risk" in resp.json()
+
+    def test_graceful_no_history(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "cvar_risk" not in resp.json()
+
+
+class TestGumbelSoftmax:
+    def test_basic(self):
+        import math
+        lp = [math.log(0.4), math.log(0.3), math.log(0.2), math.log(0.1)]
+        r = compute_gumbel_softmax(lp, 1.0)
+        assert r is not None and abs(sum(r.relaxed_probs.values()) - 1.0) < 0.01
+
+    def test_straight_through(self):
+        import math
+        lp = [math.log(0.25)] * 4
+        r = compute_gumbel_softmax(lp, 0.3)
+        assert r is not None and r.straight_through is True
+
+    def test_not_straight_through(self):
+        import math
+        lp = [math.log(0.25)] * 4
+        r = compute_gumbel_softmax(lp, 1.0)
+        assert r is not None and r.straight_through is False
+
+    def test_wrong_length(self):
+        assert compute_gumbel_softmax([0.5, 0.5]) is None
+
+    def test_temperature_preserved(self):
+        import math
+        r = compute_gumbel_softmax([math.log(0.25)] * 4, 0.7)
+        assert r is not None and r.temperature == 0.7
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+
+
+class TestFIMExtended:
+    def test_basic(self):
+        r = compute_fim_extended({"s_freshness": 30, "s_drift": 20, "s_provenance": 10})
+        assert r is not None and len(r.top_interactions) <= 3 and r.most_sensitive != ""
+
+    def test_single_component(self):
+        assert compute_fim_extended({"s_freshness": 30}) is None
+
+    def test_empty(self):
+        assert compute_fim_extended({}) is None
+
+    def test_interactions_sorted(self):
+        r = compute_fim_extended({"a": 10, "b": 50, "c": 90, "d": 5})
+        assert r is not None
+        if len(r.top_interactions) >= 2:
+            assert r.top_interactions[0].interaction >= r.top_interactions[1].interaction
+
+    def test_most_sensitive(self):
+        r = compute_fim_extended({"a": 10, "b": 90, "c": 50})
+        assert r is not None and r.most_sensitive in ("a", "b", "c")
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "fim_extended" in resp.json()

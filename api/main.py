@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -2153,6 +2153,91 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         response["roc_monitoring"] = {"auc_estimate": roc.auc_estimate, "model_degraded": roc.model_degraded, "retrain_recommended": roc.retrain_recommended}
             except Exception:
                 pass
+    except Exception:
+        pass
+
+    # Front-door criterion (REC-04)
+    try:
+        _fd_key = f"frontdoor_probs:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _fd_data = None
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _fdr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_fd_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                if _fdr.ok and _fdr.json().get("result"):
+                    _fd_data = _json.loads(_fdr.json()["result"])
+            except Exception:
+                pass
+        _mem_types = list(set(e.type for e in entries))
+        fd = compute_frontdoor(omega_out, req.domain, req.action_type, _mem_types, _fd_data)
+        if fd:
+            response["frontdoor_effect"] = {"causal_effect": fd.causal_effect, "confounders_controlled": fd.confounders_controlled, "do_calculus_estimate": fd.do_calculus_estimate}
+    except Exception:
+        pass
+
+    # Expected Utility (C-03)
+    try:
+        _eu_q = None
+        _eu_eps = 0
+        _rl_data = response.get("rl_adjustment", {})
+        if _rl_data:
+            _eu_eps = _rl_data.get("learning_episodes", 0)
+            from scoring_engine.rl_policy import _q_table, _state_key
+            _st = _state_key(omega_out, result.component_breakdown.get("s_freshness", 0),
+                             result.component_breakdown.get("s_drift", 0), result.component_breakdown.get("s_provenance", 0))
+            _eu_q = _q_table.get_q_values(req.domain, _st)
+        eu = compute_expected_utility(_eu_q, _eu_eps)
+        response["expected_utility"] = {"utilities": eu.utilities, "optimal_action": eu.optimal_action,
+                                        "utility_margin": eu.utility_margin, "utility_using_prior_probabilities": eu.utility_using_prior_probabilities}
+    except Exception:
+        pass
+
+    # CVaR Risk (C-04)
+    try:
+        _cvar_history = list(req.score_history) if req.score_history else []
+        if len(_cvar_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _ck = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                _cr = http_requests.get(f"{UPSTASH_REDIS_URL}/LRANGE/{_ck}/0/99",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                if _cr.ok:
+                    _ch = _cr.json().get("result", [])
+                    if _ch:
+                        _cvar_history = [float(x) for x in _ch]
+            except Exception:
+                pass
+        if len(_cvar_history) >= 10:
+            cv = compute_cvar(_cvar_history)
+            if cv:
+                response["cvar_risk"] = {"var_5": cv.var_5, "cvar_5": cv.cvar_5, "tail_risk": cv.tail_risk}
+                if cv.tail_risk == "high":
+                    repair_plan_out.append({"action": "CVAR_WARNING", "entry_id": "*",
+                        "reason": "CVaR WARNING: worst-case memory risk is high", "projected_improvement": 0, "priority": "high"})
+    except Exception:
+        pass
+
+    # Gumbel-Softmax (ML-07)
+    try:
+        _pg_data = response.get("policy_gradient", {})
+        _pg_probs = _pg_data.get("action_probabilities", {})
+        if _pg_probs:
+            import math as _gm
+            _log_probs = [_gm.log(max(_pg_probs.get(a, 0.25), 1e-10)) for a in ["USE_MEMORY", "WARN", "ASK_USER", "BLOCK"]]
+            _gs_temp = _pg_data.get("temperature", 1.0)
+            gs = compute_gumbel_softmax(_log_probs, _gs_temp, seed=request_id)
+            if gs:
+                response["gumbel_softmax"] = {"relaxed_probs": gs.relaxed_probs, "temperature": gs.temperature, "straight_through": gs.straight_through}
+    except Exception:
+        pass
+
+    # FIM Extended (ML-08)
+    try:
+        fim_ext = compute_fim_extended(result.component_breakdown)
+        if fim_ext:
+            response["fim_extended"] = {
+                "top_interactions": [{"param_i": t.param_i, "param_j": t.param_j, "interaction": t.interaction} for t in fim_ext.top_interactions],
+                "most_sensitive": fim_ext.most_sensitive,
+            }
     except Exception:
         pass
 

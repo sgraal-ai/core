@@ -51,7 +51,7 @@ from .ctl_verification import compute_ctl_verification, CTLResult
 from .lyapunov_exponent import compute_lyapunov_exponent, LyapunovExponentResult
 from .banach import compute_banach, BanachResult
 from .hotelling_t2 import compute_hotelling_t2, HotellingT2Result
-from .fisher_rao import compute_fisher_rao, FisherRaoResult
+from .fisher_rao import compute_fisher_rao, FisherRaoResult, compute_fim_extended, FIMExtendedResult
 from .geodesic_flow import compute_geodesic_flow, GeodesicFlowResult
 from .koopman import compute_koopman, KoopmanResult
 from .ergodicity import compute_ergodicity, ErgodicityResult
@@ -65,3 +65,7 @@ from .arrhenius import compute_arrhenius, ArrheniusResult
 from .owa_provenance import compute_owa, OWAResult
 from .poisson_recall import compute_poisson_recall, PoissonRecallResult
 from .roc_monitoring import compute_roc_auc, ROCResult
+from .frontdoor import compute_frontdoor, FrontdoorResult
+from .expected_utility import compute_expected_utility, ExpectedUtilityResult
+from .cvar import compute_cvar, CVaRResult
+from .gumbel_softmax import compute_gumbel_softmax, GumbelSoftmaxResult

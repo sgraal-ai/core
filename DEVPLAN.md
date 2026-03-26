@@ -89,6 +89,11 @@
 | P-05 | OWA Operator provenance aggregation | Done | 6 tests |
 | R-03 | Poisson Recall error model | Done | 6 tests |
 | R-04 | ROC AUC online monitoring | Done | 6 tests |
+| REC-04 | Front-door criterion (Pearl do-calculus) | Done | 6 tests |
+| C-03 | Expected Utility decision theory | Done | 6 tests |
+| C-04 | CVaR tail risk measure | Done | 6 tests |
+| ML-07 | Gumbel-Softmax relaxation | Done | 6 tests |
+| ML-08 | FIM Extended off-diagonal interactions | Done | 6 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -109,7 +114,7 @@
 
 ### Test Summary
 
-- **661 tests passing** (pytest)
+- **691 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
