@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5289,3 +5289,100 @@ class TestMMD:
             assert "score" in dd["mmd"]
             assert "sigma" in dd["mmd"]
             assert "kernel" in dd["mmd"]
+
+
+class TestPageHinkley:
+    """Tests for D-07 Page-Hinkley online change detection."""
+
+    def test_insufficient_history_returns_none(self):
+        """Less than 5 observations returns None."""
+        assert compute_page_hinkley([30, 31, 32], 33) is None
+        assert compute_page_hinkley([], 30) is None
+
+    def test_no_change_stable(self):
+        """Stable history should not trigger alert."""
+        history = [30.0, 30.1, 30.0, 30.1, 30.0, 30.1, 30.0]
+        result = compute_page_hinkley(history, 30.0)
+        assert result is not None
+        assert result.alert is False
+        assert result.ph_statistic >= 0
+
+    def test_change_detected(self):
+        """Large sudden shift should trigger alert."""
+        # Stable at 30, then jump to 80
+        history = [30, 30, 30, 30, 30, 80, 80, 80, 80, 80]
+        result = compute_page_hinkley(history, 80.0, lam=5.0)
+        assert result is not None
+        assert result.alert is True
+        assert result.change_magnitude > 0
+        assert result.steps_since_change > 0
+
+    def test_custom_delta_lambda(self):
+        """Custom delta and lambda should be reflected in result."""
+        history = [30, 31, 32, 33, 34]
+        result = compute_page_hinkley(history, 35.0, delta=0.01, lam=100.0)
+        assert result is not None
+        assert result.delta_used == 0.01
+        assert result.lambda_used == 100.0
+
+    def test_permanent_shift_detected_top_level(self):
+        """permanent_shift_detected should be a top-level field."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 31, 30, 31, 30],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "permanent_shift_detected" in data
+        assert isinstance(data["permanent_shift_detected"], bool)
+
+    def test_steps_since_change_counter(self):
+        """steps_since_change should count from change point to end."""
+        history = [30, 30, 30, 80, 80, 80, 80, 80]
+        result = compute_page_hinkley(history, 80.0, lam=5.0)
+        assert result is not None
+        if result.alert:
+            assert result.steps_since_change >= 1
+
+    def test_page_hinkley_in_api(self):
+        """Preflight with score_history should include page_hinkley in trend_detection."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 31, 32, 33, 34, 35],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        td = data.get("trend_detection", {})
+        if "page_hinkley" in td:
+            ph = td["page_hinkley"]
+            assert "ph_statistic" in ph
+            assert "alert" in ph
+            assert "change_magnitude" in ph
+            assert "steps_since_change" in ph
+            assert "running_mean" in ph
+            assert "delta_used" in ph
+            assert "lambda_used" in ph
+
+    def test_graceful_degradation_no_history(self):
+        """Without score_history, page_hinkley should not appear."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        td = data.get("trend_detection", {})
+        assert "page_hinkley" not in td
+
+    def test_config_from_request(self):
+        """page_hinkley_config should be accepted in request."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 31, 32, 33, 34, 35],
+            "page_hinkley_config": {"delta": 0.01, "lambda": 100.0},
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        td = data.get("trend_detection", {})
+        if "page_hinkley" in td:
+            assert td["page_hinkley"]["delta_used"] == 0.01
+            assert td["page_hinkley"]["lambda_used"] == 100.0

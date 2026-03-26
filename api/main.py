@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -139,6 +139,7 @@ class PreflightRequest(BaseModel):
     thresholds: Optional[dict[str, float]] = None  # custom WARN/ASK_USER/BLOCK thresholds
     use_pagerank: bool = False  # opt-in PageRank authority scoring
     score_history: Optional[list[float]] = None  # recent omega scores for CUSUM/EWMA trend detection
+    page_hinkley_config: Optional[dict[str, float]] = None  # {"delta": float, "lambda": float}
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -1250,7 +1251,53 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         except Exception:
             pass  # graceful degradation
 
+        # Page-Hinkley change detection
+        _ph_alert = False
+        try:
+            _ph_history = list(req.score_history) if req.score_history else []
+            if len(_ph_history) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                try:
+                    _phk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                    _phr = http_requests.get(
+                        f"{UPSTASH_REDIS_URL}/LRANGE/{_phk}/0/99",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                        timeout=2,
+                    )
+                    if _phr.ok:
+                        _phh = _phr.json().get("result", [])
+                        if _phh:
+                            _ph_history = [float(x) for x in _phh]
+                except Exception:
+                    pass
+
+            if len(_ph_history) >= 5:
+                _ph_cfg = req.page_hinkley_config or {}
+                _ph_delta = _ph_cfg.get("delta", 0.005)
+                _ph_lambda = _ph_cfg.get("lambda", 50.0)
+                ph = compute_page_hinkley(_ph_history, omega_out, delta=_ph_delta, lam=_ph_lambda)
+                if ph:
+                    td["page_hinkley"] = {
+                        "ph_statistic": ph.ph_statistic,
+                        "alert": ph.alert,
+                        "change_magnitude": ph.change_magnitude,
+                        "steps_since_change": ph.steps_since_change,
+                        "running_mean": ph.running_mean,
+                        "delta_used": ph.delta_used,
+                        "lambda_used": ph.lambda_used,
+                    }
+                    _ph_alert = ph.alert
+        except Exception:
+            pass  # graceful degradation
+
         response["trend_detection"] = td
+
+        # Permanent shift: Page-Hinkley alert AND BOCPD regime_change
+        _bocpd_regime = td.get("bocpd", {}).get("regime_change", False)
+        if _ph_alert and _bocpd_regime:
+            response["permanent_shift_detected"] = True
+
+    if "permanent_shift_detected" not in response:
+        response["permanent_shift_detected"] = False
 
     # Calibration metrics
     cal = compute_calibration(omega_out, result.assurance_score, result.component_breakdown)

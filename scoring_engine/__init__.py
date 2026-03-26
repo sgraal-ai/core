@@ -40,3 +40,4 @@ from .unified_loss import compute_unified_loss, geodesic_update, UnifiedLossResu
 from .policy_gradient import compute_policy_gradient, decay_temperature, PolicyGradientResult
 from .info_thermodynamics import compute_info_thermodynamics, InfoThermodynamicsResult
 from .mahalanobis import compute_mahalanobis, MahalanobisResult
+from .page_hinkley import compute_page_hinkley, PageHinkleyResult
