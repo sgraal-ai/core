@@ -69,3 +69,8 @@ from .frontdoor import compute_frontdoor, FrontdoorResult
 from .expected_utility import compute_expected_utility, ExpectedUtilityResult
 from .cvar import compute_cvar, CVaRResult
 from .gumbel_softmax import compute_gumbel_softmax, GumbelSoftmaxResult
+from .simulated_annealing import compute_simulated_annealing, SAResult
+from .lqr_control import compute_lqr, LQRResult
+from .persistence_landscape import compute_persistence_landscape, PersistenceLandscapeResult
+from .topological_entropy import compute_topological_entropy, TopologicalEntropyResult
+from .homology_torsion import compute_homology_torsion, HomologyTorsionResult

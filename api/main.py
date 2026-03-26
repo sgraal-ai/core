@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended, compute_simulated_annealing, compute_lqr, compute_persistence_landscape, compute_topological_entropy, compute_homology_torsion
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -2238,6 +2238,88 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "top_interactions": [{"param_i": t.param_i, "param_j": t.param_j, "interaction": t.interaction} for t in fim_ext.top_interactions],
                 "most_sensitive": fim_ext.most_sensitive,
             }
+    except Exception:
+        pass
+
+    # Simulated Annealing (ML-09)
+    try:
+        _ul_data = response.get("unified_loss", {})
+        _sa_gc = _ul_data.get("geodesic_update_count", 0)
+        _sa_loss = _ul_data.get("L_v4", 0.0)
+        _sa_key = f"sa_state:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _sa_prev = None
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _sar = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_sa_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                if _sar.ok and _sar.json().get("result"):
+                    _sa_prev = _json.loads(_sar.json()["result"])
+            except Exception:
+                pass
+        sa = compute_simulated_annealing(_sa_loss, _sa_gc, _sa_prev)
+        if sa:
+            response["simulated_annealing"] = {"current_temperature": sa.current_temperature, "accepted_moves": sa.accepted_moves, "best_loss": sa.best_loss, "sa_active": sa.sa_active}
+            if sa.sa_active and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                try:
+                    _sa_store = _json.dumps({"temperature": sa.current_temperature, "accepted": sa.accepted_moves, "best_loss": sa.best_loss, "iteration": _sa_prev.get("iteration", 0) + 1 if _sa_prev else 1})
+                    http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_sa_key}/{_sa_store}/EX/86400",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # LQR Control (ML-10)
+    try:
+        lqr = compute_lqr(omega_out)
+        if lqr:
+            response["lqr_control"] = {"optimal_control": lqr.optimal_control, "state_deviation": lqr.state_deviation, "control_effort": lqr.control_effort, "target_omega": lqr.target_omega}
+    except Exception:
+        pass
+
+    # Persistence Landscape (TDA-02)
+    try:
+        _ph_data = response.get("persistent_homology", {})
+        _b1_data = _ph_data.get("betti_1")
+        if _b1_data:
+            pl = compute_persistence_landscape(_b1_data)
+            if pl:
+                response["persistence_landscape"] = {"landscape_values": pl.landscape_values, "landscape_norm": pl.landscape_norm, "topology_complexity": pl.topology_complexity}
+    except Exception:
+        pass
+
+    # Topological Entropy (TDA-03)
+    try:
+        _te_history = list(req.score_history) if req.score_history else []
+        if len(_te_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _tek = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                _ter = http_requests.get(f"{UPSTASH_REDIS_URL}/LRANGE/{_tek}/0/99",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                if _ter.ok:
+                    _teh = _ter.json().get("result", [])
+                    if _teh: _te_history = [float(x) for x in _teh]
+            except Exception:
+                pass
+        if len(_te_history) >= 10:
+            te = compute_topological_entropy(_te_history, omega_out)
+            if te:
+                response["topological_entropy"] = {"entropy_estimate": te.entropy_estimate, "distinct_states_visited": te.distinct_states_visited, "complexity_class": te.complexity_class}
+    except Exception:
+        pass
+
+    # Homology Torsion (TDA-05)
+    try:
+        _ph_b1_max = max((b.get("count", 0) for b in response.get("persistent_homology", {}).get("betti_1", [{"count": 0}])), default=0)
+        _sh_h1 = response.get("consistency_analysis", {}).get("h1_rank", 0)
+        ht = compute_homology_torsion(_ph_b1_max, _sh_h1)
+        response["homology_torsion"] = {"torsion_detected": ht.torsion_detected, "hallucination_risk": ht.hallucination_risk, "torsion_evidence": ht.torsion_evidence}
+        if ht.hallucination_risk == "high":
+            _orig_action = response.get("recommended_action", "USE_MEMORY")
+            if _orig_action in ("USE_MEMORY", "WARN"):
+                response["original_recommended_action"] = _orig_action
+                response["recommended_action"] = "ASK_USER"
+                response["hallucination_override"] = True
     except Exception:
         pass
 

@@ -94,6 +94,11 @@
 | C-04 | CVaR tail risk measure | Done | 6 tests |
 | ML-07 | Gumbel-Softmax relaxation | Done | 6 tests |
 | ML-08 | FIM Extended off-diagonal interactions | Done | 6 tests |
+| ML-09 | Simulated Annealing for L_v4 optimization | Done | 6 tests |
+| ML-10 | LQR Control for omega targeting | Done | 6 tests |
+| TDA-02 | Persistence Landscape from Betti numbers | Done | 6 tests |
+| TDA-03 | Topological Entropy complexity measure | Done | 6 tests |
+| TDA-05 | Homology Torsion hallucination detection | Done | 6 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -114,7 +119,7 @@
 
 ### Test Summary
 
-- **691 tests passing** (pytest)
+- **721 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)

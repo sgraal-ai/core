@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended, compute_simulated_annealing, compute_lqr, compute_persistence_landscape, compute_topological_entropy, compute_homology_torsion
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -6919,3 +6919,136 @@ class TestFIMExtended:
     def test_in_api(self):
         resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
         assert "fim_extended" in resp.json()
+
+
+class TestSimulatedAnnealing:
+    def test_inactive_low_count(self):
+        r = compute_simulated_annealing(5.0, 5)
+        assert r is not None and r.sa_active is False
+
+    def test_active_high_count(self):
+        r = compute_simulated_annealing(5.0, 25)
+        assert r is not None and r.sa_active is True
+
+    def test_temperature_decays(self):
+        r = compute_simulated_annealing(5.0, 25, {"temperature": 1.0, "accepted": 0, "best_loss": 10.0, "iteration": 5})
+        assert r is not None and r.current_temperature < 1.0
+
+    def test_best_loss_tracks(self):
+        r = compute_simulated_annealing(3.0, 25, {"temperature": 0.5, "accepted": 2, "best_loss": 5.0, "iteration": 3})
+        assert r is not None and r.best_loss <= 5.0
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "simulated_annealing" in resp.json()
+
+    def test_max_iterations(self):
+        r = compute_simulated_annealing(5.0, 25, {"temperature": 0.01, "accepted": 40, "best_loss": 2.0, "iteration": 55})
+        assert r is not None and r.sa_active is False
+
+
+class TestLQRControl:
+    def test_basic(self):
+        r = compute_lqr(70.0)
+        assert r is not None and r.optimal_control < 0  # should reduce omega
+
+    def test_at_target(self):
+        r = compute_lqr(50.0)
+        assert r is not None and abs(r.optimal_control) < 0.01
+
+    def test_below_target(self):
+        r = compute_lqr(20.0)
+        assert r is not None and r.optimal_control > 0  # should increase
+
+    def test_deviation(self):
+        r = compute_lqr(80.0, target=50.0)
+        assert r is not None and r.state_deviation == 30.0
+
+    def test_effort_positive(self):
+        r = compute_lqr(60.0)
+        assert r is not None and r.control_effort >= 0
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "lqr_control" in resp.json()
+
+
+class TestPersistenceLandscape:
+    def test_basic(self):
+        betti = [{"scale": 0.1, "count": 0}, {"scale": 0.5, "count": 1}, {"scale": 1.0, "count": 2}, {"scale": 2.0, "count": 1}, {"scale": 5.0, "count": 0}]
+        r = compute_persistence_landscape(betti)
+        assert r is not None and len(r.landscape_values) == 6
+
+    def test_norm_positive(self):
+        betti = [{"scale": 0.5, "count": 3}]
+        r = compute_persistence_landscape(betti)
+        assert r is not None and r.landscape_norm >= 0
+
+    def test_null_input(self):
+        assert compute_persistence_landscape(None) is None
+        assert compute_persistence_landscape([]) is None
+
+    def test_complexity(self):
+        betti = [{"count": 1}, {"count": 2}, {"count": 3}]
+        r = compute_persistence_landscape(betti)
+        assert r is not None and r.topology_complexity > 0
+
+    def test_padding(self):
+        betti = [{"count": 1}]
+        r = compute_persistence_landscape(betti)
+        assert r is not None and len(r.landscape_values) == 6
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(id="p1"), _fresh_entry(id="p2"), _fresh_entry(id="p3")]}, headers=AUTH)
+        assert resp.status_code == 200
+
+
+class TestTopologicalEntropy:
+    def test_insufficient(self):
+        assert compute_topological_entropy([30] * 5, 30) is None
+
+    def test_ordered(self):
+        r = compute_topological_entropy([30] * 12, 30)
+        assert r is not None and r.complexity_class == "ordered"
+
+    def test_diverse(self):
+        r = compute_topological_entropy([10, 30, 60, 90, 10, 30, 60, 90, 10, 30], 60)
+        assert r is not None and r.distinct_states_visited == 4
+
+    def test_entropy_positive(self):
+        r = compute_topological_entropy([10, 50, 90, 10, 50, 90, 10, 50, 90, 10], 50)
+        assert r is not None and r.entropy_estimate > 0
+
+    def test_in_api_with_history(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [30 + i for i in range(12)]}, headers=AUTH)
+        assert "topological_entropy" in resp.json()
+
+    def test_graceful_no_history(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "topological_entropy" not in resp.json()
+
+
+class TestHomologyTorsion:
+    def test_no_torsion(self):
+        r = compute_homology_torsion(0, 0)
+        assert r.torsion_detected is False and r.hallucination_risk == "none"
+
+    def test_high_risk(self):
+        r = compute_homology_torsion(2, 3)
+        assert r.torsion_detected is True and r.hallucination_risk == "high"
+
+    def test_low_risk_loops_only(self):
+        r = compute_homology_torsion(1, 0)
+        assert r.hallucination_risk == "low"
+
+    def test_low_risk_h1_only(self):
+        r = compute_homology_torsion(0, 2)
+        assert r.hallucination_risk == "low"
+
+    def test_evidence_string(self):
+        r = compute_homology_torsion(3, 5)
+        assert "beta_1=3" in r.torsion_evidence and "h1_rank=5" in r.torsion_evidence
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "homology_torsion" in resp.json()
