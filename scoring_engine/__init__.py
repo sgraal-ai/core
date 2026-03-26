@@ -41,3 +41,4 @@ from .policy_gradient import compute_policy_gradient, decay_temperature, PolicyG
 from .info_thermodynamics import compute_info_thermodynamics, InfoThermodynamicsResult
 from .mahalanobis import compute_mahalanobis, MahalanobisResult
 from .page_hinkley import compute_page_hinkley, PageHinkleyResult
+from .provenance_entropy import compute_provenance_entropy, ProvenanceEntropyResult

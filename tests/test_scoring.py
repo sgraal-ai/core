@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5386,3 +5386,89 @@ class TestPageHinkley:
         if "page_hinkley" in td:
             assert td["page_hinkley"]["delta_used"] == 0.01
             assert td["page_hinkley"]["lambda_used"] == 100.0
+
+
+class TestProvenanceEntropy:
+    """Tests for P-03 Shannon entropy on provenance graph."""
+
+    def test_single_source_low_entropy(self):
+        """Single entry with high trust should have low entropy."""
+        entries = [{"id": "e1", "source_trust": 0.99, "source_conflict": 0.01}]
+        result = compute_provenance_entropy(entries)
+        assert result is not None
+        assert result.per_entry[0].entropy >= 0
+        # High trust, low conflict → lower entropy
+        assert result.per_entry[0].entropy < 1.5
+
+    def test_multiple_sources(self):
+        """Multiple entries should compute per-entry and mean entropy."""
+        entries = [
+            {"id": "e1", "source_trust": 0.9, "source_conflict": 0.1},
+            {"id": "e2", "source_trust": 0.5, "source_conflict": 0.5},
+            {"id": "e3", "source_trust": 0.1, "source_conflict": 0.9},
+        ]
+        result = compute_provenance_entropy(entries)
+        assert result is not None
+        assert len(result.per_entry) == 3
+        assert result.mean_entropy > 0
+
+    def test_conflict_probable_threshold(self):
+        """Entry with balanced trust/conflict should flag conflict_probable."""
+        entries = [{"id": "e1", "source_trust": 0.5, "source_conflict": 0.5}]
+        result = compute_provenance_entropy(entries)
+        assert result is not None
+        # 0.5/0.5 trust and 0.5/0.5 conflict → high entropy
+        assert result.per_entry[0].entropy > 1.0
+        assert result.per_entry[0].conflict_probable is True
+
+    def test_s_provenance_adjustment(self):
+        """API should boost s_provenance based on mean entropy."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="p1", source_trust=0.5, source_conflict=0.5),
+                _fresh_entry(id="p2", source_trust=0.5, source_conflict=0.5),
+            ],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "provenance_entropy" in data
+        assert "s_provenance" in data["component_breakdown"]
+
+    def test_n_entries_1_edge_case(self):
+        """Single entry should still work without division by zero."""
+        entries = [{"id": "e1", "source_trust": 0.9}]
+        result = compute_provenance_entropy(entries)
+        assert result is not None
+        assert result.mean_entropy >= 0
+
+    def test_entropy_trend_stable(self):
+        """Flat history should give stable trend."""
+        entries = [{"id": "e1", "source_trust": 0.5, "source_conflict": 0.5}]
+        result = compute_provenance_entropy(entries, history=[1.0, 1.0, 1.0, 1.0])
+        assert result is not None
+        assert result.entropy_trend == "stable"
+
+    def test_entropy_trend_increasing(self):
+        """Rising history should give increasing trend."""
+        entries = [{"id": "e1", "source_trust": 0.5}]
+        result = compute_provenance_entropy(entries, history=[0.5, 0.7, 0.9, 1.1])
+        assert result is not None
+        assert result.entropy_trend == "increasing"
+
+    def test_graceful_degradation_empty(self):
+        """Empty entries should return None."""
+        assert compute_provenance_entropy([]) is None
+
+    def test_provenance_entropy_in_api(self):
+        """Preflight should include provenance_entropy."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "provenance_entropy" in data
+        pe = data["provenance_entropy"]
+        assert "per_entry" in pe
+        assert "mean_entropy" in pe
+        assert "high_entropy_entries" in pe
+        assert "entropy_trend" in pe

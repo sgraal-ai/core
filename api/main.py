@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Literal, Optional
-import sys, os
+import sys, os, math
 import secrets
 import hashlib
 import hmac as _hmac
@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1420,6 +1420,65 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 new_interf = min(100, old_interf + boost)
                 if "component_breakdown" in response:
                     response["component_breakdown"]["s_interference"] = round(new_interf, 2)
+    except Exception:
+        pass  # graceful degradation
+
+    # Provenance entropy (P-03)
+    try:
+        _pe_entries = [{"id": e.id, "source_trust": e.source_trust, "source_conflict": e.source_conflict} for e in entries]
+        # Fetch entropy history from Redis for trend
+        _pe_history = None
+        _pe_key = f"prov_entropy:{key_record.get('key_hash', 'default')}:{req.domain}"
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _per = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/LRANGE/{_pe_key}/0/9",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _per.ok:
+                    _peh = _per.json().get("result", [])
+                    if _peh:
+                        _pe_history = [float(x) for x in _peh]
+            except Exception:
+                pass
+
+        pe = compute_provenance_entropy(_pe_entries, history=_pe_history)
+        if pe:
+            response["provenance_entropy"] = {
+                "per_entry": [{"entry_id": p.entry_id, "entropy": p.entropy, "source_count": p.source_count, "conflict_probable": p.conflict_probable} for p in pe.per_entry],
+                "mean_entropy": pe.mean_entropy,
+                "high_entropy_entries": pe.high_entropy_entries,
+                "entropy_trend": pe.entropy_trend,
+            }
+            # Wire into s_provenance
+            n_e = len(entries)
+            max_h = math.log(n_e) if n_e > 1 else 1.0
+            if max_h > 0 and "component_breakdown" in response:
+                boost = (pe.mean_entropy / max_h) * 10
+                old_prov = response["component_breakdown"].get("s_provenance", 0)
+                response["component_breakdown"]["s_provenance"] = round(min(100, old_prov + boost), 2)
+
+            # Push to Redis for trend
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                try:
+                    http_requests.post(
+                        f"{UPSTASH_REDIS_URL}/RPUSH/{_pe_key}/{pe.mean_entropy}",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                        timeout=2,
+                    )
+                    http_requests.post(
+                        f"{UPSTASH_REDIS_URL}/LTRIM/{_pe_key}/-10/-1",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                        timeout=2,
+                    )
+                    http_requests.post(
+                        f"{UPSTASH_REDIS_URL}/EXPIRE/{_pe_key}/3600",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                        timeout=2,
+                    )
+                except Exception:
+                    pass
     except Exception:
         pass  # graceful degradation
 
