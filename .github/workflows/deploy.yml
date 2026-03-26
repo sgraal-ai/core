@@ -1,3 +1,7 @@
+# Required GitHub Secrets:
+# RAILWAY_TOKEN: from Railway dashboard → Account Settings → Tokens
+# RAILWAY_SERVICE_ID: from Railway dashboard → Service → Settings → Service ID
+
 name: Deploy to Railway
 on:
   push:
@@ -20,6 +24,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - uses: railwayapp/railway-github-action@v2
-        with:
-          token: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Deploy to Railway
+        run: |
+          npm install -g @railway/cli
+          railway up --service ${{ secrets.RAILWAY_SERVICE_ID }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
