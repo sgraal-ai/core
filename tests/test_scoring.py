@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5807,3 +5807,75 @@ class TestMDP:
             result = compute_mdp(float(omega))
             assert result is not None
             assert result.optimal_action in ("WAIT", "SOFT_HEAL", "FULL_HEAL", "EMERGENCY_HEAL")
+
+
+class TestMTTR:
+    """Tests for REC-03 MTTR Weibull estimation."""
+
+    def test_default_params_cold_start(self):
+        """No history should use default params."""
+        result = compute_mttr(None)
+        assert result is not None
+        assert result.weibull_k == 1.5
+        assert result.weibull_lambda == 10.0
+        assert result.data_points == 0
+
+    def test_mttr_estimate_computation(self):
+        """MTTR should be λ·Γ(1+1/k)."""
+        result = compute_mttr(None)
+        assert result is not None
+        assert result.mttr_estimate > 0
+        assert result.mttr_estimate < 100
+
+    def test_mttr_p95_computation(self):
+        """p95 should be λ·(-log(0.05))^(1/k)."""
+        result = compute_mttr(None)
+        assert result is not None
+        assert result.mttr_p95 > result.mttr_estimate  # p95 > mean
+
+    def test_recovery_probability_bounds(self):
+        """Recovery probability should be in [0, 1]."""
+        result = compute_mttr(None)
+        assert result is not None
+        assert 0 <= result.recovery_probability <= 1.0
+
+    def test_sla_compliant_true(self):
+        """Short heal durations should be SLA compliant (p95 < 20)."""
+        durations = [3.0, 4.0, 5.0, 3.5, 4.5, 2.0, 6.0]
+        result = compute_mttr(durations)
+        assert result is not None
+        assert result.sla_compliant is True
+
+    def test_sla_compliant_false_repair_plan(self):
+        """Very long durations should trigger SLA warning."""
+        # Simulate very long heal times
+        durations = [50.0, 60.0, 55.0, 45.0, 70.0, 65.0, 80.0]
+        result = compute_mttr(durations)
+        assert result is not None
+        assert result.mttr_p95 > 20.0
+        assert result.sla_compliant is False
+
+    def test_invalid_parameter_fallback(self):
+        """Should handle edge cases gracefully."""
+        # All zeros → should fall back to defaults
+        result = compute_mttr([0.0, 0.0, 0.0, 0.0, 0.0])
+        assert result is not None
+        assert result.weibull_k > 0
+        assert result.weibull_lambda > 0
+
+    def test_mttr_in_api(self):
+        """Preflight should include mttr_analysis."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "mttr_analysis" in data
+        m = data["mttr_analysis"]
+        assert "mttr_estimate" in m
+        assert "mttr_p95" in m
+        assert "recovery_probability" in m
+        assert "weibull_k" in m
+        assert "weibull_lambda" in m
+        assert "sla_compliant" in m
+        assert "data_points" in m

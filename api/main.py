@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1628,6 +1628,46 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "reason": f"MDP recommends {mdp.optimal_action} (V*={mdp.expected_value:.2f}, state={mdp.state})",
                     "projected_improvement": round(mdp.expected_value * 10, 1),
                     "priority": "high" if mdp.state in ("DEGRADED", "CRITICAL") else "medium",
+                })
+    except Exception:
+        pass  # graceful degradation
+
+    # MTTR Weibull estimation (REC-03)
+    try:
+        _mttr_key = f"mttr_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _mttr_durations = None
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _mttrr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/LRANGE/{_mttr_key}/0/49",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _mttrr.ok:
+                    _mttrh = _mttrr.json().get("result", [])
+                    if _mttrh:
+                        _mttr_durations = [float(x) for x in _mttrh]
+            except Exception:
+                pass
+
+        mttr = compute_mttr(_mttr_durations)
+        if mttr:
+            response["mttr_analysis"] = {
+                "mttr_estimate": mttr.mttr_estimate,
+                "mttr_p95": mttr.mttr_p95,
+                "recovery_probability": mttr.recovery_probability,
+                "weibull_k": mttr.weibull_k,
+                "weibull_lambda": mttr.weibull_lambda,
+                "sla_compliant": mttr.sla_compliant,
+                "data_points": mttr.data_points,
+            }
+            if not mttr.sla_compliant:
+                repair_plan_out.append({
+                    "action": "SLA_WARNING",
+                    "entry_id": "*",
+                    "reason": f"SLA WARNING: p95 recovery time {mttr.mttr_p95:.1f} steps exceeds 20-step threshold",
+                    "projected_improvement": 0,
+                    "priority": "high",
                 })
     except Exception:
         pass  # graceful degradation
