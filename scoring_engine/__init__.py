@@ -58,3 +58,5 @@ from .ergodicity import compute_ergodicity, ErgodicityResult
 from .extended_freshness import compute_extended_freshness, ExtendedFreshnessResult
 from .persistent_homology import compute_persistent_homology, PersistentHomologyResult
 from .ricci_curvature import compute_ricci_curvature, RicciCurvatureResult
+from .recursive_colimit import compute_recursive_colimit, RecursiveColimitResult
+from .cohomological_gradient import compute_cohomological_gradient, CohomologicalGradientResult

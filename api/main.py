@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -2005,6 +2005,85 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass
 
+    # Recursive Colimit (Category Theory)
+    _colimit_state = None
+    try:
+        _cl_key = f"colimit_state:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _cl_prev = None
+        _cl_iter = 0
+        _cl_min = None
+        _cl_max = None
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _clr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/GET/{_cl_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _clr.ok and _clr.json().get("result"):
+                    _cl_data = _json.loads(_clr.json()["result"])
+                    _cl_prev = _cl_data.get("state")
+                    _cl_iter = _cl_data.get("iteration", 0)
+                    _cl_min = _cl_data.get("min")
+                    _cl_max = _cl_data.get("max")
+            except Exception:
+                pass
+
+        _omega_scores = list(result.component_breakdown.values())
+        _h1 = response.get("consistency_analysis", {}).get("h1_rank", 0)
+        cl = compute_recursive_colimit(_omega_scores, h1_rank=_h1, previous_state=_cl_prev,
+                                        iteration=_cl_iter, min_observed=_cl_min, max_observed=_cl_max)
+        if cl:
+            response["recursive_colimit"] = {
+                "global_state": cl.global_state,
+                "state_velocity": cl.state_velocity,
+                "colimit_stable": cl.colimit_stable,
+                "h1_factor": cl.h1_factor,
+                "iteration": cl.iteration,
+            }
+            _colimit_state = cl.global_state
+
+            # Store in Redis
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                try:
+                    _raw = sum(_omega_scores) / max(len(_omega_scores), 1) * cl.h1_factor
+                    _new_min = min(_cl_min or _raw, _raw)
+                    _new_max = max(_cl_max or _raw, _raw)
+                    _cl_store = _json.dumps({"state": cl.global_state, "iteration": cl.iteration,
+                                             "min": _new_min, "max": _new_max})
+                    http_requests.post(
+                        f"{UPSTASH_REDIS_URL}/SET/{_cl_key}/{_cl_store}/EX/86400",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                        timeout=2,
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # Cohomological Learning Gradient
+    try:
+        _fe_F = response.get("free_energy", {}).get("F", 0.0)
+        _fr_diag_cg = response.get("fisher_rao", {}).get("metric_diagonal")
+        _ul_weights_cg = response.get("unified_loss", {}).get("lambda_weights")
+        _h1_cg = response.get("consistency_analysis", {}).get("h1_rank", 0)
+
+        cg = compute_cohomological_gradient(
+            free_energy_F=_fe_F, h1_rank=_h1_cg,
+            fisher_rao_diagonal=_fr_diag_cg, lambda_weights=_ul_weights_cg,
+        )
+        if cg:
+            response["cohomological_gradient"] = {
+                "gradient_norm": cg.gradient_norm,
+                "h1_contribution": cg.h1_contribution,
+                "fim_contribution": cg.fim_contribution,
+                "cohomological_update_used": cg.cohomological_update_used,
+            }
+            if cg.cohomological_update_used and "unified_loss" in response:
+                response["unified_loss"]["cohomological_update_used"] = True
+    except Exception:
+        pass
+
     # Hawkes self-exciting process
     entry_ages = [e.timestamp_age_days for e in entries]
     hawkes = hawkes_from_entries(entry_ages)
@@ -2441,8 +2520,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _cg_edges = len(_cg.get("edges", [])) if _cg else 0
         _d_geo = min(2.0, _cg_edges / 5.0)
 
-        # Get lyapunov lambda if computed earlier
+        # Get lyapunov lambda and colimit state if computed earlier
         _lyap_for_ss = response.get("lyapunov_exponent", {}).get("lambda_estimate")
+        _colimit_for_ss = response.get("recursive_colimit", {}).get("global_state")
 
         ss = compute_stability_score(
             delta_alpha=_alpha_score,
@@ -2455,6 +2535,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             tau_mix=_mix_time,
             d_geo_causal=_d_geo,
             lyapunov_lambda=_lyap_for_ss,
+            colimit_state=_colimit_for_ss,
         )
         response["stability_score"] = {
             "score": ss.score,

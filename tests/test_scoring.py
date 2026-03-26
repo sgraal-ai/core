@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -6532,4 +6532,102 @@ class TestRicciCurvature:
     def test_graceful_degradation(self):
         resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
         assert resp.status_code == 200
-        # Single entry: no ricci_curvature (need ≥ 2)
+        # Single entry: no ricci_curvature (need >= 2)
+
+
+class TestRecursiveColimit:
+    """Tests for Recursive Colimit (Category Theory)."""
+
+    def test_first_call_prior(self):
+        """First call without previous state should return 0.5."""
+        result = compute_recursive_colimit([30, 20, 10])
+        assert result is not None
+        assert result.global_state == 0.5
+        assert result.iteration == 0
+
+    def test_state_velocity(self):
+        """With previous state, velocity should be computed."""
+        result = compute_recursive_colimit([30, 20], previous_state=0.5, iteration=1)
+        assert result is not None
+        assert isinstance(result.state_velocity, float)
+
+    def test_colimit_stable(self):
+        """Small velocity should be stable."""
+        result = compute_recursive_colimit([30, 20], previous_state=0.5, iteration=1,
+                                           min_observed=0.1, max_observed=100.0)
+        assert result is not None
+        assert isinstance(result.colimit_stable, bool)
+
+    def test_h1_factor(self):
+        """h1_rank=0 should give h1_factor=1.0."""
+        result = compute_recursive_colimit([30], h1_rank=0)
+        assert result is not None
+        assert result.h1_factor == 1.0
+        r2 = compute_recursive_colimit([30], h1_rank=5)
+        assert r2 is not None
+        assert r2.h1_factor == 0.5
+
+    def test_stability_score_11_component(self):
+        """With colimit_state, StabilityScore should use 11 components."""
+        ss = compute_stability_score(lyapunov_lambda=0.1, colimit_state=0.3)
+        assert ss.component_count == 11
+        assert "colimit_state" in ss.components
+
+    def test_graceful_degradation(self):
+        assert compute_recursive_colimit([]) is None
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "recursive_colimit" in data
+        cl = data["recursive_colimit"]
+        assert "global_state" in cl
+        assert "colimit_stable" in cl
+
+
+class TestCohomologicalGradient:
+    """Tests for Cohomological Learning Gradient."""
+
+    def test_with_fim(self):
+        """With Fisher-Rao and weights, should use cohomological update."""
+        result = compute_cohomological_gradient(
+            free_energy_F=5.0, h1_rank=2,
+            fisher_rao_diagonal=[1.0, 2.0, 3.0],
+            lambda_weights=[0.1, 0.2, 0.3],
+        )
+        assert result is not None
+        assert result.cohomological_update_used is True
+        assert result.gradient_norm > 0
+
+    def test_without_fim_fallback(self):
+        """Without Fisher-Rao, should fall back."""
+        result = compute_cohomological_gradient(free_energy_F=5.0, h1_rank=2)
+        assert result is not None
+        assert result.cohomological_update_used is False
+        assert result.fim_contribution == 0.0
+
+    def test_h1_contribution(self):
+        """Higher h1_rank should increase gradient."""
+        r1 = compute_cohomological_gradient(free_energy_F=1.0, h1_rank=0,
+                                             fisher_rao_diagonal=[1.0], lambda_weights=[0.1])
+        r2 = compute_cohomological_gradient(free_energy_F=1.0, h1_rank=5,
+                                             fisher_rao_diagonal=[1.0], lambda_weights=[0.1])
+        assert r1 is not None and r2 is not None
+        assert r2.gradient_norm > r1.gradient_norm
+
+    def test_gradient_norm_bounds(self):
+        result = compute_cohomological_gradient(free_energy_F=0.0, h1_rank=0)
+        assert result is not None
+        assert result.gradient_norm >= 0
+
+    def test_unified_loss_integration(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "cohomological_gradient" in data
+
+    def test_graceful_degradation(self):
+        result = compute_cohomological_gradient()
+        assert result is not None
+        assert result.gradient_norm == 0

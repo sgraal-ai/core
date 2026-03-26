@@ -53,6 +53,7 @@ def compute_stability_score(
     tau_mix: float = 0.0,
     d_geo_causal: float = 0.0,
     lyapunov_lambda: Optional[float] = None,
+    colimit_state: Optional[float] = None,
 ) -> StabilityResult:
     """StabilityScore 9 or 10-component formula.
 
@@ -100,6 +101,13 @@ def compute_stability_score(
         raw["lyapunov_lambda"] = max(0.0, lyapunov_lambda)
         maxes["lyapunov_lambda"] = 1.0
         n_components = 10
+
+    # Add 11th component if colimit available
+    if colimit_state is not None:
+        # Higher global_state = more risk (inverted: 1 - global_state already handled by formula)
+        raw["colimit_state"] = max(0.0, min(1.0, colimit_state))
+        maxes["colimit_state"] = 1.0
+        n_components += 1
 
     total = 0.0
     for key, val in raw.items():

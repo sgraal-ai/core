@@ -82,6 +82,8 @@
 | W-03/04/05 | Extended Freshness ensemble (Sprint 9) | Done | 10 tests |
 | TDA-01 | Persistent Homology (Betti numbers) | Done | 8 tests |
 | TDA-04 | Ollivier-Ricci Curvature | Done | 8 tests |
+| CT-01 | Recursive Colimit (Category Theory) | Done | 7 tests |
+| CG-02 | Cohomological Learning Gradient | Done | 6 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -102,7 +104,7 @@
 
 ### Test Summary
 
-- **618 tests passing** (pytest)
+- **631 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -179,6 +181,8 @@
 - Extended Freshness: 10 tests (gompertz, holt_winters history, HW null redistribution, power_law, model preference, model factual, ensemble weights, s_freshness, models_used, backward compat)
 - Persistent Homology: 8 tests (n<3 null, beta_0 connected, beta_1 loops, significant features, structural drift, topology summary, API, graceful)
 - Ricci Curvature: 8 tests (n<2 null, positive kappa, negative kappa, mean curvature, graph health, at_risk, edge list, graceful)
+- Recursive Colimit: 7 tests (first call prior, velocity, stable, h1_factor, 11-component SS, graceful, API)
+- Cohomological Gradient: 6 tests (with FIM, without FIM, h1 contribution, norm bounds, unified_loss, graceful)
 
 ### Deployments
 
