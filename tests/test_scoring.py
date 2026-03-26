@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -2884,7 +2884,7 @@ class TestDriftDetector:
 
     def test_drift_method_is_ensemble(self):
         metrics = compute_drift_metrics([10, 20, 30])
-        assert metrics.drift_method in ("ensemble_3", "ensemble_4")
+        assert metrics.drift_method in ("ensemble_3", "ensemble_4", "ensemble_5")
 
     def test_empty_returns_zero(self):
         metrics = compute_drift_metrics([])
@@ -2903,7 +2903,7 @@ class TestDriftDetector:
         assert "kl_divergence" in dd
         assert "wasserstein" in dd
         assert "jsd" in dd
-        assert dd["drift_method"] in ("ensemble_3", "ensemble_4")
+        assert dd["drift_method"] in ("ensemble_3", "ensemble_4", "ensemble_5")
 
 
 class TestAlphaDivergence:
@@ -2944,9 +2944,9 @@ class TestAlphaDivergence:
         assert math.isfinite(result)
 
     def test_ensemble_4_score(self):
-        """With α-divergence, drift_method should be ensemble_4."""
+        """With α-divergence + MMD, drift_method should be ensemble_4 or ensemble_5."""
         metrics = compute_drift_metrics([80, 5, 5, 5, 5])
-        assert metrics.drift_method == "ensemble_4"
+        assert metrics.drift_method in ("ensemble_4", "ensemble_5")
         assert metrics.alpha_divergence is not None
         assert metrics.alpha_divergence.alpha_0_5 >= 0
         assert metrics.alpha_divergence.alpha_1_5 >= 0
@@ -2969,7 +2969,7 @@ class TestAlphaDivergence:
         assert "alpha_0_5" in dd["alpha_divergence"]
         assert "alpha_1_5" in dd["alpha_divergence"]
         assert "alpha_2_0" in dd["alpha_divergence"]
-        assert dd["drift_method"] == "ensemble_4"
+        assert dd["drift_method"] in ("ensemble_4", "ensemble_5")
 
     def test_backward_compat_identical_distributions(self):
         """Identical distributions should still have near-zero drift."""
@@ -5217,3 +5217,75 @@ class TestMahalanobis:
             {"id": "e2", "source_trust": 0.1, "timestamp_age_days": 100},
         ]
         assert compute_mahalanobis(entries) is None
+
+
+class TestMMD:
+    """Tests for D-04 Maximum Mean Discrepancy."""
+
+    def test_basic_mmd_computation(self):
+        """MMD should produce valid result for two distributions."""
+        p = [0.1, 0.2, 0.3, 0.4]
+        q = [0.25, 0.25, 0.25, 0.25]
+        result = compute_mmd(p, q)
+        assert result is not None
+        assert result.score >= 0
+        assert result.sigma > 0
+        assert result.kernel == "rbf"
+
+    def test_identical_distributions_zero(self):
+        """Identical samples should give MMD = 0."""
+        p = [0.5, 0.5, 0.5, 0.5]
+        result = compute_mmd(p, p)
+        assert result is not None
+        assert result.score == 0.0
+
+    def test_different_distributions_positive(self):
+        """Different distributions should give positive MMD."""
+        p = [1.0, 2.0, 3.0, 4.0]
+        q = [10.0, 20.0, 30.0, 40.0]
+        result = compute_mmd(p, q)
+        assert result is not None
+        assert result.score > 0
+
+    def test_sigma_median_heuristic(self):
+        """Sigma should be computed via median heuristic."""
+        p = [0.1, 0.2, 0.3]
+        q = [0.4, 0.5, 0.6]
+        result = compute_mmd(p, q)
+        assert result is not None
+        assert result.sigma > 0
+
+    def test_ensemble_5_score(self):
+        """Drift metrics with enough components should use ensemble_5."""
+        scores = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
+        drift = compute_drift_metrics(scores)
+        assert drift.drift_method == "ensemble_5"
+        assert drift.mmd is not None
+        assert drift.ensemble_score >= 0
+
+    def test_n_entries_less_than_2_null(self):
+        """MMD with < 2 samples should return None."""
+        assert compute_mmd([0.5], [0.5]) is None
+        assert compute_mmd([], []) is None
+
+    def test_fallback_to_ensemble_4(self):
+        """With only 1 score, MMD cannot compute; should fall back."""
+        scores = [50.0]
+        drift = compute_drift_metrics(scores)
+        assert drift.mmd is None
+        assert "ensemble_5" not in drift.drift_method
+
+    def test_backward_compatibility(self):
+        """API drift_details should include mmd when available."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        dd = data["drift_details"]
+        assert "drift_method" in dd
+        if dd["drift_method"] == "ensemble_5":
+            assert "mmd" in dd
+            assert "score" in dd["mmd"]
+            assert "sigma" in dd["mmd"]
+            assert "kernel" in dd["mmd"]

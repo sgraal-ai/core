@@ -1219,6 +1219,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "alpha_1_5": drift.alpha_divergence.alpha_1_5,
             "alpha_2_0": drift.alpha_divergence.alpha_2_0,
         }
+    if drift.mmd:
+        dd["mmd"] = {
+            "score": drift.mmd.score,
+            "sigma": drift.mmd.sigma,
+            "kernel": drift.mmd.kernel,
+        }
     response["drift_details"] = dd
 
     # CUSUM + EWMA trend detection + BOCPD

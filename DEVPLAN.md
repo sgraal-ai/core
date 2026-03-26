@@ -59,6 +59,7 @@
 | RL-02 | Policy Gradient with Advantage function | Done | 8 tests |
 | IT-01 | Information Thermodynamics (transfer entropy, Landauer) | Done | 9 tests |
 | I-06 | Mahalanobis distance multivariate anomaly detection | Done | 8 tests |
+| D-04 | Maximum Mean Discrepancy (MMD) — 5th drift method | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -79,7 +80,7 @@
 
 ### Test Summary
 
-- **468 tests passing** (pytest)
+- **476 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -137,6 +138,7 @@
 - Policy Gradient: 8 tests (cold start, advantage computation, softmax sum, exploration trigger, no exploration peaked, temperature decay, entropy bounds, API response)
 - Info Thermodynamics: 9 tests (insufficient history, TE non-negative, Landauer with healing, info temperature, entropy production, reversibility bounds, max_flow for unified loss, API response, graceful degradation)
 - Mahalanobis: 8 tests (single entry null, three entries, anomaly detection, non-anomaly, covariance regularization, s_interference adjustment, dynamic chi2, graceful degradation)
+- MMD: 8 tests (basic computation, identical zero, different positive, sigma heuristic, ensemble_5, n<2 null, fallback ensemble_4, backward compatibility)
 
 ### Deployments
 
