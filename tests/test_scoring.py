@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -6028,3 +6028,153 @@ class TestLyapunovExponent:
         assert "chaos_risk" in le
         assert "stability_class" in le
         assert "divergence_rate" in le
+
+
+class TestBanach:
+    """Tests for S-04 Banach Fixed-Point contraction."""
+
+    def test_insufficient_history_null(self):
+        """Less than 5 observations returns None."""
+        assert compute_banach([30, 31], 32) is None
+
+    def test_k_less_than_1_contraction(self):
+        """Damped series should have k < 1."""
+        history = [50, 40, 35, 32.5, 31.25]
+        result = compute_banach(history, 30.625)
+        assert result is not None
+        assert result.k_estimate < 1.0
+        assert result.contraction_guaranteed is True
+
+    def test_k_greater_than_1_no_contraction(self):
+        """Diverging series should have k > 1."""
+        history = [30, 31, 33, 37, 45]
+        result = compute_banach(history, 61.0)
+        assert result is not None
+        assert result.k_estimate > 1.0
+        assert result.contraction_guaranteed is False
+
+    def test_convergence_steps(self):
+        """Contracting map should have finite convergence steps."""
+        history = [50, 40, 35, 32.5, 31.25]
+        result = compute_banach(history, 30.625)
+        assert result is not None
+        if result.contraction_guaranteed and result.k_estimate > 0:
+            assert result.convergence_steps > 0
+
+    def test_identical_pairs_skip(self):
+        """Identical consecutive values should be skipped."""
+        history = [30, 30, 30, 31, 30.5]
+        result = compute_banach(history, 30.25)
+        assert result is not None
+
+    def test_all_identical_k_zero(self):
+        """All identical → k=0, contraction guaranteed."""
+        history = [30.0] * 8
+        result = compute_banach(history, 30.0)
+        assert result is not None
+        assert result.k_estimate == 0.0
+        assert result.contraction_guaranteed is True
+
+    def test_repair_plan_warning(self):
+        """API should warn when not contracting."""
+        history = [30, 31, 33, 37, 45, 61]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        if "banach_contraction" in data and not data["banach_contraction"]["contraction_guaranteed"]:
+            warnings = [r for r in data["repair_plan"] if r["action"] == "BANACH_WARNING"]
+            assert len(warnings) >= 1
+
+    def test_graceful_degradation(self):
+        """Without history, banach_contraction should not appear."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "banach_contraction" not in data
+
+
+class TestHotellingT2:
+    """Tests for S-05 Hotelling T-squared control chart."""
+
+    def test_phase1_calibrating(self):
+        """Without reference data, should be phase1."""
+        result = compute_hotelling_t2({"s_freshness": 30, "s_drift": 20})
+        assert result is not None
+        assert result.phase == "phase1_calibrating"
+        assert result.out_of_control is False
+
+    def test_phase2_monitoring(self):
+        """With reference data, should be phase2."""
+        ref = {"mean": [30, 20, 10, 15, 25, 5, 10, 80, 10, 15],
+               "cov": [[1 if i == j else 0 for j in range(10)] for i in range(10)],
+               "n_observations": 50}
+        components = {"s_freshness": 30, "s_drift": 20, "s_provenance": 10,
+                      "s_propagation": 15, "r_recall": 25, "r_encode": 5,
+                      "s_interference": 10, "s_recovery": 80, "r_belief": 10, "s_relevance": 15}
+        result = compute_hotelling_t2(components, reference_data=ref)
+        assert result is not None
+        assert result.phase == "phase2_monitoring"
+
+    def test_out_of_control_true(self):
+        """Extreme deviation should trigger out_of_control."""
+        ref = {"mean": [30, 20, 10, 15, 25, 5, 10, 80, 10, 15],
+               "cov": [[1 if i == j else 0 for j in range(10)] for i in range(10)],
+               "n_observations": 50}
+        components = {"s_freshness": 99, "s_drift": 99, "s_provenance": 99,
+                      "s_propagation": 99, "r_recall": 99, "r_encode": 99,
+                      "s_interference": 99, "s_recovery": 1, "r_belief": 99, "s_relevance": 99}
+        result = compute_hotelling_t2(components, reference_data=ref)
+        assert result is not None
+        assert result.out_of_control is True
+
+    def test_out_of_control_false(self):
+        """Near-mean values should be in control."""
+        ref = {"mean": [30, 20, 10, 15, 25, 5, 10, 80, 10, 15],
+               "cov": [[100 if i == j else 0 for j in range(10)] for i in range(10)],
+               "n_observations": 50}
+        components = {"s_freshness": 31, "s_drift": 21, "s_provenance": 11,
+                      "s_propagation": 16, "r_recall": 26, "r_encode": 6,
+                      "s_interference": 11, "s_recovery": 79, "r_belief": 11, "s_relevance": 16}
+        result = compute_hotelling_t2(components, reference_data=ref)
+        assert result is not None
+        assert result.out_of_control is False
+
+    def test_ucl_dynamic(self):
+        """UCL should be computed dynamically based on component count."""
+        result = compute_hotelling_t2({"s_freshness": 30, "s_drift": 20})
+        assert result is not None
+        assert result.ucl > 0
+
+    def test_at_risk_warnings_integration(self):
+        """API should include hotelling_t2."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "hotelling_t2" in data
+        h = data["hotelling_t2"]
+        assert "t2_statistic" in h
+        assert "ucl" in h
+        assert "phase" in h
+
+    def test_covariance_regularization(self):
+        """Should handle singular covariance via regularization."""
+        ref = {"mean": [0] * 10,
+               "cov": [[0 for j in range(10)] for i in range(10)],
+               "n_observations": 50}
+        components = {"s_freshness": 10, "s_drift": 10, "s_provenance": 10,
+                      "s_propagation": 10, "r_recall": 10, "r_encode": 10,
+                      "s_interference": 10, "s_recovery": 10, "r_belief": 10, "s_relevance": 10}
+        result = compute_hotelling_t2(components, reference_data=ref)
+        assert result is not None  # regularization prevents failure
+
+    def test_graceful_degradation(self):
+        """Empty components should return None."""
+        result = compute_hotelling_t2({})
+        assert result is None

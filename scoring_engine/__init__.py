@@ -49,3 +49,5 @@ from .mdp import compute_mdp, MDPResult
 from .mttr import compute_mttr, MTTRResult
 from .ctl_verification import compute_ctl_verification, CTLResult
 from .lyapunov_exponent import compute_lyapunov_exponent, LyapunovExponentResult
+from .banach import compute_banach, BanachResult
+from .hotelling_t2 import compute_hotelling_t2, HotellingT2Result

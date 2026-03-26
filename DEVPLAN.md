@@ -69,6 +69,8 @@
 | REC-03 | MTTR Weibull estimation for SLA guarantees | Done | 8 tests |
 | FV-07 | CTL branching-time workflow verification | Done | 8 tests |
 | S-03 | Lyapunov Exponent chaos detection | Done | 9 tests |
+| S-04 | Banach Fixed-Point contraction verification | Done | 8 tests |
+| S-05 | Hotelling T-squared control chart | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -89,7 +91,7 @@
 
 ### Test Summary
 
-- **552 tests passing** (pytest)
+- **568 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -157,6 +159,8 @@
 - MTTR: 8 tests (default cold start, mttr estimate, p95 computation, recovery bounds, SLA compliant, SLA warning, invalid fallback, API response)
 - CTL: 8 tests (EF safe, EF critical, AG heal true, AG heal critical, EG stable, compliance integration, timeout, bounded_steps)
 - Lyapunov Exponent: 9 tests (insufficient null, converging, diverging, chaos threshold, stability class, 10-component SS, 9-component backward compat, graceful degradation, API with history)
+- Banach: 8 tests (insufficient null, k<1 contraction, k>1 no contraction, convergence steps, identical skip, all identical k=0, repair_plan warning, graceful degradation)
+- Hotelling T2: 8 tests (phase1, phase2, out_of_control true/false, UCL dynamic, at_risk integration, covariance regularization, graceful degradation)
 
 ### Deployments
 
