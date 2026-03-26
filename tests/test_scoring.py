@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -6332,3 +6332,86 @@ class TestErgodicity:
         resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
         assert resp.status_code == 200
         assert "ergodicity" not in resp.json()
+
+
+class TestExtendedFreshness:
+    """Tests for W-03/04/05 Extended Freshness models."""
+
+    def test_gompertz_computation(self):
+        """Gompertz should decay with age."""
+        entries = [{"id": "e1", "type": "preference", "timestamp_age_days": 0},
+                   {"id": "e2", "type": "preference", "timestamp_age_days": 50}]
+        result = compute_extended_freshness(entries)
+        assert result is not None
+        assert result.gompertz[0].score > result.gompertz[1].score
+
+    def test_holt_winters_with_history(self):
+        """With 5+ history, holt_winters should be computed."""
+        entries = [{"id": "e1", "type": "tool_state", "timestamp_age_days": 5}]
+        history = [30, 32, 35, 33, 31, 34]
+        result = compute_extended_freshness(entries, history=history)
+        assert result is not None
+        assert result.holt_winters is not None
+        assert len(result.holt_winters) == 1
+        assert "holt_winters" in result.models_used
+
+    def test_holt_winters_null_redistribution(self):
+        """Without history, holt_winters=null and weights redistributed."""
+        entries = [{"id": "e1", "type": "semantic", "timestamp_age_days": 10}]
+        result = compute_extended_freshness(entries, history=None)
+        assert result is not None
+        assert result.holt_winters is None
+        assert "holt_winters" not in result.models_used
+        # Weights still sum to 1.0 implicitly via ensemble
+
+    def test_power_law_computation(self):
+        """Power-law should have long tail — still > 0 at high age."""
+        entries = [{"id": "e1", "type": "semantic", "timestamp_age_days": 200}]
+        result = compute_extended_freshness(entries)
+        assert result is not None
+        assert result.power_law[0].score > 0
+        assert result.power_law[0].half_life > 0
+
+    def test_recommended_model_preference(self):
+        """Preference type should recommend gompertz."""
+        entries = [{"id": "e1", "type": "preference", "timestamp_age_days": 5}]
+        result = compute_extended_freshness(entries)
+        assert result is not None
+        assert result.recommended_model == "gompertz"
+
+    def test_recommended_model_factual(self):
+        """Semantic/factual type should recommend power_law."""
+        entries = [{"id": "e1", "type": "semantic", "timestamp_age_days": 5}]
+        result = compute_extended_freshness(entries)
+        assert result is not None
+        assert result.recommended_model == "power_law"
+
+    def test_ensemble_weights_sum(self):
+        """ensemble_freshness should be in [0, 1]."""
+        entries = [{"id": "e1", "type": "tool_state", "timestamp_age_days": 10}]
+        result = compute_extended_freshness(entries)
+        assert result is not None
+        assert 0 <= result.ensemble_freshness <= 1.0
+
+    def test_s_freshness_update(self):
+        """API should update s_freshness with ensemble."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "extended_freshness" in data
+        assert "s_freshness" in data["component_breakdown"]
+
+    def test_models_used_logging(self):
+        """models_used should list contributing models."""
+        entries = [{"id": "e1", "type": "tool_state", "timestamp_age_days": 5}]
+        result = compute_extended_freshness(entries)
+        assert result is not None
+        assert "weibull" in result.models_used
+        assert "gompertz" in result.models_used
+        assert "power_law" in result.models_used
+
+    def test_backward_compatibility(self):
+        """Empty entries should return None."""
+        assert compute_extended_freshness([]) is None

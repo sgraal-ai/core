@@ -76,6 +76,10 @@
 | IG-04 | Geodesic Flow discrete approximation | Done | 6 tests |
 | OP-01 | Koopman Operator via DMD | Done | 6 tests |
 | ET-01 | Ergodicity measure | Done | 6 tests |
+| W-03 | Gompertz decay freshness model | Done | (in W-03/04/05) |
+| W-04 | Holt-Winters exponential smoothing | Done | (in W-03/04/05) |
+| W-05 | Power-law decay freshness model | Done | (in W-03/04/05) |
+| W-03/04/05 | Extended Freshness ensemble (Sprint 9) | Done | 10 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -96,7 +100,7 @@
 
 ### Test Summary
 
-- **592 tests passing** (pytest)
+- **602 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -170,6 +174,7 @@
 - Geodesic Flow: 6 tests (basic, metric, zero losses, empty, mismatch, API)
 - Koopman: 6 tests (insufficient, stable eigenvalue, prediction bounded, dominant mode, API, graceful)
 - Ergodicity: 6 tests (insufficient, ergodic, non-ergodic, interpretation, API, graceful)
+- Extended Freshness: 10 tests (gompertz, holt_winters history, HW null redistribution, power_law, model preference, model factual, ensemble weights, s_freshness, models_used, backward compat)
 
 ### Deployments
 

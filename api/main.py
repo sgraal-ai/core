@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1915,6 +1915,47 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 }
     except Exception:
         pass
+
+    # Extended Freshness models (W-03/04/05)
+    try:
+        _ef_entries = [{"id": e.id, "type": e.type, "timestamp_age_days": e.timestamp_age_days} for e in entries]
+        _ef_history = list(req.score_history) if req.score_history else None
+        if (_ef_history is None or len(_ef_history) < 5) and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _efk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                _efr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/LRANGE/{_efk}/0/99",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _efr.ok:
+                    _efh = _efr.json().get("result", [])
+                    if _efh and len(_efh) >= 5:
+                        _ef_history = [float(x) for x in _efh]
+            except Exception:
+                pass
+
+        ef = compute_extended_freshness(_ef_entries, history=_ef_history)
+        if ef:
+            _ef_resp = {
+                "gompertz": [{"entry_id": g.entry_id, "score": g.score} for g in ef.gompertz],
+                "power_law": [{"entry_id": p.entry_id, "score": p.score, "half_life": p.half_life} for p in ef.power_law],
+                "recommended_model": ef.recommended_model,
+                "ensemble_freshness": ef.ensemble_freshness,
+                "models_used": ef.models_used,
+            }
+            if ef.holt_winters:
+                _ef_resp["holt_winters"] = [{"entry_id": h.entry_id, "score": h.score, "trend": h.trend} for h in ef.holt_winters]
+            else:
+                _ef_resp["holt_winters"] = None
+            response["extended_freshness"] = _ef_resp
+
+            # Wire into s_freshness: use ensemble_freshness
+            if "component_breakdown" in response:
+                fresh_score = (1.0 - ef.ensemble_freshness) * 100  # lower freshness = higher risk
+                response["component_breakdown"]["s_freshness"] = round(min(100, fresh_score), 2)
+    except Exception:
+        pass  # graceful degradation
 
     # Hawkes self-exciting process
     entry_ages = [e.timestamp_age_days for e in entries]
