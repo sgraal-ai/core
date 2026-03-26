@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended, compute_simulated_annealing, compute_lqr, compute_persistence_landscape, compute_topological_entropy, compute_homology_torsion
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended, compute_simulated_annealing, compute_lqr, compute_persistence_landscape, compute_topological_entropy, compute_homology_torsion, compute_dirichlet_process, compute_particle_filter, compute_pctl, compute_dual_process, compute_security_te, compute_sparse_merkle
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -2322,6 +2322,96 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 response["hallucination_override"] = True
     except Exception:
         pass
+
+    # Dirichlet Process (ADV-02)
+    try:
+        _dp_entries = [{"id": e.id, "source_trust": e.source_trust, "timestamp_age_days": e.timestamp_age_days,
+                        "source_conflict": e.source_conflict, "downstream_count": e.downstream_count} for e in entries]
+        dp = compute_dirichlet_process(_dp_entries)
+        if dp:
+            response["dirichlet_process"] = {"n_clusters": dp.n_clusters, "cluster_assignments": dp.cluster_assignments,
+                                              "new_cluster_detected": dp.new_cluster_detected, "concentration": dp.concentration}
+    except Exception: pass
+
+    # Particle Filter (ADV-04)
+    try:
+        _pf_key = f"pf_particles:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _pf_parts, _pf_weights = None, None
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _pfr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_pf_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                if _pfr.ok and _pfr.json().get("result"):
+                    _pfd = _json.loads(_pfr.json()["result"])
+                    _pf_parts = _pfd.get("particles"); _pf_weights = _pfd.get("weights")
+            except Exception: pass
+        pf = compute_particle_filter(omega_out, _pf_parts, _pf_weights, seed=request_id)
+        if pf:
+            response["particle_filter"] = {"state_estimate": pf.state_estimate, "uncertainty": pf.uncertainty,
+                                           "effective_sample_size": pf.effective_sample_size, "resampled": pf.resampled}
+    except Exception: pass
+
+    # PCTL Verification (ADV-05)
+    try:
+        pctl = compute_pctl(omega_out)
+        if pctl:
+            response["pctl_verification"] = {"p_ef_recovery": pctl.p_ef_recovery, "p_ag_heal_works": pctl.p_ag_heal_works,
+                                              "p_eg_stable": pctl.p_eg_stable, "simulations": pctl.simulations}
+            if pctl.p_ag_heal_works < 0.9 and "compliance_result" in response:
+                response["compliance_result"].setdefault("warnings", [])
+                if isinstance(response["compliance_result"].get("warnings"), list):
+                    response["compliance_result"]["warnings"].append("PCTL WARNING: healing convergence probability below 0.9")
+    except Exception: pass
+
+    # Dual-Process AUQ (ADV-08)
+    try:
+        _fe_s = response.get("free_energy", {}).get("surprise", 0)
+        _lf_ht = response.get("levy_flight", {}).get("heavy_tail_risk", False)
+        _hmm_p = response.get("hmm_regime", {}).get("state_probability", 1.0)
+        _bp_pc = response.get("trend_detection", {}).get("bocpd", {}).get("p_changepoint", 0)
+        _ss_sc = response.get("stability_score", {}).get("score", 1.0)
+        dpauq = compute_dual_process(omega_out, _fe_s, _lf_ht, _hmm_p, _bp_pc, _ss_sc)
+        response["dual_process_auq"] = {"system1_uncertainty": dpauq.system1_uncertainty, "system2_uncertainty": dpauq.system2_uncertainty,
+                                        "dual_process_uncertainty": dpauq.dual_process_uncertainty, "verbalized": dpauq.verbalized}
+    except Exception: pass
+
+    # Security Transfer Entropy (SEC-03)
+    try:
+        _ste_entries = [{"id": e.id, "type": e.type} for e in entries]
+        _te_val = response.get("info_thermodynamics", {}).get("transfer_entropy", 0)
+        ste = compute_security_te(_ste_entries, _te_val)
+        if ste:
+            response["security_transfer_entropy"] = {"leakage_detected": ste.leakage_detected,
+                "leakage_paths": [list(p) for p in ste.leakage_paths], "risk_level": ste.risk_level}
+            if ste.leakage_detected and "compliance_result" in response:
+                response["compliance_result"].setdefault("warnings", [])
+                if isinstance(response["compliance_result"].get("warnings"), list):
+                    response["compliance_result"]["warnings"].append("SEC: information leakage detected between sensitive and non-sensitive entries")
+    except Exception: pass
+
+    # Sparse Merkle Tree (SEC-04)
+    try:
+        _mk_key = f"merkle_root:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _mk_stored = None
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _mkr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_mk_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                if _mkr.ok and _mkr.json().get("result"):
+                    _mk_stored = _mkr.json()["result"]
+            except Exception: pass
+        mk = compute_sparse_merkle([e.id for e in entries], _mk_stored)
+        if mk:
+            response["sparse_merkle"] = {"root_hash": mk.root_hash, "proof_depth": mk.proof_depth,
+                                         "integrity_verified": mk.integrity_verified, "tamper_detected": mk.tamper_detected}
+            if mk.integrity_verified and "compliance_result" in response:
+                response["compliance_result"]["merkle_integrity_proof"] = True
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                try:
+                    http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_mk_key}/{mk.root_hash}/EX/86400",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                except Exception: pass
+    except Exception: pass
 
     # Hawkes self-exciting process
     entry_ages = [e.timestamp_age_days for e in entries]

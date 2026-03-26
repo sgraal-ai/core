@@ -99,6 +99,12 @@
 | TDA-02 | Persistence Landscape from Betti numbers | Done | 6 tests |
 | TDA-03 | Topological Entropy complexity measure | Done | 6 tests |
 | TDA-05 | Homology Torsion hallucination detection | Done | 6 tests |
+| ADV-02 | Dirichlet Process clustering | Done | 6 tests |
+| ADV-04 | Particle Filter (SMC) state estimation | Done | 6 tests |
+| ADV-05 | PCTL probabilistic verification | Done | 6 tests |
+| ADV-08 | Dual-Process AUQ uncertainty | Done | 6 tests |
+| SEC-03 | Transfer Entropy security leakage | Done | 6 tests |
+| SEC-04 | Sparse Merkle Tree integrity | Done | 6 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -119,7 +125,7 @@
 
 ### Test Summary
 
-- **721 tests passing** (pytest)
+- **757 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)

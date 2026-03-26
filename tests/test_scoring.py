@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended, compute_simulated_annealing, compute_lqr, compute_persistence_landscape, compute_topological_entropy, compute_homology_torsion
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended, compute_simulated_annealing, compute_lqr, compute_persistence_landscape, compute_topological_entropy, compute_homology_torsion, compute_dirichlet_process, compute_particle_filter, compute_pctl, compute_dual_process, compute_security_te, compute_sparse_merkle
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -7052,3 +7052,138 @@ class TestHomologyTorsion:
     def test_in_api(self):
         resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
         assert "homology_torsion" in resp.json()
+
+
+class TestDirichletProcess:
+    def test_basic(self):
+        entries = [{"id": f"e{i}", "source_trust": 0.5, "timestamp_age_days": 10} for i in range(3)]
+        r = compute_dirichlet_process(entries)
+        assert r is not None and r.n_clusters >= 1
+    def test_diverse_clusters(self):
+        entries = [{"id": "e1", "source_trust": 0.9, "timestamp_age_days": 1},
+                   {"id": "e2", "source_trust": 0.1, "timestamp_age_days": 500}]
+        r = compute_dirichlet_process(entries)
+        assert r is not None
+    def test_new_cluster(self):
+        entries = [{"id": "e1", "source_trust": 0.9, "timestamp_age_days": 1},
+                   {"id": "e2", "source_trust": 0.01, "timestamp_age_days": 999, "source_conflict": 0.99, "downstream_count": 50}]
+        r = compute_dirichlet_process(entries)
+        assert r is not None and r.n_clusters >= 1
+    def test_empty(self):
+        assert compute_dirichlet_process([]) is None
+    def test_assignments(self):
+        entries = [{"id": f"e{i}", "source_trust": 0.5} for i in range(5)]
+        r = compute_dirichlet_process(entries)
+        assert r is not None and len(r.cluster_assignments) == 5
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "dirichlet_process" in resp.json()
+
+
+class TestParticleFilter:
+    def test_basic(self):
+        r = compute_particle_filter(30.0)
+        assert r is not None and r.state_estimate > 0
+    def test_uncertainty_positive(self):
+        r = compute_particle_filter(50.0)
+        assert r is not None and r.uncertainty >= 0
+    def test_ess(self):
+        r = compute_particle_filter(40.0)
+        assert r is not None and r.effective_sample_size > 0
+    def test_with_previous(self):
+        r = compute_particle_filter(30.0, [30.0]*50, [1/50]*50)
+        assert r is not None
+    def test_empty_init(self):
+        r = compute_particle_filter(50.0, None, None)
+        assert r is not None
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "particle_filter" in resp.json()
+
+
+class TestPCTL:
+    def test_safe_state(self):
+        r = compute_pctl(10.0)
+        assert r is not None and r.p_ef_recovery > 0.5
+    def test_critical_state(self):
+        r = compute_pctl(90.0)
+        assert r is not None
+    def test_simulations_count(self):
+        r = compute_pctl(50.0)
+        assert r is not None and r.simulations == 100
+    def test_probabilities_bounded(self):
+        r = compute_pctl(50.0)
+        assert r is not None
+        assert 0 <= r.p_ef_recovery <= 1 and 0 <= r.p_ag_heal_works <= 1 and 0 <= r.p_eg_stable <= 1
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "pctl_verification" in resp.json()
+    def test_heal_probability(self):
+        r = compute_pctl(10.0)
+        assert r is not None and r.p_ag_heal_works > 0
+
+
+class TestDualProcessAUQ:
+    def test_basic(self):
+        r = compute_dual_process(30.0)
+        assert 0 <= r.dual_process_uncertainty <= 1
+    def test_high_uncertainty(self):
+        r = compute_dual_process(90.0, surprise=0.9, heavy_tail=True, hmm_prob=0.1, p_changepoint=0.8, stability=0.1)
+        assert r.dual_process_uncertainty > 0.5
+    def test_low_uncertainty(self):
+        r = compute_dual_process(10.0, surprise=0.0, heavy_tail=False, hmm_prob=1.0, p_changepoint=0.0, stability=0.95)
+        assert r.dual_process_uncertainty < 0.3
+    def test_verbalized(self):
+        r = compute_dual_process(50.0)
+        assert len(r.verbalized) > 0
+    def test_system_weights(self):
+        r = compute_dual_process(50.0)
+        assert r.system1_uncertainty == 0.5
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "dual_process_auq" in resp.json()
+
+
+class TestSecurityTE:
+    def test_no_sensitive(self):
+        r = compute_security_te([{"id": "e1", "type": "semantic"}])
+        assert r is not None and r.risk_level == "none"
+    def test_leakage(self):
+        entries = [{"id": "s1", "type": "pii"}, {"id": "n1", "type": "semantic"}]
+        r = compute_security_te(entries, te_value=0.5)
+        assert r is not None and r.leakage_detected is True and r.risk_level == "high"
+    def test_no_leakage_low_te(self):
+        entries = [{"id": "s1", "type": "pii"}, {"id": "n1", "type": "semantic"}]
+        r = compute_security_te(entries, te_value=0.01)
+        assert r is not None and r.leakage_detected is False
+    def test_empty(self):
+        assert compute_security_te([]) is None
+    def test_paths(self):
+        entries = [{"id": "s1", "type": "confidential"}, {"id": "n1", "type": "tool_state"}]
+        r = compute_security_te(entries, te_value=0.4)
+        assert r is not None and len(r.leakage_paths) > 0
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "security_transfer_entropy" in resp.json()
+
+
+class TestSparseMerkle:
+    def test_basic(self):
+        r = compute_sparse_merkle(["e1", "e2", "e3"])
+        assert r is not None and len(r.root_hash) == 64
+    def test_integrity(self):
+        r1 = compute_sparse_merkle(["e1", "e2"])
+        r2 = compute_sparse_merkle(["e1", "e2"], stored_root=r1.root_hash)
+        assert r2.integrity_verified is True and r2.tamper_detected is False
+    def test_tamper(self):
+        r = compute_sparse_merkle(["e1", "e2"], stored_root="fakehash")
+        assert r is not None and r.tamper_detected is True
+    def test_deterministic(self):
+        r1 = compute_sparse_merkle(["a", "b"])
+        r2 = compute_sparse_merkle(["a", "b"])
+        assert r1.root_hash == r2.root_hash
+    def test_empty(self):
+        assert compute_sparse_merkle([]) is None
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "sparse_merkle" in resp.json()

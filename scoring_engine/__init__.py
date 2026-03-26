@@ -74,3 +74,9 @@ from .lqr_control import compute_lqr, LQRResult
 from .persistence_landscape import compute_persistence_landscape, PersistenceLandscapeResult
 from .topological_entropy import compute_topological_entropy, TopologicalEntropyResult
 from .homology_torsion import compute_homology_torsion, HomologyTorsionResult
+from .dirichlet_process import compute_dirichlet_process, DirichletProcessResult
+from .particle_filter import compute_particle_filter, ParticleFilterResult
+from .pctl_verification import compute_pctl, PCTLResult
+from .dual_process_auq import compute_dual_process, DualProcessResult
+from .security_transfer_entropy import compute_security_te, SecurityTEResult
+from .sparse_merkle import compute_sparse_merkle, SparseMerkleResult
