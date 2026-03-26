@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1956,6 +1956,54 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 response["component_breakdown"]["s_freshness"] = round(min(100, fresh_score), 2)
     except Exception:
         pass  # graceful degradation
+
+    # Persistent Homology (TDA-01)
+    try:
+        if len(entries) >= 3:
+            _ph_entries = [{"id": e.id, "source_trust": e.source_trust,
+                            "timestamp_age_days": e.timestamp_age_days,
+                            "source_conflict": e.source_conflict,
+                            "downstream_count": e.downstream_count} for e in entries]
+            ph = compute_persistent_homology(_ph_entries)
+            if ph:
+                response["persistent_homology"] = {
+                    "betti_0": [{"scale": b.scale, "count": b.count} for b in ph.betti_0],
+                    "betti_1": [{"scale": b.scale, "count": b.count} for b in ph.betti_1],
+                    "significant_features": ph.significant_features,
+                    "structural_drift": ph.structural_drift,
+                    "topology_summary": ph.topology_summary,
+                }
+    except Exception:
+        pass
+
+    # Ollivier-Ricci Curvature (TDA-04)
+    try:
+        if len(entries) >= 2:
+            _rc_entries = [{"id": e.id, "source_trust": e.source_trust,
+                            "timestamp_age_days": e.timestamp_age_days,
+                            "source_conflict": e.source_conflict,
+                            "downstream_count": e.downstream_count} for e in entries]
+            rc = compute_ricci_curvature(_rc_entries)
+            if rc:
+                response["ricci_curvature"] = {
+                    "edge_curvatures": [{"from": c.from_id, "to": c.to_id, "kappa": c.kappa} for c in rc.edge_curvatures],
+                    "mean_curvature": rc.mean_curvature,
+                    "negative_curvature_edges": [list(e) for e in rc.negative_curvature_edges],
+                    "graph_health": rc.graph_health,
+                }
+                # Wire fragile edges into at_risk_warnings
+                for from_id, to_id in rc.negative_curvature_edges:
+                    kappa = next((c.kappa for c in rc.edge_curvatures if c.from_id == from_id and c.to_id == to_id), 0)
+                    if kappa < -0.5:
+                        at_risk_warnings.append({
+                            "entry_id": from_id,
+                            "importance_score": 0,
+                            "voi_score": 0,
+                            "warning": "ricci_fragile_connection",
+                            "signal_breakdown": {"kappa": kappa, "connected_to": to_id},
+                        })
+    except Exception:
+        pass
 
     # Hawkes self-exciting process
     entry_ages = [e.timestamp_age_days for e in entries]
