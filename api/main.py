@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -140,6 +140,7 @@ class PreflightRequest(BaseModel):
     use_pagerank: bool = False  # opt-in PageRank authority scoring
     score_history: Optional[list[float]] = None  # recent omega scores for CUSUM/EWMA trend detection
     page_hinkley_config: Optional[dict[str, float]] = None  # {"delta": float, "lambda": float}
+    reset_frechet_reference: bool = False  # reset stored Fréchet reference distribution
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -1504,6 +1505,71 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             if sl.fused_opinion and "component_breakdown" in response:
                 fused_risk = (1.0 - sl.fused_opinion.projected_prob) * 100
                 response["component_breakdown"]["s_provenance"] = round(min(100, fused_risk), 2)
+    except Exception:
+        pass  # graceful degradation
+
+    # Fréchet distance for encoding degradation (R-05)
+    try:
+        if len(entries) >= 3:
+            _fd_vectors = [[e.source_trust * 100, max(0, 100 - e.timestamp_age_days),
+                            (1.0 - (e.source_conflict or 0.1)) * 100, max(0, 100 - e.downstream_count * 10),
+                            (e.r_belief or 0) * 100] for e in entries]
+            _fd_key = f"frechet_ref:{key_record.get('key_hash', 'default')}:{req.domain}"
+            _fd_ref = None
+            _fd_age = 0
+
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not req.reset_frechet_reference:
+                try:
+                    _fdr = http_requests.get(
+                        f"{UPSTASH_REDIS_URL}/GET/{_fd_key}",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                        timeout=2,
+                    )
+                    if _fdr.ok and _fdr.json().get("result"):
+                        _fd_data = _json.loads(_fdr.json()["result"])
+                        _fd_ref = _fd_data.get("vectors")
+                        _fd_age = _fd_data.get("age", 0) + 1
+                except Exception:
+                    pass
+
+            if _fd_ref is None:
+                # First call or reset: store current as reference
+                if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                    try:
+                        _fd_store = _json.dumps({"vectors": _fd_vectors, "age": 0})
+                        http_requests.post(
+                            f"{UPSTASH_REDIS_URL}/SET/{_fd_key}/{_fd_store}/EX/86400",
+                            headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                            timeout=2,
+                        )
+                    except Exception:
+                        pass
+            else:
+                fd = compute_frechet(_fd_vectors, _fd_ref, reference_age_steps=_fd_age)
+                if fd:
+                    response["frechet_distance"] = {
+                        "fd_score": fd.fd_score,
+                        "mean_shift": fd.mean_shift,
+                        "covariance_shift": fd.covariance_shift,
+                        "encoding_degraded": fd.encoding_degraded,
+                        "reference_age_steps": fd.reference_age_steps,
+                    }
+                    # Wire into r_encode
+                    if fd.encoding_degraded and "component_breakdown" in response:
+                        old_enc = response["component_breakdown"].get("r_encode", 0)
+                        response["component_breakdown"]["r_encode"] = round(min(100, old_enc + 15), 2)
+
+                    # Update age in Redis
+                    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                        try:
+                            _fd_store = _json.dumps({"vectors": _fd_ref, "age": _fd_age})
+                            http_requests.post(
+                                f"{UPSTASH_REDIS_URL}/SET/{_fd_key}/{_fd_store}/EX/86400",
+                                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                                timeout=2,
+                            )
+                        except Exception:
+                            pass
     except Exception:
         pass  # graceful degradation
 

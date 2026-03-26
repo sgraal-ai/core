@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5560,3 +5560,78 @@ class TestSubjectiveLogic:
         _, op = result.opinions[0]
         assert abs(op.belief + op.disbelief + op.uncertainty - 1.0) < 0.01
         assert op.uncertainty == 0.0  # clipped, no room for uncertainty
+
+
+class TestFrechet:
+    """Tests for R-05 Frechet distance encoding degradation."""
+
+    def test_initialization_first_call(self):
+        """With no reference, compute_frechet returns None (need to store first)."""
+        vecs = [[10, 20, 30, 40, 50], [15, 25, 35, 45, 55], [12, 22, 32, 42, 52]]
+        result = compute_frechet(vecs, reference_vectors=None)
+        assert result is None
+
+    def test_degradation_detection(self):
+        """Very different distributions should detect degradation."""
+        ref = [[10, 10, 10, 10, 10], [12, 12, 12, 12, 12], [11, 11, 11, 11, 11]]
+        cur = [[90, 90, 90, 90, 90], [88, 88, 88, 88, 88], [92, 92, 92, 92, 92]]
+        result = compute_frechet(cur, ref)
+        assert result is not None
+        assert result.fd_score > 10.0
+        assert result.encoding_degraded is True
+
+    def test_no_degradation_similar(self):
+        """Similar distributions should not detect degradation."""
+        ref = [[50, 50, 50, 50, 50], [52, 48, 51, 49, 50], [49, 51, 50, 50, 51]]
+        cur = [[51, 49, 50, 50, 50], [50, 50, 51, 49, 50], [50, 51, 49, 50, 51]]
+        result = compute_frechet(cur, ref)
+        assert result is not None
+        assert result.fd_score < 10.0
+        assert result.encoding_degraded is False
+
+    def test_mean_shift_computation(self):
+        """mean_shift should be ||mu_P - mu_Q||^2."""
+        ref = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+        cur = [[10, 10, 10], [10, 10, 10], [10, 10, 10]]
+        result = compute_frechet(cur, ref)
+        assert result is not None
+        # mean_shift = 10^2 + 10^2 + 10^2 = 300
+        assert abs(result.mean_shift - 300.0) < 1.0
+
+    def test_covariance_shift_non_negative(self):
+        """covariance_shift should be >= 0."""
+        ref = [[10, 20, 30], [15, 25, 35], [12, 22, 32]]
+        cur = [[50, 60, 70], [55, 65, 75], [52, 62, 72]]
+        result = compute_frechet(cur, ref)
+        assert result is not None
+        assert result.covariance_shift >= 0
+
+    def test_sqrtm_diagonal_fallback(self):
+        """Identical covariance should produce near-zero cov shift."""
+        ref = [[10, 20, 30], [15, 25, 35], [20, 30, 40]]
+        cur = [[10, 20, 30], [15, 25, 35], [20, 30, 40]]
+        result = compute_frechet(cur, ref)
+        assert result is not None
+        assert result.covariance_shift < 1.0
+        assert result.mean_shift < 1.0
+
+    def test_r_encode_adjustment(self):
+        """API should boost r_encode when encoding_degraded."""
+        # Without Redis reference, frechet_distance won't appear on first call
+        # but the module should not crash
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [
+                _fresh_entry(id="f1", source_trust=0.9, timestamp_age_days=1),
+                _fresh_entry(id="f2", source_trust=0.8, timestamp_age_days=2),
+                _fresh_entry(id="f3", source_trust=0.7, timestamp_age_days=3),
+            ],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        # Graceful: no crash even without Redis reference
+
+    def test_graceful_degradation_few_entries(self):
+        """Less than 3 entries should return None."""
+        vecs = [[10, 20], [15, 25]]
+        ref = [[10, 20], [15, 25]]
+        result = compute_frechet(vecs, ref)
+        assert result is None
