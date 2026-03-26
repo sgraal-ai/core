@@ -11,6 +11,7 @@ import { ComponentBreakdown } from "../../components/ComponentBreakdown";
 import { RepairPlanList } from "../../components/RepairPlanList";
 import { AtRiskWarnings } from "../../components/AtRiskWarnings";
 import { AdvancedAnalytics } from "../../components/AdvancedAnalytics";
+import { DeepAnalytics } from "../../components/DeepAnalytics";
 
 const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
   USE_MEMORY: { bg: "bg-green-400/10", text: "text-green-400" },
@@ -145,6 +146,11 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           copula={agent.copula_analysis}
           mewma={agent.mewma}
         />
+      </div>
+
+      <div className="mb-10">
+        <h2 className="text-lg font-semibold mb-4">Deep Analysis <span className="text-xs text-muted font-normal">(click to expand)</span></h2>
+        <DeepAnalytics data={agent as unknown as Record<string, unknown>} />
       </div>
     </div>
   );

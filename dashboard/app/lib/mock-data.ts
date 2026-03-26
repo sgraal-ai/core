@@ -45,6 +45,8 @@ export interface Agent {
   mewma?: MEWMA;
   r_total_normalized?: number;
   stability_score?: { score: number; components: Record<string, number>; interpretation: string };
+  // All additional preflight response fields (deep analytics)
+  [key: string]: unknown;
 }
 
 export interface RepairAction {
