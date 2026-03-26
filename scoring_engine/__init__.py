@@ -48,3 +48,4 @@ from .mutual_information import compute_mutual_information, MutualInformationRes
 from .mdp import compute_mdp, MDPResult
 from .mttr import compute_mttr, MTTRResult
 from .ctl_verification import compute_ctl_verification, CTLResult
+from .lyapunov_exponent import compute_lyapunov_exponent, LyapunovExponentResult

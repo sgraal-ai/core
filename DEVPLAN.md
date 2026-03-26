@@ -68,6 +68,7 @@
 | REC-02 | MDP optimal healing strategy selection | Done | 8 tests |
 | REC-03 | MTTR Weibull estimation for SLA guarantees | Done | 8 tests |
 | FV-07 | CTL branching-time workflow verification | Done | 8 tests |
+| S-03 | Lyapunov Exponent chaos detection | Done | 9 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -88,7 +89,7 @@
 
 ### Test Summary
 
-- **543 tests passing** (pytest)
+- **552 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -155,6 +156,7 @@
 - MDP: 8 tests (SAFE WAIT optimal, CRITICAL emergency, value convergence, all action values, repair_plan integration, sparse confidence, uniform fallback, graceful degradation)
 - MTTR: 8 tests (default cold start, mttr estimate, p95 computation, recovery bounds, SLA compliant, SLA warning, invalid fallback, API response)
 - CTL: 8 tests (EF safe, EF critical, AG heal true, AG heal critical, EG stable, compliance integration, timeout, bounded_steps)
+- Lyapunov Exponent: 9 tests (insufficient null, converging, diverging, chaos threshold, stability class, 10-component SS, 9-component backward compat, graceful degradation, API with history)
 
 ### Deployments
 

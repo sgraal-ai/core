@@ -9,6 +9,7 @@ class StabilityResult:
     score: float                    # 0.0 (unstable) → 1.0 (perfectly stable)
     components: dict[str, float]    # per-component raw values
     interpretation: str             # "stable", "degrading", "critical"
+    component_count: int = 9        # 9 or 10 (with lyapunov)
 
 
 def compute_r_total(
@@ -51,18 +52,22 @@ def compute_stability_score(
     h1_rank: float = 0.0,
     tau_mix: float = 0.0,
     d_geo_causal: float = 0.0,
+    lyapunov_lambda: Optional[float] = None,
 ) -> StabilityResult:
-    """StabilityScore 9-component formula (Grok formula).
+    """StabilityScore 9 or 10-component formula.
 
-    StabilityScore = (1/9) · Σₖ (1 - Componentₖ/Componentₖ_max)
+    StabilityScore = (1/N) · Σₖ (1 - Componentₖ/Componentₖ_max)
 
-    Components and max values:
+    9 components (base):
         delta_alpha: 2.0, p_transition: 1.0, omega_drift: 1.0,
         omega_0: 1.0, lambda_2: 5.0, hurst: 1.0,
         h1_rank: 10.0, tau_mix: 100.0, d_geo_causal: 2.0
 
+    10th component (when lyapunov available):
+        lyapunov_lambda: 1.0 (max, using max(0, λ))
+
     Returns:
-        StabilityResult with score (0-1), components, and interpretation
+        StabilityResult with score (0-1), components, interpretation, component_count
     """
     maxes = {
         "delta_alpha": 2.0,
@@ -88,12 +93,20 @@ def compute_stability_score(
         "d_geo_causal": d_geo_causal,
     }
 
+    n_components = 9
+
+    # Add 10th component if lyapunov available
+    if lyapunov_lambda is not None:
+        raw["lyapunov_lambda"] = max(0.0, lyapunov_lambda)
+        maxes["lyapunov_lambda"] = 1.0
+        n_components = 10
+
     total = 0.0
     for key, val in raw.items():
         capped = min(val, maxes[key])
         total += 1.0 - capped / maxes[key]
 
-    score = round(total / 9.0, 4)
+    score = round(total / n_components, 4)
     score = max(0.0, min(1.0, score))
 
     if score > 0.7:
@@ -107,4 +120,5 @@ def compute_stability_score(
         score=score,
         components=raw,
         interpretation=interpretation,
+        component_count=n_components,
     )

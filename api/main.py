@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1702,6 +1702,48 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass  # graceful degradation
 
+    # Lyapunov Exponent chaos detection (S-03)
+    _lyap_lambda = None
+    try:
+        _lyap_history = list(req.score_history) if req.score_history else []
+        if len(_lyap_history) < 10 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _lyk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                _lyr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/LRANGE/{_lyk}/0/99",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _lyr.ok:
+                    _lyh = _lyr.json().get("result", [])
+                    if _lyh:
+                        _lyap_history = [float(x) for x in _lyh]
+            except Exception:
+                pass
+
+        if len(_lyap_history) >= 10:
+            lyap = compute_lyapunov_exponent(_lyap_history, omega_out)
+            if lyap:
+                response["lyapunov_exponent"] = {
+                    "lambda_estimate": lyap.lambda_estimate,
+                    "chaos_risk": lyap.chaos_risk,
+                    "stability_class": lyap.stability_class,
+                    "divergence_rate": lyap.divergence_rate,
+                }
+                _lyap_lambda = lyap.lambda_estimate
+
+                # Wire into repair_plan
+                if lyap.chaos_risk:
+                    repair_plan_out.append({
+                        "action": "CHAOS_WARNING",
+                        "entry_id": "*",
+                        "reason": "CHAOS WARNING: positive Lyapunov exponent — drift spiral risk",
+                        "projected_improvement": 0,
+                        "priority": "high",
+                    })
+    except Exception:
+        pass  # graceful degradation
+
     # Hawkes self-exciting process
     entry_ages = [e.timestamp_age_days for e in entries]
     hawkes = hawkes_from_entries(entry_ages)
@@ -2138,6 +2180,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _cg_edges = len(_cg.get("edges", [])) if _cg else 0
         _d_geo = min(2.0, _cg_edges / 5.0)
 
+        # Get lyapunov lambda if computed earlier
+        _lyap_for_ss = response.get("lyapunov_exponent", {}).get("lambda_estimate")
+
         ss = compute_stability_score(
             delta_alpha=_alpha_score,
             p_transition=_p_trans,
@@ -2148,11 +2193,13 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             h1_rank=float(_h1),
             tau_mix=_mix_time,
             d_geo_causal=_d_geo,
+            lyapunov_lambda=_lyap_for_ss,
         )
         response["stability_score"] = {
             "score": ss.score,
             "components": ss.components,
             "interpretation": ss.interpretation,
+            "component_count": ss.component_count,
         }
     except Exception:
         pass  # graceful degradation

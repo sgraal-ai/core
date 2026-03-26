@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5943,3 +5943,88 @@ class TestCTLVerification:
         assert result is not None
         assert result.bounded_steps == 10
         assert len(result.ctl_formulas) == 3
+
+
+class TestLyapunovExponent:
+    """Tests for S-03 Lyapunov Exponent chaos detection."""
+
+    def test_insufficient_history_null(self):
+        """Less than 10 observations returns None."""
+        assert compute_lyapunov_exponent([30] * 5, 30) is None
+        assert compute_lyapunov_exponent([], 30) is None
+
+    def test_converging_negative_lambda(self):
+        """Converging series (decreasing oscillations) should give negative λ."""
+        # Damped oscillation: amplitude decreases
+        history = [50 + 20 * (0.8 ** i) * ((-1) ** i) for i in range(15)]
+        result = compute_lyapunov_exponent(history, 50.0)
+        assert result is not None
+        assert result.lambda_estimate < 0
+        assert result.stability_class == "converging"
+        assert result.chaos_risk is False
+
+    def test_diverging_positive_lambda(self):
+        """Diverging series (increasing changes) should give positive λ."""
+        # Exponentially growing differences
+        history = [30 + i ** 2 * 0.1 for i in range(15)]
+        result = compute_lyapunov_exponent(history, 60.0)
+        assert result is not None
+        assert result.lambda_estimate > 0
+        assert result.stability_class == "diverging"
+
+    def test_chaos_risk_threshold(self):
+        """chaos_risk should be true when λ > 0.1."""
+        # Very erratic with growing amplitude
+        history = [30, 80, 20, 90, 10, 95, 5, 98, 2, 99]
+        result = compute_lyapunov_exponent(history, 1.0)
+        assert result is not None
+        if result.lambda_estimate > 0.1:
+            assert result.chaos_risk is True
+
+    def test_stability_class_classification(self):
+        """All three classes should be reachable."""
+        # Stable
+        history = [30.0] * 12
+        r = compute_lyapunov_exponent(history, 30.0)
+        assert r is not None
+        assert r.stability_class in ("converging", "neutral", "diverging")
+
+    def test_stability_score_10_component(self):
+        """When lyapunov available, StabilityScore should use 10 components."""
+        ss = compute_stability_score(lyapunov_lambda=0.5)
+        assert ss.component_count == 10
+        assert "lyapunov_lambda" in ss.components
+
+    def test_stability_score_9_component_backward_compat(self):
+        """Without lyapunov, StabilityScore should use 9 components."""
+        ss = compute_stability_score()
+        assert ss.component_count == 9
+        assert "lyapunov_lambda" not in ss.components
+        assert 0 <= ss.score <= 1.0
+
+    def test_graceful_degradation_api(self):
+        """Without score_history, lyapunov_exponent should not appear."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "lyapunov_exponent" not in data
+        # stability_score should still have component_count field
+        assert "component_count" in data["stability_score"]
+
+    def test_lyapunov_in_api_with_history(self):
+        """With 10+ history, lyapunov_exponent should appear."""
+        history = [30 + ((-1) ** i) * 5 for i in range(12)]
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": history,
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "lyapunov_exponent" in data
+        le = data["lyapunov_exponent"]
+        assert "lambda_estimate" in le
+        assert "chaos_risk" in le
+        assert "stability_class" in le
+        assert "divergence_rate" in le
