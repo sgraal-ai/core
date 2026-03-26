@@ -57,6 +57,7 @@
 | SS-01 | R_total normalized + StabilityScore 9-component | Done | 8 tests |
 | LV-01 | L_v4 Unified Loss — 11-component master objective | Done | 8 tests |
 | RL-02 | Policy Gradient with Advantage function | Done | 8 tests |
+| IT-01 | Information Thermodynamics (transfer entropy, Landauer) | Done | 9 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -77,7 +78,7 @@
 
 ### Test Summary
 
-- **451 tests passing** (pytest)
+- **460 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -133,6 +134,7 @@
 - Stability Score: 8 tests (all components, missing fallback, stable, degrading, critical, R_total cap, bounds 0-1, dashboard fields)
 - Unified Loss: 8 tests (all components, missing fallback, T_XY negative sign, dominant loss, geodesic direction, weight clipping, equal weights, API response)
 - Policy Gradient: 8 tests (cold start, advantage computation, softmax sum, exploration trigger, no exploration peaked, temperature decay, entropy bounds, API response)
+- Info Thermodynamics: 9 tests (insufficient history, TE non-negative, Landauer with healing, info temperature, entropy production, reversibility bounds, max_flow for unified loss, API response, graceful degradation)
 
 ### Deployments
 

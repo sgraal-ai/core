@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5045,3 +5045,82 @@ class TestPolicyGradient:
         assert "exploration_mode" in pg
         probs = pg["action_probabilities"]
         assert abs(sum(probs.values()) - 1.0) < 0.01
+
+
+class TestInfoThermodynamics:
+    """Tests for IT-01 Information Thermodynamics."""
+
+    def test_insufficient_history_returns_none(self):
+        """Less than 5 observations returns None."""
+        assert compute_info_thermodynamics([30, 31, 32], 33, [10, 20]) is None
+        assert compute_info_thermodynamics([], 30, [10]) is None
+
+    def test_transfer_entropy_non_negative(self):
+        """Transfer entropy should be >= 0."""
+        history = [30, 35, 40, 45, 50, 55, 60]
+        result = compute_info_thermodynamics(history, 65, [20, 30, 40])
+        assert result is not None
+        assert result.transfer_entropy >= 0
+        assert result.max_flow >= result.transfer_entropy
+
+    def test_landauer_bound_with_healing(self):
+        """Landauer bound should increase with healing_counter."""
+        history = [30, 31, 32, 33, 34]
+        r0 = compute_info_thermodynamics(history, 35, [10], healing_counter=0)
+        r5 = compute_info_thermodynamics(history, 35, [10], healing_counter=5)
+        assert r0 is not None and r5 is not None
+        assert r5.landauer_bound > r0.landauer_bound
+
+    def test_information_temperature(self):
+        """Info temperature = Var/Mean of component scores."""
+        history = [30, 31, 32, 33, 34]
+        result = compute_info_thermodynamics(history, 35, [10, 20, 30, 40, 50])
+        assert result is not None
+        assert result.information_temperature > 0
+
+    def test_entropy_production_non_negative(self):
+        """Entropy production (2nd law) should be >= 0."""
+        history = [30, 50, 20, 60, 10, 70]
+        result = compute_info_thermodynamics(history, 40, [10, 20])
+        assert result is not None
+        assert result.entropy_production >= 0
+
+    def test_reversibility_bounds(self):
+        """Reversibility should be in [0, 1]."""
+        history = [30, 31, 32, 33, 34]
+        result = compute_info_thermodynamics(history, 35, [10, 20])
+        assert result is not None
+        assert 0 <= result.reversibility <= 1.0
+
+    def test_max_flow_feeds_unified_loss(self):
+        """max_flow should be usable as T_XY in unified loss."""
+        history = [30, 35, 40, 45, 50]
+        result = compute_info_thermodynamics(history, 55, [10, 20, 30])
+        assert result is not None
+        assert isinstance(result.max_flow, float)
+
+    def test_info_thermodynamics_in_api(self):
+        """Preflight with score_history should include info_thermodynamics."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "score_history": [30, 32, 34, 36, 38, 40],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "info_thermodynamics" in data
+        it = data["info_thermodynamics"]
+        assert "transfer_entropy" in it
+        assert "max_flow" in it
+        assert "landauer_bound" in it
+        assert "information_temperature" in it
+        assert "entropy_production" in it
+        assert "reversibility" in it
+
+    def test_graceful_degradation_no_history(self):
+        """Without score_history, info_thermodynamics should not appear."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "info_thermodynamics" not in data

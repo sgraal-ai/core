@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1305,6 +1305,44 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             w["free_energy_surprise"] = fe_surprise
             w["warning"] = w.get("warning", "") + " [HIGH FREE ENERGY SURPRISE]"
 
+    # Information Thermodynamics (IT-01)
+    _it_max_flow = 0.0
+    try:
+        _it_history = list(req.score_history) if req.score_history else []
+        if len(_it_history) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _itk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+                _itr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/LRANGE/{_itk}/0/99",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _itr.ok:
+                    _ith = _itr.json().get("result", [])
+                    if _ith:
+                        _it_history = [float(x) for x in _ith]
+            except Exception:
+                pass
+
+        if len(_it_history) >= 5:
+            _comp_vals = list(result.component_breakdown.values())
+            it = compute_info_thermodynamics(
+                _it_history, omega_out, _comp_vals,
+                healing_counter=result.healing_counter,
+            )
+            if it:
+                response["info_thermodynamics"] = {
+                    "transfer_entropy": it.transfer_entropy,
+                    "max_flow": it.max_flow,
+                    "landauer_bound": it.landauer_bound,
+                    "information_temperature": it.information_temperature,
+                    "entropy_production": it.entropy_production,
+                    "reversibility": it.reversibility,
+                }
+                _it_max_flow = it.max_flow
+    except Exception:
+        pass  # graceful degradation
+
     # Hawkes self-exciting process
     entry_ages = [e.timestamp_age_days for e in entries]
     hawkes = hawkes_from_entries(entry_ages)
@@ -1799,7 +1837,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             L_HG=abs(_ou.get("current_deviation", 0.0)),
             L_FE=_fe.get("F", 0.0),
             L_OT=response.get("drift_details", {}).get("wasserstein", 0.0),
-            T_XY=0.0,  # transfer_entropy not yet implemented
+            T_XY=response.get("info_thermodynamics", {}).get("max_flow", 0.0),
             L_LDT=_lf.get("extreme_event_probability", 0.0),
             Var_dN=_jd.get("jump_rate_lambda", 0.0),
             L_CA=1.0 - _ss.get("score", 1.0),
