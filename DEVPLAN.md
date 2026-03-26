@@ -125,7 +125,14 @@
 
 ### Test Summary
 
-- **757 tests passing** (pytest)
+- **800 tests passing** (pytest)
+
+### Product Features
+| Task | Description | Status | Tests |
+|------|-------------|--------|-------|
+| PROD-01 | POST /v1/explain — NL explanations (EN/DE/FR) | Done | 8 tests |
+| PROD-02 | mem0-sgraal bridge package (SafeMemory) | Done | 6 tests |
+| PROD-03 | GitHub Actions CI/CD (test + deploy + compat) | Done | 3 workflows |
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)

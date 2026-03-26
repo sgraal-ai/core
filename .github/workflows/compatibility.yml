@@ -1,0 +1,23 @@
+name: Compatibility
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Every Monday 9 AM UTC
+  workflow_dispatch:
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: "LangChain latest"
+            extra: "langchain langchain-core"
+          - name: "Mem0 latest"
+            extra: "mem0ai"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt && pip install pytest httpx ${{ matrix.extra }}
+      - run: python -m pytest tests/test_scoring.py -v --tb=short

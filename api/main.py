@@ -192,6 +192,119 @@ def root():
 def health():
     return {"status": "ok", "port": os.environ.get("PORT", "not set")}
 
+
+# ---- /v1/explain ----
+
+class ExplainRequest(BaseModel):
+    preflight_result: dict
+    audience: str = "developer"  # developer | compliance | executive
+    language: str = "en"  # en | de | fr
+
+_SEVERITY_MAP = {"USE_MEMORY": "low", "WARN": "medium", "ASK_USER": "high", "BLOCK": "critical"}
+
+_TEMPLATES = {
+    "en": {
+        "developer": {
+            "summary": "Omega score {omega:.1f}/100 → {action}. Primary risk: {root}.",
+            "timeline": "Score computed from {n_components} components. {heal_note}",
+            "action": {"USE_MEMORY": "Safe to proceed.", "WARN": "Proceed with monitoring.", "ASK_USER": "Escalate to human review.", "BLOCK": "Halt execution immediately."},
+        },
+        "compliance": {
+            "summary": "Memory state assessment: {severity} risk (score {omega:.1f}). Recommendation: {action}.",
+            "timeline": "Assessment based on {n_components}-component analysis per EU AI Act Article 12 transparency requirements. {heal_note}",
+            "action": {"USE_MEMORY": "No regulatory concern.", "WARN": "Log for audit trail.", "ASK_USER": "Human oversight required per Article 14.", "BLOCK": "Operation blocked — compliance violation risk."},
+        },
+        "executive": {
+            "summary": "Agent reliability: {reliability}. Decision: {action_simple}.",
+            "timeline": "Based on {n_entries} memory entries. {heal_note}",
+            "action": {"USE_MEMORY": "Green light.", "WARN": "Proceed with caution.", "ASK_USER": "Needs human approval.", "BLOCK": "Stopped to prevent errors."},
+        },
+    },
+    "de": {
+        "developer": {
+            "summary": "Omega-Score {omega:.1f}/100 → {action}. Hauptrisiko: {root}.",
+            "timeline": "Score aus {n_components} Komponenten berechnet. {heal_note}",
+            "action": {"USE_MEMORY": "Sicher fortzufahren.", "WARN": "Mit Monitoring fortfahren.", "ASK_USER": "An menschliche Prüfung eskalieren.", "BLOCK": "Ausführung sofort stoppen."},
+        },
+        "compliance": {
+            "summary": "Speicherzustandsbewertung: {severity} Risiko (Score {omega:.1f}). Empfehlung: {action}.",
+            "timeline": "Bewertung basiert auf {n_components}-Komponenten-Analyse gemäß EU AI Act Artikel 12. {heal_note}",
+            "action": {"USE_MEMORY": "Kein regulatorisches Risiko.", "WARN": "Für Audit-Trail protokollieren.", "ASK_USER": "Menschliche Aufsicht erforderlich.", "BLOCK": "Operation blockiert — Compliance-Verstoß."},
+        },
+        "executive": {
+            "summary": "Agenten-Zuverlässigkeit: {reliability}. Entscheidung: {action_simple}.",
+            "timeline": "Basierend auf {n_entries} Speichereinträgen. {heal_note}",
+            "action": {"USE_MEMORY": "Grünes Licht.", "WARN": "Mit Vorsicht fortfahren.", "ASK_USER": "Menschliche Genehmigung nötig.", "BLOCK": "Gestoppt um Fehler zu vermeiden."},
+        },
+    },
+    "fr": {
+        "developer": {
+            "summary": "Score Omega {omega:.1f}/100 → {action}. Risque principal: {root}.",
+            "timeline": "Score calculé à partir de {n_components} composants. {heal_note}",
+            "action": {"USE_MEMORY": "Sûr de continuer.", "WARN": "Continuer avec surveillance.", "ASK_USER": "Escalader à l'examen humain.", "BLOCK": "Arrêter l'exécution immédiatement."},
+        },
+        "compliance": {
+            "summary": "Évaluation de l'état mémoire: risque {severity} (score {omega:.1f}). Recommandation: {action}.",
+            "timeline": "Évaluation basée sur l'analyse de {n_components} composants. {heal_note}",
+            "action": {"USE_MEMORY": "Aucun risque réglementaire.", "WARN": "Enregistrer pour la piste d'audit.", "ASK_USER": "Supervision humaine requise.", "BLOCK": "Opération bloquée — risque de conformité."},
+        },
+        "executive": {
+            "summary": "Fiabilité de l'agent: {reliability}. Décision: {action_simple}.",
+            "timeline": "Basé sur {n_entries} entrées mémoire. {heal_note}",
+            "action": {"USE_MEMORY": "Feu vert.", "WARN": "Procéder avec prudence.", "ASK_USER": "Approbation humaine nécessaire.", "BLOCK": "Arrêté pour éviter les erreurs."},
+        },
+    },
+}
+
+@app.post("/v1/explain")
+def explain(req: ExplainRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    pr = req.preflight_result
+    omega = pr.get("omega_mem_final", 0)
+    action = pr.get("recommended_action", "USE_MEMORY")
+    severity = _SEVERITY_MAP.get(action, "medium")
+    lang = req.language if req.language in _TEMPLATES else "en"
+    aud = req.audience if req.audience in _TEMPLATES[lang] else "developer"
+    t = _TEMPLATES[lang][aud]
+
+    # Root cause from Shapley or causal graph
+    shapley = pr.get("shapley_values", {})
+    causal = pr.get("causal_graph", {})
+    if causal.get("causal_explanation"):
+        root = causal["causal_explanation"]
+    elif shapley:
+        top = max(shapley, key=lambda k: abs(shapley[k]))
+        root = f"{top} (Shapley={shapley[top]:.2f})"
+    else:
+        cb = pr.get("component_breakdown", {})
+        if cb:
+            top = max(cb, key=cb.get)
+            root = f"{top}={cb[top]:.1f}"
+        else:
+            root = "unknown"
+
+    n_comp = len(pr.get("component_breakdown", {}))
+    n_entries = len(pr.get("at_risk_warnings", []))
+    repair = pr.get("repair_plan", [])
+    heal_note = f"{len(repair)} repair actions recommended." if repair else "No repairs needed."
+    reliability = "high" if omega < 30 else "moderate" if omega < 60 else "low"
+    action_simple = t["action"][action]
+
+    summary = t["summary"].format(omega=omega, action=action, root=root, severity=severity,
+                                   reliability=reliability, action_simple=action_simple)
+    timeline = t["timeline"].format(n_components=n_comp, n_entries=n_entries, heal_note=heal_note)
+
+    return {
+        "summary": summary,
+        "root_cause": root,
+        "recommended_action_human": action_simple,
+        "severity": severity,
+        "timeline": timeline,
+        "audience": aud,
+        "language": lang,
+    }
+
+
 @app.get("/metrics")
 def metrics(accept: Optional[str] = None):
     """Prometheus-format metrics export. Also accepts ?format=json."""
