@@ -84,6 +84,11 @@
 | TDA-04 | Ollivier-Ricci Curvature | Done | 8 tests |
 | CT-01 | Recursive Colimit (Category Theory) | Done | 7 tests |
 | CG-02 | Cohomological Learning Gradient | Done | 6 tests |
+| W-06 | Cox Proportional Hazard survival analysis | Done | 6 tests |
+| W-07 | Arrhenius thermal degradation | Done | 6 tests |
+| P-05 | OWA Operator provenance aggregation | Done | 6 tests |
+| R-03 | Poisson Recall error model | Done | 6 tests |
+| R-04 | ROC AUC online monitoring | Done | 6 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -104,7 +109,7 @@
 
 ### Test Summary
 
-- **631 tests passing** (pytest)
+- **661 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)

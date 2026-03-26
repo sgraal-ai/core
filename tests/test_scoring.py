@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -6631,3 +6631,150 @@ class TestCohomologicalGradient:
         result = compute_cohomological_gradient()
         assert result is not None
         assert result.gradient_norm == 0
+
+
+class TestCoxHazard:
+    def test_basic(self):
+        entries = [{"source_trust": 0.9, "downstream_count": 2, "timestamp_age_days": 10}]
+        r = compute_cox_hazard(entries)
+        assert r is not None and r.hazard_rate > 0 and 0 <= r.survival_probability <= 1
+
+    def test_high_risk(self):
+        entries = [{"source_trust": 0.99, "downstream_count": 50, "timestamp_age_days": 500}]
+        r = compute_cox_hazard(entries)
+        assert r is not None
+
+    def test_survival_decreases_with_age(self):
+        r1 = compute_cox_hazard([{"source_trust": 0.5, "downstream_count": 1, "timestamp_age_days": 1}])
+        r2 = compute_cox_hazard([{"source_trust": 0.5, "downstream_count": 1, "timestamp_age_days": 500}])
+        assert r1 is not None and r2 is not None
+        assert r2.hazard_rate >= r1.hazard_rate
+
+    def test_empty_none(self):
+        assert compute_cox_hazard([]) is None
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+        assert "cox_hazard" in resp.json()
+
+    def test_fields(self):
+        r = compute_cox_hazard([{"source_trust": 0.5, "downstream_count": 5, "timestamp_age_days": 30}])
+        assert r is not None
+        assert isinstance(r.high_risk, bool)
+
+
+class TestArrhenius:
+    def test_basic(self):
+        r = compute_arrhenius([{"source_conflict": 0.5, "timestamp_age_days": 10}])
+        assert r is not None and r.degradation_rate >= 0 and r.effective_lifetime > 0
+
+    def test_zero_conflict(self):
+        r = compute_arrhenius([{"source_conflict": 0.0}])
+        assert r is not None
+        assert r.heat_index == 0.01
+
+    def test_high_conflict_faster(self):
+        r1 = compute_arrhenius([{"source_conflict": 0.1}])
+        r2 = compute_arrhenius([{"source_conflict": 0.9}])
+        assert r1 is not None and r2 is not None
+        assert r2.degradation_rate > r1.degradation_rate
+
+    def test_empty_none(self):
+        assert compute_arrhenius([]) is None
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "arrhenius" in resp.json()
+
+    def test_lifetime_positive(self):
+        r = compute_arrhenius([{"source_conflict": 0.5}])
+        assert r is not None and r.effective_lifetime > 0
+
+
+class TestOWA:
+    def test_basic(self):
+        r = compute_owa([0.9, 0.8, 0.7])
+        assert r is not None and 0 <= r.owa_score <= 1
+
+    def test_weights_sum(self):
+        r = compute_owa([0.5, 0.5, 0.5, 0.5])
+        assert r is not None
+        assert abs(sum(r.weights_used) - 1.0) < 0.01
+
+    def test_orness_range(self):
+        r = compute_owa([0.9, 0.1])
+        assert r is not None
+        assert 0 <= r.orness <= 1
+
+    def test_single_entry(self):
+        r = compute_owa([0.8])
+        assert r is not None
+        assert r.owa_score == 0.8
+
+    def test_empty_none(self):
+        assert compute_owa([]) is None
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "owa_provenance" in resp.json()
+
+
+class TestPoissonRecall:
+    def test_basic(self):
+        r = compute_poisson_recall(0.1)
+        assert r is not None and r.expected_errors_10 == 1.0
+
+    def test_zero_rate(self):
+        r = compute_poisson_recall(0.0)
+        assert r is not None and r.error_probability == 0.0
+
+    def test_high_rate(self):
+        r = compute_poisson_recall(1.0)
+        assert r is not None and r.error_probability > 0.99
+
+    def test_probability_bounds(self):
+        r = compute_poisson_recall(0.5)
+        assert r is not None and 0 <= r.error_probability <= 1
+
+    def test_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "poisson_recall" in resp.json()
+
+    def test_expected_errors(self):
+        r = compute_poisson_recall(0.2)
+        assert r is not None and abs(r.expected_errors_10 - 2.0) < 0.01
+
+
+class TestROCMonitoring:
+    def test_insufficient_data(self):
+        assert compute_roc_auc([0.5] * 5, [1] * 5) is None
+
+    def test_perfect_auc(self):
+        preds = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05]
+        acts = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
+        r = compute_roc_auc(preds, acts)
+        assert r is not None and r.auc_estimate == 1.0
+
+    def test_random_auc(self):
+        preds = [0.5] * 10
+        acts = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+        r = compute_roc_auc(preds, acts)
+        assert r is not None and 0.3 <= r.auc_estimate <= 0.7
+
+    def test_degraded_flag(self):
+        preds = [0.5] * 10
+        acts = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+        r = compute_roc_auc(preds, acts)
+        assert r is not None
+        assert isinstance(r.model_degraded, bool)
+
+    def test_retrain_needs_data(self):
+        preds = [0.5] * 10
+        acts = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+        r = compute_roc_auc(preds, acts)
+        assert r is not None
+        assert r.retrain_recommended is False  # only 10 data points
+
+    def test_empty_none(self):
+        assert compute_roc_auc([], []) is None

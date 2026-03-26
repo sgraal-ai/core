@@ -60,3 +60,8 @@ from .persistent_homology import compute_persistent_homology, PersistentHomology
 from .ricci_curvature import compute_ricci_curvature, RicciCurvatureResult
 from .recursive_colimit import compute_recursive_colimit, RecursiveColimitResult
 from .cohomological_gradient import compute_cohomological_gradient, CohomologicalGradientResult
+from .cox_hazard import compute_cox_hazard, CoxHazardResult
+from .arrhenius import compute_arrhenius, ArrheniusResult
+from .owa_provenance import compute_owa, OWAResult
+from .poisson_recall import compute_poisson_recall, PoissonRecallResult
+from .roc_monitoring import compute_roc_auc, ROCResult
