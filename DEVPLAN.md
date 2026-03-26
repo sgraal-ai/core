@@ -65,6 +65,7 @@
 | P-04 | Subjective Logic for uncertainty handling | Done | 8 tests |
 | R-05 | Frechet distance encoding degradation detection | Done | 8 tests |
 | R-06/07 | Mutual Information + NMI encoding efficiency | Done | 9 tests |
+| REC-02 | MDP optimal healing strategy selection | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -85,7 +86,7 @@
 
 ### Test Summary
 
-- **519 tests passing** (pytest)
+- **527 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -149,6 +150,7 @@
 - Subjective Logic: 8 tests (single opinion, two-entry fusion, high uncertainty, consensus threshold, projected_prob, s_provenance replacement, division by zero, exceed unit constraint)
 - Frechet: 8 tests (init first call, degradation detection, no degradation, mean shift, covariance shift, sqrtm fallback, r_encode adjustment, graceful degradation)
 - Mutual Information: 9 tests (single null, high MI, low MI, NMI bounds, efficiency classification, info loss, rho clipping, zero variance, API response)
+- MDP: 8 tests (SAFE WAIT optimal, CRITICAL emergency, value convergence, all action values, repair_plan integration, sparse confidence, uniform fallback, graceful degradation)
 
 ### Deployments
 

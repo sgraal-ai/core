@@ -45,3 +45,4 @@ from .provenance_entropy import compute_provenance_entropy, ProvenanceEntropyRes
 from .subjective_logic import compute_subjective_logic, SubjectiveLogicResult
 from .frechet import compute_frechet, FrechetResult
 from .mutual_information import compute_mutual_information, MutualInformationResult
+from .mdp import compute_mdp, MDPResult

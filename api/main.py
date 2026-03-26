@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1591,6 +1591,44 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 boost = (1.0 - mi.nmi_score) * 20
                 old_enc = response["component_breakdown"].get("r_encode", 0)
                 response["component_breakdown"]["r_encode"] = round(min(100, old_enc + boost), 2)
+    except Exception:
+        pass  # graceful degradation
+
+    # MDP optimal healing strategy (REC-02)
+    try:
+        # Fetch learned transitions from Redis
+        _mdp_key = f"mdp_transitions:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _mdp_data = None
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            try:
+                _mdpr = http_requests.get(
+                    f"{UPSTASH_REDIS_URL}/GET/{_mdp_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                    timeout=2,
+                )
+                if _mdpr.ok and _mdpr.json().get("result"):
+                    _mdp_data = _json.loads(_mdpr.json()["result"])
+            except Exception:
+                pass
+
+        mdp = compute_mdp(omega_out, transition_data=_mdp_data)
+        if mdp:
+            response["mdp_recommendation"] = {
+                "optimal_action": mdp.optimal_action,
+                "expected_value": mdp.expected_value,
+                "action_values": mdp.action_values,
+                "state": mdp.state,
+                "confidence": mdp.confidence,
+            }
+            # Wire into repair_plan if action != WAIT
+            if mdp.optimal_action != "WAIT":
+                repair_plan_out.insert(0, {
+                    "action": mdp.optimal_action,
+                    "entry_id": "*",
+                    "reason": f"MDP recommends {mdp.optimal_action} (V*={mdp.expected_value:.2f}, state={mdp.state})",
+                    "projected_improvement": round(mdp.expected_value * 10, 1),
+                    "priority": "high" if mdp.state in ("DEGRADED", "CRITICAL") else "medium",
+                })
     except Exception:
         pass  # graceful degradation
 

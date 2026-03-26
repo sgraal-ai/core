@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -1775,10 +1775,13 @@ class TestPrivacyLayer:
         assert resp.status_code == 200
         data = resp.json()
         if data["repair_plan"]:
-            # Entry ID should be obfuscated (not the original)
-            assert data["repair_plan"][0]["entry_id"] != "mem_priv_test"
-            # Reason should be abstracted
-            assert data["repair_plan"][0]["reason"] in ["STALE", "CONFLICT", "LOW_TRUST", "PROPAGATION_RISK", "INTENT_DRIFT", "GENERAL_RISK"]
+            # Find entry-specific repair actions (not wildcard MDP/OU)
+            entry_actions = [r for r in data["repair_plan"] if r["entry_id"] != "*"]
+            if entry_actions:
+                # Entry ID should be obfuscated (not the original)
+                assert entry_actions[0]["entry_id"] != "mem_priv_test"
+                # Reason should be abstracted
+                assert entry_actions[0]["reason"] in ["STALE", "CONFLICT", "LOW_TRUST", "PROPAGATION_RISK", "INTENT_DRIFT", "GENERAL_RISK"]
 
     def test_full_detail_returns_original(self):
         """detail_level=full should return original entry_ids and reasons."""
@@ -1795,7 +1798,9 @@ class TestPrivacyLayer:
         assert resp.status_code == 200
         data = resp.json()
         if data["repair_plan"]:
-            assert data["repair_plan"][0]["entry_id"] == "mem_full_test"
+            entry_actions = [r for r in data["repair_plan"] if r["entry_id"] != "*"]
+            if entry_actions:
+                assert entry_actions[0]["entry_id"] == "mem_full_test"
             # Full reason contains specific values
             assert "(" in data["repair_plan"][0]["reason"]
 
@@ -5735,3 +5740,70 @@ class TestMutualInformation:
         assert "nmi_score" in mi
         assert "encoding_efficiency" in mi
         assert "information_loss" in mi
+
+
+class TestMDP:
+    """Tests for REC-02 MDP optimal healing strategy."""
+
+    def test_safe_state_wait_optimal(self):
+        """In SAFE state (low omega), WAIT should be optimal."""
+        result = compute_mdp(10.0)
+        assert result is not None
+        assert result.state == "SAFE"
+        assert result.optimal_action == "WAIT"
+
+    def test_critical_state_emergency(self):
+        """In CRITICAL state (high omega), aggressive healing should be optimal."""
+        result = compute_mdp(90.0)
+        assert result is not None
+        assert result.state == "CRITICAL"
+        assert result.optimal_action in ("FULL_HEAL", "EMERGENCY_HEAL")
+
+    def test_value_iteration_convergence(self):
+        """Expected value should be finite and reasonable."""
+        result = compute_mdp(50.0)
+        assert result is not None
+        assert result.expected_value is not None
+        assert -100 < result.expected_value < 100
+
+    def test_action_values_all_computed(self):
+        """All 4 action values should be present."""
+        result = compute_mdp(40.0)
+        assert result is not None
+        assert len(result.action_values) == 4
+        for action in ("WAIT", "SOFT_HEAL", "FULL_HEAL", "EMERGENCY_HEAL"):
+            assert action in result.action_values
+
+    def test_repair_plan_integration(self):
+        """API should include mdp_recommendation."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "mdp_recommendation" in data
+        mdp = data["mdp_recommendation"]
+        assert "optimal_action" in mdp
+        assert "expected_value" in mdp
+        assert "action_values" in mdp
+        assert "state" in mdp
+        assert "confidence" in mdp
+
+    def test_confidence_sparse_data(self):
+        """Without learned transitions, confidence should be low."""
+        result = compute_mdp(50.0, transition_data=None)
+        assert result is not None
+        assert result.confidence == 0.1
+
+    def test_uniform_transition_fallback(self):
+        """None transition_data should use defaults without error."""
+        result = compute_mdp(60.0, transition_data=None)
+        assert result is not None
+        assert result.state == "DEGRADED"
+
+    def test_graceful_degradation(self):
+        """Various omega values should all produce valid results."""
+        for omega in [0, 25, 50, 75, 100]:
+            result = compute_mdp(float(omega))
+            assert result is not None
+            assert result.optimal_action in ("WAIT", "SOFT_HEAL", "FULL_HEAL", "EMERGENCY_HEAL")
