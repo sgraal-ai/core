@@ -42,3 +42,4 @@ from .info_thermodynamics import compute_info_thermodynamics, InfoThermodynamics
 from .mahalanobis import compute_mahalanobis, MahalanobisResult
 from .page_hinkley import compute_page_hinkley, PageHinkleyResult
 from .provenance_entropy import compute_provenance_entropy, ProvenanceEntropyResult
+from .subjective_logic import compute_subjective_logic, SubjectiveLogicResult

@@ -15,7 +15,7 @@ import stripe
 import requests as http_requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy
+from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -1479,6 +1479,31 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     )
                 except Exception:
                     pass
+    except Exception:
+        pass  # graceful degradation
+
+    # Subjective Logic (P-04)
+    try:
+        _sl_entries = [{"id": e.id, "source_trust": e.source_trust, "source_conflict": e.source_conflict} for e in entries]
+        sl = compute_subjective_logic(_sl_entries)
+        if sl:
+            _sl_opinions = [{"entry_id": eid, "belief": op.belief, "disbelief": op.disbelief,
+                             "uncertainty": op.uncertainty, "projected_prob": op.projected_prob}
+                            for eid, op in sl.opinions]
+            _sl_fused = None
+            if sl.fused_opinion:
+                _sl_fused = {"belief": sl.fused_opinion.belief, "disbelief": sl.fused_opinion.disbelief,
+                             "uncertainty": sl.fused_opinion.uncertainty, "projected_prob": sl.fused_opinion.projected_prob}
+            response["subjective_logic"] = {
+                "opinions": _sl_opinions,
+                "fused_opinion": _sl_fused,
+                "high_uncertainty_entries": sl.high_uncertainty_entries,
+                "consensus_possible": sl.consensus_possible,
+            }
+            # Wire into s_provenance: use fused projected_prob instead of raw trust
+            if sl.fused_opinion and "component_breakdown" in response:
+                fused_risk = (1.0 - sl.fused_opinion.projected_prob) * 100
+                response["component_breakdown"]["s_provenance"] = round(min(100, fused_risk), 2)
     except Exception:
         pass  # graceful degradation
 

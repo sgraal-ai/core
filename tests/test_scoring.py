@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy
+from scoring_engine import compute, MemoryEntry, HealingAction, HealingPolicy, load_healing_policies, compute_importance, compute_importance_with_voi, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, FallbackEngine, FallbackPolicy, CircuitBreaker, CircuitState, LocalFallbackScorer, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_pagerank, compute_authority_scores, compute_drift_metrics, detect_trend, CUSUMDetector, EWMADetector, compute_calibration, compute_hawkes_intensity, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, get_q_table, reset_q_table, compute_reward, compute_bocpd, BOCPDetector, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, sinkhorn_distance, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_mmd, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic
 
 # Patch out external services before importing the app
 with patch.dict(os.environ, {}, clear=False):
@@ -5472,3 +5472,91 @@ class TestProvenanceEntropy:
         assert "mean_entropy" in pe
         assert "high_entropy_entries" in pe
         assert "entropy_trend" in pe
+
+
+class TestSubjectiveLogic:
+    """Tests for P-04 Subjective Logic."""
+
+    def test_single_entry_opinion(self):
+        """Single entry should produce valid opinion."""
+        entries = [{"id": "e1", "source_trust": 0.8, "source_conflict": 0.1}]
+        result = compute_subjective_logic(entries)
+        assert result is not None
+        eid, op = result.opinions[0]
+        assert op.belief == 0.8
+        assert op.disbelief == 0.1
+        assert abs(op.uncertainty - 0.1) < 0.001
+        assert abs(op.belief + op.disbelief + op.uncertainty - 1.0) < 0.01
+
+    def test_two_entry_fusion(self):
+        """Two entries should produce fused opinion."""
+        entries = [
+            {"id": "e1", "source_trust": 0.9, "source_conflict": 0.05},
+            {"id": "e2", "source_trust": 0.7, "source_conflict": 0.1},
+        ]
+        result = compute_subjective_logic(entries)
+        assert result is not None
+        assert result.fused_opinion is not None
+        f = result.fused_opinion
+        assert abs(f.belief + f.disbelief + f.uncertainty - 1.0) < 0.01
+
+    def test_high_uncertainty_detection(self):
+        """Entry with low trust and low conflict should flag high uncertainty."""
+        entries = [{"id": "e1", "source_trust": 0.3, "source_conflict": 0.1}]
+        result = compute_subjective_logic(entries)
+        assert result is not None
+        assert "e1" in result.high_uncertainty_entries
+
+    def test_consensus_possible_threshold(self):
+        """High-confidence entries should allow consensus."""
+        entries = [
+            {"id": "e1", "source_trust": 0.95, "source_conflict": 0.04},
+            {"id": "e2", "source_trust": 0.90, "source_conflict": 0.05},
+        ]
+        result = compute_subjective_logic(entries)
+        assert result is not None
+        assert result.fused_opinion is not None
+        # Both have low uncertainty → fused should too
+        assert result.consensus_possible is True
+
+    def test_projected_prob_computation(self):
+        """P(X) = b + a·u should be more conservative than raw trust."""
+        entries = [{"id": "e1", "source_trust": 0.6, "source_conflict": 0.1}]
+        result = compute_subjective_logic(entries)
+        assert result is not None
+        _, op = result.opinions[0]
+        # u = 0.3, P = 0.6 + 0.5*0.3 = 0.75
+        assert abs(op.projected_prob - 0.75) < 0.01
+
+    def test_s_provenance_replacement(self):
+        """API should use projected_prob for s_provenance."""
+        resp = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+        }, headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "subjective_logic" in data
+        sl = data["subjective_logic"]
+        assert "opinions" in sl
+        assert "fused_opinion" in sl
+        assert "consensus_possible" in sl
+
+    def test_division_by_zero_guard(self):
+        """When both entries have u=0, fusion should return None gracefully."""
+        entries = [
+            {"id": "e1", "source_trust": 0.6, "source_conflict": 0.4},
+            {"id": "e2", "source_trust": 0.5, "source_conflict": 0.5},
+        ]
+        result = compute_subjective_logic(entries)
+        assert result is not None
+        # u₁=0, u₂=0 → denom=0 → fused=None
+        # This is the graceful degradation case
+
+    def test_source_values_exceed_unit(self):
+        """trust + conflict > 1.0 should clip proportionally."""
+        entries = [{"id": "e1", "source_trust": 0.8, "source_conflict": 0.5}]
+        result = compute_subjective_logic(entries)
+        assert result is not None
+        _, op = result.opinions[0]
+        assert abs(op.belief + op.disbelief + op.uncertainty - 1.0) < 0.01
+        assert op.uncertainty == 0.0  # clipped, no room for uncertainty

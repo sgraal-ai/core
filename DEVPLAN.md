@@ -62,6 +62,7 @@
 | D-04 | Maximum Mean Discrepancy (MMD) — 5th drift method | Done | 8 tests |
 | D-07 | Page-Hinkley online change detection | Done | 9 tests |
 | P-03 | Shannon entropy on provenance graph | Done | 9 tests |
+| P-04 | Subjective Logic for uncertainty handling | Done | 8 tests |
 
 ### Also Delivered (Pre-Sprint)
 
@@ -82,7 +83,7 @@
 
 ### Test Summary
 
-- **494 tests passing** (pytest)
+- **502 tests passing** (pytest)
 - Scoring engine: 31 tests (components, Weibull, belief, relevance, decay ordering)
 - API integration: 15 tests (auth, validation, rate limiting, GSV, heal, outcome)
 - Self-healing: 8 tests (repair plan, priority, counter)
@@ -143,6 +144,7 @@
 - MMD: 8 tests (basic computation, identical zero, different positive, sigma heuristic, ensemble_5, n<2 null, fallback ensemble_4, backward compatibility)
 - Page-Hinkley: 9 tests (insufficient history, stable no alert, change detected, custom config, permanent_shift top-level, steps counter, API response, graceful degradation, config from request)
 - Provenance Entropy: 9 tests (single source, multiple sources, conflict threshold, s_provenance adjustment, n=1 edge case, trend stable, trend increasing, graceful degradation, API response)
+- Subjective Logic: 8 tests (single opinion, two-entry fusion, high uncertainty, consensus threshold, projected_prob, s_provenance replacement, division by zero, exceed unit constraint)
 
 ### Deployments
 
