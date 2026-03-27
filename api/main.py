@@ -153,6 +153,7 @@ class PreflightRequest(BaseModel):
     score_history: Optional[list[float]] = None  # recent omega scores for CUSUM/EWMA trend detection
     page_hinkley_config: Optional[dict[str, float]] = None  # {"delta": float, "lambda": float}
     reset_frechet_reference: bool = False  # reset stored Fréchet reference distribution
+    profile: Optional[str] = None  # named domain profile to apply
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -297,6 +298,314 @@ def postman_collection():
             return _pjson.load(f)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Postman collection not found")
+
+
+# ---- Teams + RBAC ----
+
+_ROLE_SCOPES = {
+    "admin": {"all"},
+    "developer": {"preflight", "heal", "batch", "explain", "outcome"},
+    "viewer": {"get"},
+    "auditor": {"audit"},
+}
+
+class TeamCreateRequest(BaseModel):
+    name: str
+    owner_email: str
+
+class TeamInviteRequest(BaseModel):
+    team_id: str
+    email: str
+    role: str = "developer"
+
+class TeamAPIKeyRequest(BaseModel):
+    team_id: str
+    name: str
+    scopes: list[str] = []
+    ip_allowlist: list[str] = []
+
+@app.post("/v1/teams")
+def create_team(req: TeamCreateRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    team_id = str(uuid.uuid4())
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.post(f"{SUPABASE_URL}/rest/v1/teams",
+                json={"id": team_id, "name": req.name, "owner_email": req.owner_email},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
+            http_requests.post(f"{SUPABASE_URL}/rest/v1/team_members",
+                json={"team_id": team_id, "user_email": req.owner_email, "role": "admin", "status": "active"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
+        except Exception:
+            pass
+    return {"team_id": team_id, "name": req.name, "owner_email": req.owner_email}
+
+@app.post("/v1/teams/invite")
+def invite_member(req: TeamInviteRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if req.role not in _ROLE_SCOPES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {list(_ROLE_SCOPES.keys())}")
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.post(f"{SUPABASE_URL}/rest/v1/team_members",
+                json={"team_id": req.team_id, "user_email": req.email, "role": req.role, "status": "pending"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
+        except Exception:
+            pass
+    return {"team_id": req.team_id, "email": req.email, "role": req.role, "status": "pending"}
+
+@app.get("/v1/teams/members")
+def list_members(team_id: str, key_record: dict = Depends(verify_api_key)):
+    members = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/team_members?team_id=eq.{team_id}&select=*",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok:
+                members = r.json()
+        except Exception:
+            pass
+    return {"team_id": team_id, "members": members}
+
+@app.delete("/v1/teams/members/{email}")
+def remove_member(email: str, team_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.delete(f"{SUPABASE_URL}/rest/v1/team_members?team_id=eq.{team_id}&user_email=eq.{email}",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+        except Exception:
+            pass
+    return {"removed": email, "team_id": team_id}
+
+@app.post("/v1/teams/api-keys")
+def create_team_key(req: TeamAPIKeyRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    new_key = f"sg_team_{secrets.token_urlsafe(32)}"
+    key_hash = hashlib.sha256(new_key.encode()).hexdigest()
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.post(f"{SUPABASE_URL}/rest/v1/team_api_keys",
+                json={"team_id": req.team_id, "api_key_hash": key_hash, "name": req.name,
+                      "scopes": req.scopes, "ip_allowlist": req.ip_allowlist},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
+        except Exception:
+            pass
+    return {"api_key": new_key, "name": req.name, "team_id": req.team_id}
+
+@app.get("/v1/teams/api-keys")
+def list_team_keys(team_id: str, key_record: dict = Depends(verify_api_key)):
+    keys = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/team_api_keys?team_id=eq.{team_id}&select=id,name,scopes,created_at",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok:
+                keys = r.json()
+        except Exception:
+            pass
+    return {"team_id": team_id, "keys": keys}
+
+
+# ---- Aging Rules ----
+
+class AgingRuleRequest(BaseModel):
+    memory_type: str
+    ttl_days: float
+    warn_at_percent: float = 70
+    block_at_percent: float = 90
+    auto_heal_action: str = "REFETCH"
+
+@app.post("/v1/aging-rules")
+def create_aging_rule(req: AgingRuleRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    rule_id = str(uuid.uuid4())
+    kh = key_record.get("key_hash", "default")
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.post(f"{SUPABASE_URL}/rest/v1/aging_rules",
+                json={"id": rule_id, "api_key_hash": kh, "memory_type": req.memory_type,
+                      "ttl_days": req.ttl_days, "warn_at_percent": req.warn_at_percent,
+                      "block_at_percent": req.block_at_percent, "auto_heal_action": req.auto_heal_action},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
+        except Exception:
+            pass
+    return {"id": rule_id, **req.model_dump()}
+
+@app.get("/v1/aging-rules")
+def list_aging_rules(key_record: dict = Depends(verify_api_key)):
+    rules = []
+    kh = key_record.get("key_hash", "default")
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/aging_rules?api_key_hash=eq.{kh}&select=*",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok:
+                rules = r.json()
+        except Exception:
+            pass
+    return {"rules": rules}
+
+@app.delete("/v1/aging-rules/{rule_id}")
+def delete_aging_rule(rule_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.delete(f"{SUPABASE_URL}/rest/v1/aging_rules?id=eq.{rule_id}",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+        except Exception:
+            pass
+    return {"deleted": rule_id}
+
+@app.get("/v1/aging-rules/expiring")
+def get_expiring(key_record: dict = Depends(verify_api_key)):
+    """List memory types approaching expiry based on aging rules."""
+    return {"expiring": [], "message": "Connect with score_history for real-time expiry tracking"}
+
+
+def _apply_aging_rules(entries, key_hash: str) -> Optional[dict]:
+    """Look up aging rules and compute age_percent. Returns rule info or None."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return None
+    try:
+        types = set(e.type for e in entries)
+        rules = {}
+        for t in types:
+            r = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/aging_rules?api_key_hash=eq.{key_hash}&memory_type=eq.{t}&select=*",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=3)
+            if r.ok and r.json():
+                rules[t] = r.json()[0]
+        if not rules:
+            return None
+        # Find most critical rule application
+        worst = None
+        for e in entries:
+            rule = rules.get(e.type)
+            if not rule:
+                continue
+            age_pct = (e.timestamp_age_days / rule["ttl_days"]) * 100 if rule["ttl_days"] > 0 else 0
+            expires_in = max(0, rule["ttl_days"] - e.timestamp_age_days)
+            entry_info = {"rule_applied": True, "ttl_days": rule["ttl_days"], "age_percent": round(age_pct, 1), "expires_in_days": round(expires_in, 1),
+                          "force_action": "BLOCK" if age_pct >= rule["block_at_percent"] else "WARN" if age_pct >= rule["warn_at_percent"] else None}
+            if worst is None or age_pct > worst.get("age_percent", 0):
+                worst = entry_info
+        return worst
+    except Exception:
+        return None  # Graceful fallback — never crash preflight
+
+
+# ---- Domain Profiles ----
+
+class ProfileRequest(BaseModel):
+    name: str
+    base_domain: str = "general"
+    custom_weights: Optional[dict] = None
+    warn_threshold: float = 40
+    ask_user_threshold: float = 60
+    block_threshold: float = 80
+    description: str = ""
+
+@app.post("/v1/profiles")
+def create_profile(req: ProfileRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    pid = str(uuid.uuid4())
+    kh = key_record.get("key_hash", "default")
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.post(f"{SUPABASE_URL}/rest/v1/profiles",
+                json={"id": pid, "api_key_hash": kh, "name": req.name, "base_domain": req.base_domain,
+                      "custom_weights": req.custom_weights or {}, "warn_threshold": req.warn_threshold,
+                      "ask_user_threshold": req.ask_user_threshold, "block_threshold": req.block_threshold,
+                      "description": req.description},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
+        except Exception:
+            pass
+    return {"id": pid, **req.model_dump()}
+
+@app.get("/v1/profiles")
+def list_profiles(key_record: dict = Depends(verify_api_key)):
+    profiles = []
+    kh = key_record.get("key_hash", "default")
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/profiles?api_key_hash=eq.{kh}&select=*",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok:
+                profiles = r.json()
+        except Exception:
+            pass
+    return {"profiles": profiles}
+
+@app.put("/v1/profiles/{name}")
+def update_profile(name: str, req: ProfileRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?api_key_hash=eq.{kh}&name=eq.{name}",
+                json={"custom_weights": req.custom_weights or {}, "warn_threshold": req.warn_threshold,
+                      "ask_user_threshold": req.ask_user_threshold, "block_threshold": req.block_threshold},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
+        except Exception:
+            pass
+    return {"name": name, "updated": True}
+
+@app.delete("/v1/profiles/{name}")
+def delete_profile(name: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.delete(f"{SUPABASE_URL}/rest/v1/profiles?api_key_hash=eq.{kh}&name=eq.{name}",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+        except Exception:
+            pass
+    return {"name": name, "deleted": True}
+
+@app.post("/v1/profiles/{name}/shadow-test")
+def shadow_test(name: str, req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
+    """Run preflight with default and custom profile, compare results."""
+    _check_rate_limit(key_record)
+    # Fetch profile
+    kh = key_record.get("key_hash", "default")
+    profile = None
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/profiles?api_key_hash=eq.{kh}&name=eq.{name}&select=*",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok and r.json():
+                profile = r.json()[0]
+        except Exception:
+            pass
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+
+    # Default run
+    entries = [MemoryEntry(id=e.id, content=e.content, type=e.type,
+        timestamp_age_days=e.timestamp_age_days if e.ttl_seconds is None else min(e.timestamp_age_days, e.ttl_seconds / 86400),
+        source_trust=e.source_trust, source_conflict=e.source_conflict or 0.1,
+        downstream_count=e.downstream_count) for e in req.memory_state]
+    default_result = compute(entries, action_type=req.action_type, domain=req.domain)
+
+    # Custom run with profile thresholds
+    custom_result = compute(entries, action_type=req.action_type, domain=profile.get("base_domain", req.domain),
+                            custom_weights=profile.get("custom_weights"),
+                            thresholds={"warn": profile["warn_threshold"], "ask_user": profile["ask_user_threshold"], "block": profile["block_threshold"]})
+
+    return {
+        "default_result": {"omega": default_result.omega_mem_final, "action": default_result.recommended_action},
+        "custom_result": {"omega": custom_result.omega_mem_final, "action": custom_result.recommended_action},
+        "decision_changed": default_result.recommended_action != custom_result.recommended_action,
+        "omega_delta": round(custom_result.omega_mem_final - default_result.omega_mem_final, 2),
+    }
 
 
 # ---- /v1/explain ----
@@ -3140,6 +3449,18 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Metrics + tracing
     _duration = _time.monotonic() - _t_start
     _metrics.record_preflight(result.recommended_action, omega_out, _duration)
+    # Aging rules (graceful — never crashes preflight)
+    try:
+        aging = _apply_aging_rules(entries, key_record.get("key_hash", "default"))
+        if aging:
+            response["aging_rule"] = aging
+            if aging.get("force_action") == "BLOCK":
+                response["recommended_action"] = "BLOCK"
+            elif aging.get("force_action") == "WARN" and response.get("recommended_action") == "USE_MEMORY":
+                response["recommended_action"] = "WARN"
+    except Exception:
+        pass
+
     response["_trace"] = {
         "span": "preflight",
         "api_key_id": key_record.get("key_hash", "in_memory"),

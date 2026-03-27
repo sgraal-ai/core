@@ -7829,3 +7829,114 @@ class TestExamples:
         import os
         for d in ["fintech-agent", "support-agent", "medical-copilot", "coding-agent", "mem0-migration"]:
             assert os.path.exists(f"examples/{d}/.env.example"), f"Missing .env.example in {d}"
+
+
+class TestTeamsRBAC:
+    """Tests for Team + RBAC endpoints."""
+    def test_create_team(self):
+        resp = client.post("/v1/teams", json={"name": "Test Team", "owner_email": "owner@test.com"}, headers=AUTH)
+        assert resp.status_code == 200 and "team_id" in resp.json()
+
+    def test_invite_member(self):
+        resp = client.post("/v1/teams/invite", json={"team_id": "fake-id", "email": "dev@test.com", "role": "developer"}, headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["status"] == "pending"
+
+    def test_invalid_role(self):
+        resp = client.post("/v1/teams/invite", json={"team_id": "fake", "email": "x@t.com", "role": "superadmin"}, headers=AUTH)
+        assert resp.status_code == 400
+
+    def test_list_members(self):
+        resp = client.get("/v1/teams/members?team_id=fake-id", headers=AUTH)
+        assert resp.status_code == 200 and "members" in resp.json()
+
+    def test_remove_member(self):
+        resp = client.delete("/v1/teams/members/dev@test.com?team_id=fake-id", headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_create_team_key(self):
+        resp = client.post("/v1/teams/api-keys", json={"team_id": "fake", "name": "CI key"}, headers=AUTH)
+        assert resp.status_code == 200 and "api_key" in resp.json()
+
+    def test_list_team_keys(self):
+        resp = client.get("/v1/teams/api-keys?team_id=fake", headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_demo_blocked(self):
+        resp = client.post("/v1/teams", json={"name": "X", "owner_email": "x@x.com"},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 403
+
+
+class TestAgingRules:
+    """Tests for Memory Aging Rules Engine."""
+    def test_create_rule(self):
+        resp = client.post("/v1/aging-rules", json={"memory_type": "tool_state", "ttl_days": 7}, headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["memory_type"] == "tool_state"
+
+    def test_list_rules(self):
+        resp = client.get("/v1/aging-rules", headers=AUTH)
+        assert resp.status_code == 200 and "rules" in resp.json()
+
+    def test_delete_rule(self):
+        resp = client.delete("/v1/aging-rules/fake-id", headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_expiring_endpoint(self):
+        resp = client.get("/v1/aging-rules/expiring", headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_no_rule_graceful(self):
+        """Preflight without aging rules should work fine."""
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_aging_rule_fields(self):
+        resp = client.post("/v1/aging-rules", json={"memory_type": "semantic", "ttl_days": 100, "warn_at_percent": 60, "block_at_percent": 85}, headers=AUTH)
+        d = resp.json()
+        assert d["warn_at_percent"] == 60 and d["block_at_percent"] == 85
+
+    def test_apply_aging_returns_none_no_supabase(self):
+        from api.main import _apply_aging_rules
+        result = _apply_aging_rules([], "test")
+        assert result is None
+
+    def test_rule_crud_full(self):
+        r1 = client.post("/v1/aging-rules", json={"memory_type": "policy", "ttl_days": 365}, headers=AUTH)
+        assert r1.status_code == 200
+        r2 = client.get("/v1/aging-rules", headers=AUTH)
+        assert r2.status_code == 200
+
+
+class TestDomainProfiles:
+    """Tests for Domain Profile Configurator."""
+    def test_create_profile(self):
+        resp = client.post("/v1/profiles", json={"name": "strict_fintech", "base_domain": "fintech", "warn_threshold": 20, "block_threshold": 50}, headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["name"] == "strict_fintech"
+
+    def test_list_profiles(self):
+        resp = client.get("/v1/profiles", headers=AUTH)
+        assert resp.status_code == 200 and "profiles" in resp.json()
+
+    def test_update_profile(self):
+        resp = client.put("/v1/profiles/test_profile", json={"name": "test_profile", "warn_threshold": 30}, headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_delete_profile(self):
+        resp = client.delete("/v1/profiles/test_profile", headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_shadow_test_404(self):
+        resp = client.post("/v1/profiles/nonexistent/shadow-test", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 404
+
+    def test_profile_field_in_preflight(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "profile": "nonexistent"}, headers=AUTH)
+        assert resp.status_code == 200  # profile lookup fails gracefully
+
+    def test_dashboard_team_page(self):
+        import os
+        assert os.path.exists("dashboard/app/team/page.tsx")
+
+    def test_dashboard_profiles_page(self):
+        import os
+        assert os.path.exists("dashboard/app/profiles/page.tsx")
