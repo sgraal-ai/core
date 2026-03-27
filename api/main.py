@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import stripe
 import requests as http_requests
+from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended, compute_simulated_annealing, compute_lqr, compute_persistence_landscape, compute_topological_entropy, compute_homology_torsion, compute_dirichlet_process, compute_particle_filter, compute_pctl, compute_dual_process, compute_security_te, compute_sparse_merkle
@@ -157,6 +158,7 @@ class PreflightRequest(BaseModel):
     auto_explain: bool = False  # include auto explanation on BLOCK
     auto_explain_language: str = "en"  # en|de|fr
     trace_id: Optional[str] = None  # OTel trace propagation
+    response_profile: Optional[str] = None  # compact | standard | full
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -644,7 +646,7 @@ def memory_graph(agent_id: Optional[str] = None, key_record: dict = Depends(veri
 
 # ---- #27 Drift Alert Rules ----
 
-_alert_rules: dict[str, dict] = {}
+_alert_rules = RedisBackedDict("alert_rules")
 
 class AlertRuleRequest(BaseModel):
     name: str
@@ -805,7 +807,7 @@ def bulk_export(agent_id: Optional[str] = None, format: str = "json", key_record
 
 
 # ---- #31 SLA Monitoring ----
-_sla_rules: dict[str, dict] = {}
+_sla_rules = RedisBackedDict("sla_rules")
 class SLARuleRequest(BaseModel):
     name: str
     metric: str
@@ -864,7 +866,7 @@ class TemplateRequest(BaseModel):
     memory_state: list[dict]
     domain: str = "general"
     action_type: str = "reversible"
-_templates: dict[str, dict] = {}
+_templates = RedisBackedDict("preflight_templates")
 @app.post("/v1/templates")
 def create_template(req: TemplateRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
@@ -1016,7 +1018,7 @@ def _parse_retention_condition(cond: str) -> bool:
     field, op, _ = parts
     return field in _RETENTION_FIELDS and op in _RETENTION_OPS
 
-_retention_policies: dict[str, dict] = {}
+_retention_policies = RedisBackedDict("retention_policies")
 
 @app.post("/v1/retention-policies")
 def create_retention(req: RetentionPolicyRequest, key_record: dict = Depends(verify_api_key)):
@@ -1072,7 +1074,7 @@ def memory_access_log(memory_id: str, key_record: dict = Depends(verify_api_key)
     return {"memory_id": memory_id, "accesses": entries, "count": len(entries)}
 
 # ---- #49 Preflight Hooks ----
-_hooks: dict[str, dict] = {}
+_hooks = RedisBackedDict("preflight_hooks")
 
 class HookRequest(BaseModel):
     event: str  # before_preflight, after_preflight, on_block
@@ -1098,7 +1100,7 @@ def delete_hook(hook_id: str, key_record: dict = Depends(verify_api_key)):
     return {"deleted": hook_id}
 
 # ---- #50 Developer API Keys ----
-_dev_keys: dict[str, dict] = {}
+_dev_keys = RedisBackedDict("dev_keys")
 
 @app.post("/v1/api-keys")
 def create_dev_key(name: str = "default", key_record: dict = Depends(verify_api_key)):
@@ -1128,7 +1130,7 @@ def rotate_dev_key(key_id: str, key_record: dict = Depends(verify_api_key)):
 
 
 # ---- #53 Memory Access Tokens ----
-_mem_tokens: dict[str, dict] = {}
+_mem_tokens = RedisBackedDict("mem_tokens")
 
 class MemTokenRequest(BaseModel):
     memory_id: str
@@ -1149,6 +1151,36 @@ def revoke_mem_token(token: str, key_record: dict = Depends(verify_api_key)):
         raise HTTPException(status_code=404, detail="Token not found or already expired")
     _mem_tokens.pop(token)
     return {"revoked": True}
+
+
+# ---- #131 RAG Filter ----
+class RAGFilterRequest(BaseModel):
+    chunks: list[dict]
+    max_omega: float = 60
+    query: Optional[str] = None
+
+@app.post("/v1/rag/filter")
+def rag_filter(req: RAGFilterRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    if len(req.chunks) > 500:
+        raise HTTPException(status_code=400, detail="Maximum 500 chunks per request.")
+    passed, blocked = [], []
+    for chunk in req.chunks:
+        content = chunk.get("content", chunk.get("text", ""))
+        if len(content) < 10:
+            chunk["sgraal_omega"] = 0
+            passed.append(chunk)
+            continue
+        try:
+            me = MemoryEntry(id=chunk.get("id","rag"), content=content, type="semantic",
+                timestamp_age_days=0, source_trust=0.8, source_conflict=0.1, downstream_count=1)
+            r = compute([me])
+            chunk["sgraal_omega"] = r.omega_mem_final
+            if r.omega_mem_final <= req.max_omega: passed.append(chunk)
+            else: blocked.append(chunk)
+        except Exception:
+            chunk["sgraal_omega"] = 0; passed.append(chunk)
+    return {"passed": passed, "blocked": blocked, "total": len(req.chunks), "passed_count": len(passed), "blocked_count": len(blocked)}
 
 
 # ---- #105-#115 Content endpoints ----
@@ -1278,7 +1310,7 @@ class FeedbackRequest(BaseModel):
     feedback_type: str  # false_positive, false_negative, correct, suggestion
     comment: str = ""
 
-_feedback_counts: dict[str, dict] = {}  # key_hash → {false_positive: int, false_negative: int, ...}
+_feedback_counts = RedisBackedDict("feedback_counts")
 
 @app.post("/v1/feedback")
 def submit_feedback(req: FeedbackRequest, key_record: dict = Depends(verify_api_key)):
@@ -1300,7 +1332,7 @@ def submit_feedback(req: FeedbackRequest, key_record: dict = Depends(verify_api_
             "calibration_bounds_hit": bounds_hit, "total_feedback": total}
 
 # ---- #91 Human Approval ----
-_approvals: dict[str, dict] = {}
+_approvals = RedisBackedDict("approvals")
 
 class ApprovalRequest(BaseModel):
     preflight_id: str
@@ -4809,6 +4841,41 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["quota_used"] = 2
         except Exception:
             pass
+
+    # #130 Auto outcome inference
+    try:
+        _agent_id = req.agent_id or "anonymous"
+        _last_pf_key = f"last_preflight:{key_record.get('key_hash', 'default')}:{_agent_id}"
+        _prev_omega = redis_get(_last_pf_key)
+        auto_inferred = None
+        if _prev_omega is not None and isinstance(_prev_omega, (int, float)):
+            delta = omega_out - _prev_omega
+            if delta < -10:
+                auto_inferred = "success"
+                try: update_from_outcome(omega_out, result.component_breakdown, result.recommended_action, "success", req.domain)
+                except Exception: pass
+            elif delta > 15:
+                auto_inferred = "partial_failure"
+                try: update_from_outcome(omega_out, result.component_breakdown, result.recommended_action, "partial", req.domain)
+                except Exception: pass
+        if auto_inferred:
+            response["auto_outcome_inferred"] = True
+            response["inferred_outcome"] = auto_inferred
+        redis_set(_last_pf_key, omega_out, ttl=300)
+    except Exception:
+        pass
+
+    # #132 Compact response profile
+    _profile = req.response_profile
+    if not _profile:
+        _profile = "compact" if key_record.get("demo") else "standard"
+    response["response_profile_used"] = _profile
+    if _profile == "compact":
+        _compact_keys = {"omega_mem_final", "recommended_action", "assurance_score", "repair_plan",
+                         "explainability_note", "confidence_intervals", "response_profile_used", "demo",
+                         "request_id", "_trace", "auto_outcome_inferred", "inferred_outcome"}
+        response = {k: v for k, v in response.items() if k in _compact_keys}
+        response["response_profile_used"] = "compact"
 
     # #67 Trace propagation
     if req.trace_id:
