@@ -7682,3 +7682,79 @@ class TestSgraalAutoJS:
         assert "preflight" in content
         assert "guard" in content
         assert "configure" in content
+
+
+class TestGitHubOAuth:
+    """Tests for GitHub OAuth endpoints."""
+
+    def test_auth_github_no_credentials(self):
+        resp = client.get("/auth/github", follow_redirects=False)
+        # Without GITHUB_CLIENT_ID set, should return 503
+        assert resp.status_code == 503
+
+    def test_callback_invalid_state(self):
+        resp = client.get("/auth/github/callback?code=fake&state=invalid")
+        assert resp.status_code == 400
+
+    def test_callback_missing_code(self):
+        resp = client.get("/auth/github/callback?state=test")
+        assert resp.status_code == 422  # missing required param
+
+    def test_callback_no_cookie(self):
+        resp = client.get("/auth/github/callback?code=test&state=test")
+        assert resp.status_code == 400
+
+
+class TestROICalculator:
+    """Tests for ROI calculator page."""
+
+    def test_roi_page_exists(self):
+        import os
+        assert os.path.exists("web/app/roi/page.tsx")
+
+    def test_roi_contains_calculator(self):
+        with open("web/app/roi/page.tsx") as f:
+            content = f.read()
+        assert "ROI Calculator" in content
+        assert "multiplier" in content
+
+    def test_domains_have_multipliers(self):
+        with open("web/app/roi/page.tsx") as f:
+            content = f.read()
+        for domain in ("fintech", "healthcare", "legal", "general"):
+            assert domain in content
+
+    def test_share_url_generation(self):
+        with open("web/app/roi/page.tsx") as f:
+            content = f.read()
+        assert "shareUrl" in content
+
+
+class TestEmulator:
+    """Tests for Sgraal Memory Emulator."""
+
+    def test_emulator_importable(self):
+        from sdk.emulator.emulator import create_mem0_app
+        assert callable(create_mem0_app)
+
+    def test_supported_providers(self):
+        from sdk.emulator.emulator import SUPPORTED_PROVIDERS, PLANNED_PROVIDERS
+        assert "mem0" in SUPPORTED_PROVIDERS
+        assert "zep" in PLANNED_PROVIDERS
+        assert "letta" in PLANNED_PROVIDERS
+
+    def test_to_sgraal_entry(self):
+        from sdk.emulator.emulator import _to_sgraal_entry
+        entry = _to_sgraal_entry({"id": "m1", "memory": "test", "metadata": {"type": "semantic", "confidence": 0.9}})
+        assert entry["id"] == "m1"
+        assert entry["source_trust"] == 0.9
+        assert entry["type"] == "semantic"
+
+    def test_dry_run_app(self):
+        from sdk.emulator.emulator import create_mem0_app
+        from fastapi.testclient import TestClient
+        app = create_mem0_app("sg_test", dry_run=True)
+        tc = TestClient(app)
+        resp = tc.post("/v1/memories", json={"text": "test memory", "memory": "test memory", "user_id": "u1"})
+        assert resp.status_code == 200
+        assert resp.json()["sgraal"]["action"] == "USE_MEMORY"

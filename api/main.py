@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Response, Cookie, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Literal, Optional
 import sys, os, math
@@ -198,6 +199,89 @@ def _hash_key(api_key: str) -> str:
 @app.get("/")
 def root():
     return {"name": "Sgraal", "version": "0.1.0"}
+
+GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
+GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
+_oauth_states: dict[str, float] = {}  # state → timestamp
+
+@app.get("/auth/github")
+def auth_github(response: Response):
+    """Redirect to GitHub OAuth with CSRF state token."""
+    if not GITHUB_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="GitHub OAuth not configured")
+    state = secrets.token_urlsafe(32)
+    _oauth_states[state] = time.time()
+    response = RedirectResponse(
+        url=f"https://github.com/login/oauth/authorize?client_id={GITHUB_CLIENT_ID}&scope=user:email&state={state}",
+        status_code=302,
+    )
+    response.set_cookie("sgraal_oauth_state", state, httponly=True, secure=True, samesite="lax", max_age=600)
+    return response
+
+@app.get("/auth/github/callback")
+def auth_github_callback(code: str = Query(...), state: str = Query(...), sgraal_oauth_state: Optional[str] = Cookie(None)):
+    """Exchange GitHub code for API key."""
+    # Validate CSRF state
+    if not sgraal_oauth_state or sgraal_oauth_state != state or state not in _oauth_states:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    # Clean up state (one-time use)
+    _oauth_states.pop(state, None)
+    if time.time() - _oauth_states.get(state, time.time()) > 600:
+        raise HTTPException(status_code=400, detail="OAuth state expired")
+
+    if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="GitHub OAuth not configured")
+
+    # Exchange code for token
+    try:
+        token_resp = http_requests.post("https://github.com/login/oauth/access_token",
+            json={"client_id": GITHUB_CLIENT_ID, "client_secret": GITHUB_CLIENT_SECRET, "code": code},
+            headers={"Accept": "application/json"}, timeout=10)
+        access_token = token_resp.json().get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=400, detail="GitHub token exchange failed")
+
+        # Get user info
+        user_resp = http_requests.get("https://api.github.com/user",
+            headers={"Authorization": f"Bearer {access_token}"}, timeout=10)
+        user = user_resp.json()
+
+        emails_resp = http_requests.get("https://api.github.com/user/emails",
+            headers={"Authorization": f"Bearer {access_token}"}, timeout=10)
+        primary_email = next((e["email"] for e in emails_resp.json() if e.get("primary")), user.get("email", ""))
+
+        if not primary_email:
+            raise HTTPException(status_code=400, detail="No email found on GitHub account")
+
+        # Check if email already has a key (idempotent)
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            existing = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/api_keys?email=eq.{primary_email}&select=id",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=5,
+            )
+            if existing.ok and existing.json():
+                # Return existing — redirect with message
+                return RedirectResponse(url=f"https://app.sgraal.com?existing=true&email={primary_email}", status_code=302)
+
+        # Create new key via signup flow
+        api_key = f"sg_live_{secrets.token_urlsafe(32)}"
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            http_requests.post(f"{SUPABASE_URL}/rest/v1/api_keys",
+                json={"key_hash": key_hash, "email": primary_email, "tier": "free"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"},
+                timeout=5)
+
+        return RedirectResponse(url=f"https://app.sgraal.com?key={api_key}&email={primary_email}", status_code=302)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"GitHub OAuth error: {str(e)[:100]}")
+
 
 @app.get("/health")
 def health():

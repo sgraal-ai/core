@@ -25,6 +25,9 @@ function Hero() {
         <a href="/playground" className="border border-gold text-gold font-semibold px-8 py-3 rounded-lg hover:bg-gold/10 transition">
           Try it live →
         </a>
+        <a href="/roi" className="border border-gray-600 text-gray-400 font-semibold px-6 py-3 rounded-lg hover:bg-gray-800 transition text-sm">
+          ROI Calculator
+        </a>
       </div>
     </section>
   );
