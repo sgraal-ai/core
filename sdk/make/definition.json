@@ -1,0 +1,1 @@
+{"name": "Sgraal", "label": "Sgraal Memory Governance", "modules": [{"name": "preflight", "label": "Run Preflight", "url": "https://api.sgraal.com/v1/preflight", "method": "POST"}]}

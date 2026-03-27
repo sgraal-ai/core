@@ -1126,6 +1126,30 @@ def rotate_dev_key(key_id: str, key_record: dict = Depends(verify_api_key)):
     return {"new_api_key": new_key, "old_key_expires_at": expires, "grace_period_seconds": 60}
 
 
+# ---- #53 Memory Access Tokens ----
+_mem_tokens: dict[str, dict] = {}
+
+class MemTokenRequest(BaseModel):
+    memory_id: str
+    scope: str = "read"
+    ttl_seconds: int = 3600
+
+@app.post("/v1/memory/tokens")
+def create_mem_token(req: MemTokenRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    token = secrets.token_urlsafe(32)
+    _mem_tokens[token] = {"memory_id": req.memory_id, "scope": req.scope,
+        "expires_at": (_time.time() + req.ttl_seconds), "key_hash": key_record.get("key_hash")}
+    return {"token": token, "memory_id": req.memory_id, "ttl_seconds": req.ttl_seconds}
+
+@app.post("/v1/memory/tokens/{token}/revoke")
+def revoke_mem_token(token: str, key_record: dict = Depends(verify_api_key)):
+    if token not in _mem_tokens:
+        raise HTTPException(status_code=404, detail="Token not found or already expired")
+    _mem_tokens.pop(token)
+    return {"revoked": True}
+
+
 # ---- EU AI Act Compliance Extension ----
 
 @app.get("/v1/compliance/eu-ai-act/report")

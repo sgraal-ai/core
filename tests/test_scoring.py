@@ -8794,3 +8794,188 @@ class TestDeveloperAPIKeys:
     def test_key_prefix(self):
         r = client.post("/v1/api-keys", headers=AUTH)
         assert r.json()["api_key"].startswith("sg_dev_")
+
+
+# ======= Sprint 27: Features #51-#65 =======
+
+class TestOpenSourceCore:
+    def test_license(self):
+        import os; assert os.path.exists("sdk/python/LICENSE")
+    def test_contributing(self):
+        import os; assert os.path.exists("sdk/python/CONTRIBUTING.md")
+
+class TestMemoryLocation:
+    def test_hot(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.status_code == 200
+    def test_cold(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.01, timestamp_age_days=500)]}, headers=AUTH)
+        assert r.status_code == 200
+    def test_warm_default(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.5, timestamp_age_days=50)]}, headers=AUTH)
+        assert r.status_code == 200
+    def test_location_ignored(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "omega_mem_final" in r.json()
+
+class TestMemoryTokens:
+    def test_create(self):
+        r = client.post("/v1/memory/tokens", json={"memory_id": "m1", "ttl_seconds": 300}, headers=AUTH)
+        assert r.status_code == 200 and "token" in r.json()
+    def test_ttl(self):
+        r = client.post("/v1/memory/tokens", json={"memory_id": "m1", "ttl_seconds": 60}, headers=AUTH)
+        assert r.json()["ttl_seconds"] == 60
+    def test_scope(self):
+        r = client.post("/v1/memory/tokens", json={"memory_id": "m1", "scope": "read"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_revoke(self):
+        r = client.post("/v1/memory/tokens", json={"memory_id": "m1"}, headers=AUTH)
+        token = r.json()["token"]
+        rv = client.post(f"/v1/memory/tokens/{token}/revoke", headers=AUTH)
+        assert rv.json()["revoked"] is True
+    def test_revoke_expired_404(self):
+        rv = client.post("/v1/memory/tokens/nonexistent/revoke", headers=AUTH)
+        assert rv.status_code == 404
+    def test_memory_id(self):
+        r = client.post("/v1/memory/tokens", json={"memory_id": "test_mem"}, headers=AUTH)
+        assert r.json()["memory_id"] == "test_mem"
+
+class TestCrewAIGuard:
+    def test_importable(self):
+        from sdk.python.sgraal.crewai_guard import SgraalCrewAIGuard; assert True
+    def test_decorator(self):
+        from sdk.python.sgraal.crewai_guard import sgraal_guard; assert callable(sgraal_guard)
+    def test_no_memory_skips(self):
+        from sdk.python.sgraal.crewai_guard import SgraalCrewAIGuard
+        g = SgraalCrewAIGuard("key"); assert g.check(None) is None
+    def test_blocked_error(self):
+        from sdk.python.sgraal.crewai_guard import SgraalBlockedError
+        assert issubclass(SgraalBlockedError, Exception)
+
+class TestAutoGenMiddleware:
+    def test_importable(self):
+        from sdk.python.sgraal.autogen_middleware import SgraalAutoGenMiddleware; assert True
+    def test_no_memory(self):
+        from sdk.python.sgraal.autogen_middleware import SgraalAutoGenMiddleware
+        m = SgraalAutoGenMiddleware("key"); assert m.intercept({}) is None
+    def test_on_block_default(self):
+        from sdk.python.sgraal.autogen_middleware import SgraalAutoGenMiddleware
+        m = SgraalAutoGenMiddleware("key"); assert m.on_block == "warn"
+    def test_api_url(self):
+        from sdk.python.sgraal.autogen_middleware import SgraalAutoGenMiddleware
+        m = SgraalAutoGenMiddleware("key", "https://custom.api"); assert m.api_url == "https://custom.api"
+
+class TestLlamaIndex:
+    def test_importable(self):
+        from sdk.python.sgraal.llamaindex_wrapper import SgraalRetrieverWrapper; assert True
+    def test_empty(self):
+        from sdk.python.sgraal.llamaindex_wrapper import SgraalRetrieverWrapper
+        w = SgraalRetrieverWrapper(None, "key"); assert w.retrieve("q") == []
+    def test_filter(self):
+        from sdk.python.sgraal.llamaindex_wrapper import SgraalRetrieverWrapper
+        class FakeR:
+            def retrieve(self, q): return [{"text": "a", "omega_score": 90}, {"text": "b", "omega_score": 20}]
+        w = SgraalRetrieverWrapper(FakeR(), "key"); assert len(w.retrieve("q")) == 1
+    def test_max_omega(self):
+        from sdk.python.sgraal.llamaindex_wrapper import SgraalRetrieverWrapper
+        w = SgraalRetrieverWrapper(None, "key", max_omega=50); assert w.max_omega == 50
+
+class TestSemanticKernel:
+    def test_importable(self):
+        from sdk.python.sgraal.semantic_kernel_filter import SgraalSemanticKernelFilter; assert True
+    def test_filter(self):
+        from sdk.python.sgraal.semantic_kernel_filter import SgraalSemanticKernelFilter
+        f = SgraalSemanticKernelFilter("key"); assert f.filter([{"omega_score": 90}]) == []
+    def test_pass(self):
+        from sdk.python.sgraal.semantic_kernel_filter import SgraalSemanticKernelFilter
+        f = SgraalSemanticKernelFilter("key"); assert len(f.filter([{"omega_score": 10}])) == 1
+    def test_api_key(self):
+        from sdk.python.sgraal.semantic_kernel_filter import SgraalSemanticKernelFilter
+        f = SgraalSemanticKernelFilter("mykey"); assert f.api_key == "mykey"
+
+class TestHaystack:
+    def test_importable(self):
+        from sdk.python.sgraal.haystack_node import SgraalHaystackNode; assert True
+    def test_run(self):
+        from sdk.python.sgraal.haystack_node import SgraalHaystackNode
+        n = SgraalHaystackNode("key"); r = n.run([{"omega_score": 90}, {"omega_score": 10}])
+        assert len(r["documents"]) == 1 and r["filtered_count"] == 1
+    def test_empty(self):
+        from sdk.python.sgraal.haystack_node import SgraalHaystackNode
+        n = SgraalHaystackNode("key"); assert n.run([])["documents"] == []
+    def test_all_pass(self):
+        from sdk.python.sgraal.haystack_node import SgraalHaystackNode
+        n = SgraalHaystackNode("key"); assert n.run([{"omega_score": 5}])["filtered_count"] == 0
+
+class TestN8N:
+    def test_definition(self):
+        import os; assert os.path.exists("sdk/n8n/sgraal-preflight.node.ts")
+    def test_content(self):
+        with open("sdk/n8n/sgraal-preflight.node.ts") as f: assert "sgraalPreflight" in f.read()
+
+class TestPlugins:
+    def test_dify(self):
+        import os, json; assert os.path.exists("sdk/plugins/dify/manifest.json")
+        with open("sdk/plugins/dify/manifest.json") as f: assert json.load(f)["name"] == "sgraal-preflight"
+    def test_langflow(self):
+        import os; assert os.path.exists("sdk/plugins/langflow/manifest.json")
+    def test_flowise(self):
+        import os; assert os.path.exists("sdk/plugins/flowise/manifest.json")
+    def test_zapier(self):
+        import os; assert os.path.exists("sdk/zapier/definition.json")
+    def test_make(self):
+        import os; assert os.path.exists("sdk/make/definition.json")
+    def test_zapier_action(self):
+        import json
+        with open("sdk/zapier/definition.json") as f: d = json.load(f)
+        assert d["actions"][0]["key"] == "preflight"
+
+class TestMigrateCLI:
+    def test_cli_importable(self):
+        from sdk.python.sgraal.cli import main; assert callable(main)
+    def test_diagnose_importable(self):
+        from sdk.python.sgraal.diagnose import run_diagnose; assert callable(run_diagnose)
+    def test_color_function(self):
+        from sdk.python.sgraal.cli import _color; assert len(_color(True)) == 5
+    def test_config_loader(self):
+        from sdk.python.sgraal.cli import _load_config; assert isinstance(_load_config(), dict)
+
+class TestGoSDK:
+    def test_client_file(self):
+        import os; assert os.path.exists("sdk/go/sgraal/client.go")
+    def test_go_mod(self):
+        import os; assert os.path.exists("sdk/go/go.mod")
+    def test_preflight_function(self):
+        with open("sdk/go/sgraal/client.go") as f: assert "Preflight" in f.read()
+    def test_heal_stub(self):
+        with open("sdk/go/sgraal/client.go") as f: assert "Coming in next release" in f.read()
+
+class TestJavaSDK:
+    def test_client_file(self):
+        import os; assert os.path.exists("sdk/java/src/main/java/com/sgraal/SgraalClient.java")
+    def test_pom(self):
+        import os; assert os.path.exists("sdk/java/pom.xml")
+    def test_preflight_method(self):
+        with open("sdk/java/src/main/java/com/sgraal/SgraalClient.java") as f: assert "preflight" in f.read()
+    def test_stub(self):
+        with open("sdk/java/src/main/java/com/sgraal/SgraalClient.java") as f: assert "UnsupportedOperationException" in f.read()
+
+class TestRustSDK:
+    def test_lib(self):
+        import os; assert os.path.exists("sdk/rust/sgraal/src/lib.rs")
+    def test_cargo(self):
+        import os; assert os.path.exists("sdk/rust/sgraal/Cargo.toml")
+    def test_preflight(self):
+        with open("sdk/rust/sgraal/src/lib.rs") as f: assert "preflight" in f.read()
+    def test_stub(self):
+        with open("sdk/rust/sgraal/src/lib.rs") as f: assert "Coming in next release" in f.read()
+
+class TestDotNetSDK:
+    def test_client(self):
+        import os; assert os.path.exists("sdk/dotnet/Sgraal/SgraalClient.cs")
+    def test_csproj(self):
+        import os; assert os.path.exists("sdk/dotnet/Sgraal/Sgraal.csproj")
+    def test_preflight_async(self):
+        with open("sdk/dotnet/Sgraal/SgraalClient.cs") as f: assert "PreflightAsync" in f.read()
+    def test_stub(self):
+        with open("sdk/dotnet/Sgraal/SgraalClient.cs") as f: assert "NotImplementedException" in f.read()

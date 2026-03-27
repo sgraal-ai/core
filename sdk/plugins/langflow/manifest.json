@@ -1,0 +1,1 @@
+{"name": "sgraal-preflight", "version": "1.0.0", "description": "Sgraal memory governance for langflow", "author": "Sgraal", "type": "tool", "endpoint": "https://api.sgraal.com/v1/preflight"}

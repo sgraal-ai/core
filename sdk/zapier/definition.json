@@ -1,0 +1,1 @@
+{"name": "Sgraal", "description": "Memory governance for AI agents", "triggers": [], "actions": [{"key": "preflight", "noun": "Preflight Check", "display": {"label": "Run Preflight"}, "operation": {"type": "create", "url": "https://api.sgraal.com/v1/preflight"}}]}
