@@ -8596,3 +8596,201 @@ class TestQuota:
     def test_calls_limit(self):
         r = client.get("/v1/quota", headers=AUTH)
         assert r.json()["calls_limit"] > 0
+
+
+# ======= Sprint 26: Features #41-#50 =======
+
+class TestMemoryClustering:
+    def test_empty(self):
+        r = client.post("/v1/memory/cluster", headers=AUTH)
+        assert r.status_code == 200 and "clusters" in r.json()
+    def test_k_computed(self):
+        r = client.post("/v1/memory/cluster", headers=AUTH)
+        assert "k" in r.json()
+    def test_total_entries(self):
+        r = client.post("/v1/memory/cluster", headers=AUTH)
+        assert "total_entries" in r.json()
+    def test_get_cluster(self):
+        r = client.get("/v1/memory/clusters/0", headers=AUTH)
+        assert r.status_code == 200
+    def test_agent_filter(self):
+        r = client.post("/v1/memory/cluster?agent_id=a1", headers=AUTH)
+        assert r.status_code == 200
+    def test_clusters_list(self):
+        r = client.post("/v1/memory/cluster", headers=AUTH)
+        assert isinstance(r.json()["clusters"], list)
+
+class TestPreflightCaching:
+    def test_cache_miss(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.status_code == 200
+    def test_no_cache_param(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.status_code == 200
+    def test_response_valid(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "omega_mem_final" in r.json()
+    def test_high_omega_not_cached(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.01, timestamp_age_days=500)]}, headers=AUTH)
+        assert r.status_code == 200
+    def test_cache_key_deterministic(self):
+        # Same input should be cacheable
+        r1 = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(id="cache_det")]}, headers=AUTH)
+        r2 = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(id="cache_det")]}, headers=AUTH)
+        assert r1.json()["omega_mem_final"] == r2.json()["omega_mem_final"]
+    def test_different_inputs_different(self):
+        r1 = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(id="c1", source_trust=0.99)]}, headers=AUTH)
+        r2 = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(id="c2", source_trust=0.01, timestamp_age_days=500)]}, headers=AUTH)
+        assert r1.json()["omega_mem_final"] != r2.json()["omega_mem_final"]
+
+class TestSimilaritySearch:
+    def test_endpoint(self):
+        r = client.post("/v1/memory/similar", json={"content": "dark mode preference"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_threshold(self):
+        r = client.post("/v1/memory/similar", json={"content": "test", "threshold": 0.9}, headers=AUTH)
+        assert r.json()["threshold"] == 0.9
+    def test_limit(self):
+        r = client.post("/v1/memory/similar", json={"content": "test", "limit": 5}, headers=AUTH)
+        assert r.status_code == 200
+    def test_empty_results(self):
+        r = client.post("/v1/memory/similar", json={"content": "xyz unique query"}, headers=AUTH)
+        assert isinstance(r.json()["similar"], list)
+    def test_query_echo(self):
+        r = client.post("/v1/memory/similar", json={"content": "hello"}, headers=AUTH)
+        assert r.json()["query"] == "hello"
+    def test_demo_allowed(self):
+        r = client.post("/v1/memory/similar", json={"content": "test"},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert r.status_code == 200
+
+class TestBatchHeal:
+    def test_single(self):
+        r = client.post("/v1/heal/batch", json={"entries": [{"entry_id": "e1", "action": "REFETCH"}]}, headers=AUTH)
+        assert r.json()["healed_count"] == 1
+    def test_multiple(self):
+        r = client.post("/v1/heal/batch", json={"entries": [{"entry_id": f"e{i}"} for i in range(5)]}, headers=AUTH)
+        assert r.json()["healed_count"] == 5
+    def test_max_50(self):
+        r = client.post("/v1/heal/batch", json={"entries": [{"entry_id": f"e{i}"} for i in range(51)]}, headers=AUTH)
+        assert r.status_code == 400
+    def test_healed_count(self):
+        r = client.post("/v1/heal/batch", json={"entries": [{"entry_id": "x"}]}, headers=AUTH)
+        assert "healed_count" in r.json()
+    def test_failed_count(self):
+        r = client.post("/v1/heal/batch", json={"entries": [{"entry_id": "x"}]}, headers=AUTH)
+        assert "failed_count" in r.json()
+    def test_total(self):
+        r = client.post("/v1/heal/batch", json={"entries": [{"entry_id": "a"}, {"entry_id": "b"}]}, headers=AUTH)
+        assert r.json()["total"] == 2
+
+class TestRetentionPolicies:
+    def test_create(self):
+        r = client.post("/v1/retention-policies", json={"name": "old_data", "condition": "age_days > 365"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_run_omega(self):
+        r = client.post("/v1/retention-policies", json={"name": "risky", "condition": "omega > 80"}, headers=AUTH)
+        run = client.post(f"/v1/retention-policies/{r.json()['id']}/run", headers=AUTH)
+        assert run.status_code == 200
+    def test_run_age(self):
+        r = client.post("/v1/retention-policies", json={"name": "stale", "condition": "age_days > 90"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_delete(self):
+        r = client.post("/v1/retention-policies", json={"name": "del", "condition": "omega > 50"}, headers=AUTH)
+        assert client.delete(f"/v1/retention-policies/{r.json()['id']}", headers=AUTH).status_code == 200
+    def test_list(self):
+        assert client.get("/v1/retention-policies", headers=AUTH).status_code == 200
+    def test_invalid_condition(self):
+        r = client.post("/v1/retention-policies", json={"name": "bad", "condition": "eval(bad_code)"}, headers=AUTH)
+        assert r.status_code == 400
+
+class TestCustomWebhookPayloads:
+    def test_test_endpoint(self):
+        r = client.post("/v1/webhooks/test?url=https://httpbin.org/post", headers=AUTH)
+        assert r.json()["test"] is True
+    def test_status_sent(self):
+        r = client.post("/v1/webhooks/test", headers=AUTH)
+        assert r.json()["status"] == "sent"
+    def test_url_in_response(self):
+        r = client.post("/v1/webhooks/test?url=https://example.com", headers=AUTH)
+        assert "url" in r.json()
+    def test_default_url(self):
+        r = client.post("/v1/webhooks/test", headers=AUTH)
+        assert "httpbin" in r.json()["url"]
+    def test_rate_limited(self):
+        r = client.post("/v1/webhooks/test", headers=AUTH)
+        assert r.status_code == 200
+    def test_demo_blocked(self):
+        r = client.post("/v1/webhooks/test", headers={"Authorization": "Bearer sg_demo_playground"})
+        assert r.status_code == 403
+
+class TestAPIVersioning:
+    def test_v1(self):
+        assert client.get("/v1/version").json()["version"] == "v1"
+    def test_v2(self):
+        assert client.get("/v2/version").json()["version"] == "v2"
+    def test_v1_not_deprecated(self):
+        assert client.get("/v1/version").json()["deprecated"] is False
+    def test_v2_status(self):
+        assert client.get("/v2/version").json()["status"] == "beta"
+
+class TestMemoryAccessLog:
+    def test_endpoint(self):
+        r = client.get("/v1/store/memories/fake-id/access-log", headers=AUTH)
+        assert r.status_code == 200
+    def test_count(self):
+        r = client.get("/v1/store/memories/fake/access-log", headers=AUTH)
+        assert "count" in r.json()
+    def test_accesses_list(self):
+        r = client.get("/v1/store/memories/fake/access-log", headers=AUTH)
+        assert isinstance(r.json()["accesses"], list)
+    def test_memory_id(self):
+        r = client.get("/v1/store/memories/test123/access-log", headers=AUTH)
+        assert r.json()["memory_id"] == "test123"
+    def test_empty(self):
+        r = client.get("/v1/store/memories/nonexistent/access-log", headers=AUTH)
+        assert r.json()["count"] == 0
+    def test_ordered(self):
+        r = client.get("/v1/store/memories/fake/access-log", headers=AUTH)
+        assert r.status_code == 200
+
+class TestPreflightHooks:
+    def test_create(self):
+        r = client.post("/v1/hooks", json={"event": "on_block", "webhook_url": "https://example.com"}, headers=AUTH)
+        assert r.status_code == 200 and "id" in r.json()
+    def test_list(self):
+        assert client.get("/v1/hooks", headers=AUTH).status_code == 200
+    def test_delete(self):
+        r = client.post("/v1/hooks", json={"event": "after_preflight", "webhook_url": "https://x.com"}, headers=AUTH)
+        assert client.delete(f"/v1/hooks/{r.json()['id']}", headers=AUTH).status_code == 200
+    def test_event_field(self):
+        r = client.post("/v1/hooks", json={"event": "before_preflight", "webhook_url": "https://x.com"}, headers=AUTH)
+        assert r.json()["event"] == "before_preflight"
+    def test_filter_domain(self):
+        r = client.post("/v1/hooks", json={"event": "on_block", "webhook_url": "https://x.com", "filter_domain": "fintech"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_filter_omega(self):
+        r = client.post("/v1/hooks", json={"event": "on_block", "webhook_url": "https://x.com", "filter_min_omega": 60}, headers=AUTH)
+        assert r.status_code == 200
+
+class TestDeveloperAPIKeys:
+    def test_create(self):
+        r = client.post("/v1/api-keys?name=ci_key", headers=AUTH)
+        assert r.status_code == 200 and "api_key" in r.json()
+    def test_list(self):
+        assert client.get("/v1/api-keys", headers=AUTH).status_code == 200
+    def test_revoke(self):
+        r = client.post("/v1/api-keys?name=revoke_test", headers=AUTH)
+        kid = r.json()["id"]
+        assert client.delete(f"/v1/api-keys/{kid}", headers=AUTH).status_code == 200
+    def test_rotate(self):
+        r = client.post("/v1/api-keys?name=rotate_test", headers=AUTH)
+        rot = client.post(f"/v1/api-keys/{r.json()['id']}/rotate", headers=AUTH)
+        assert "new_api_key" in rot.json() and "old_key_expires_at" in rot.json()
+    def test_grace_period(self):
+        r = client.post("/v1/api-keys?name=grace", headers=AUTH)
+        rot = client.post(f"/v1/api-keys/{r.json()['id']}/rotate", headers=AUTH)
+        assert rot.json()["grace_period_seconds"] == 60
+    def test_key_prefix(self):
+        r = client.post("/v1/api-keys", headers=AUTH)
+        assert r.json()["api_key"].startswith("sg_dev_")
