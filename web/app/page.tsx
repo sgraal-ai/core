@@ -28,6 +28,9 @@ function Hero() {
         <a href="/roi" className="border border-gray-600 text-gray-400 font-semibold px-6 py-3 rounded-lg hover:bg-gray-800 transition text-sm">
           ROI Calculator
         </a>
+        <a href="https://github.com/sgraal-ai/core/tree/main/examples" className="border border-gray-600 text-gray-400 font-semibold px-6 py-3 rounded-lg hover:bg-gray-800 transition text-sm">
+          Examples →
+        </a>
       </div>
     </section>
   );

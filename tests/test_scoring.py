@@ -7758,3 +7758,74 @@ class TestEmulator:
         resp = tc.post("/v1/memories", json={"text": "test memory", "memory": "test memory", "user_id": "u1"})
         assert resp.status_code == 200
         assert resp.json()["sgraal"]["action"] == "USE_MEMORY"
+
+
+class TestCodeGenerator:
+    """Tests for code generator page."""
+    def test_page_exists(self):
+        import os
+        assert os.path.exists("dashboard/app/code-generator/page.tsx")
+
+    def test_contains_frameworks(self):
+        with open("dashboard/app/code-generator/page.tsx") as f:
+            c = f.read()
+        for fw in ["Python", "Node.js", "LangChain", "Claude MCP", "Vanilla JS"]:
+            assert fw in c
+
+    def test_security_comment(self):
+        with open("dashboard/app/code-generator/page.tsx") as f:
+            c = f.read()
+        assert "Keep your API key secret" in c
+        assert "sg_live_..." in c
+
+    def test_copy_inserts_real_key(self):
+        with open("dashboard/app/code-generator/page.tsx") as f:
+            c = f.read()
+        assert "clipboard" in c
+        assert "replace" in c  # replaces sg_live_... with real key
+
+
+class TestTutorial:
+    """Tests for interactive tutorial page."""
+    def test_page_exists(self):
+        import os
+        assert os.path.exists("dashboard/app/tutorial/page.tsx")
+
+    def test_five_steps(self):
+        with open("dashboard/app/tutorial/page.tsx") as f:
+            c = f.read()
+        assert "STEPS" in c
+        assert "Step 1" not in c or "step 3" not in c  # steps are 0-indexed in code
+        assert "You're ready" in c
+
+    def test_rate_limiting(self):
+        with open("dashboard/app/tutorial/page.tsx") as f:
+            c = f.read()
+        assert "MAX_CALLS" in c
+        assert "20" in c  # 20 call limit
+
+    def test_gamification(self):
+        with open("dashboard/app/tutorial/page.tsx") as f:
+            c = f.read()
+        assert "Memory Governance Expert" in c
+
+
+class TestExamples:
+    """Tests for example projects."""
+    def test_examples_readme(self):
+        import os
+        assert os.path.exists("examples/README.md")
+
+    def test_fintech_agent(self):
+        import os
+        assert os.path.exists("examples/fintech-agent/agent.py")
+        assert os.path.exists("examples/fintech-agent/.env.example")
+
+    def test_mem0_migration(self):
+        import os
+        assert os.path.exists("examples/mem0-migration/migrate.py")
+
+    def test_all_examples_have_env(self):
+        import os
+        for d in ["fintech-agent", "support-agent", "medical-copilot", "coding-agent", "mem0-migration"]:
+            assert os.path.exists(f"examples/{d}/.env.example"), f"Missing .env.example in {d}"

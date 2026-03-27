@@ -94,6 +94,12 @@ export default function DashboardHome() {
         </div>
       </div>
 
+      {/* Quick Actions */}
+      <div className="flex gap-3 mb-6">
+        <a href="/tutorial" className="bg-gold text-background text-sm font-semibold px-4 py-2 rounded hover:bg-gold-dim transition">Start Tutorial</a>
+        <a href="/code-generator" className="bg-surface border border-surface-light text-sm px-4 py-2 rounded hover:bg-surface-light transition">Code Generator</a>
+      </div>
+
       {/* Stability Overview */}
       {(() => {
         const avgStability = total > 0 ? agents.reduce((s, a) => s + (a.stability_score?.score ?? 0), 0) / total : 0;
