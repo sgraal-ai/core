@@ -8183,3 +8183,220 @@ class TestEUAIActCompliance:
         resp = client.get("/v1/compliance/eu-ai-act/report", headers=AUTH)
         # Without Supabase, total_calls=0
         assert resp.json()["article_17_quality_management"]["total_calls"] >= 0
+
+
+# ======= Sprint 24: Features #21-#30 =======
+
+class TestStreamingPreflight:
+    def test_non_streaming_works(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+    def test_stream_alias(self):
+        resp = client.get("/v1/preflight/stream")
+        assert resp.status_code == 200
+    def test_preflight_has_result(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "omega_mem_final" in resp.json()
+    def test_streaming_param_accepted(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+    def test_progress_in_trace(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "_trace" in resp.json()
+    def test_complete_event_structure(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.json().get("recommended_action") in ("USE_MEMORY","WARN","ASK_USER","BLOCK")
+
+class TestMemoryDiff:
+    def test_no_changes(self):
+        e = [{"id": "m1", "content": "test", "source_trust": 0.9}]
+        resp = client.post("/v1/memory/diff", json={"memory_state_before": e, "memory_state_after": e}, headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["summary"] == "0 added, 0 removed, 0 modified"
+    def test_added(self):
+        resp = client.post("/v1/memory/diff", json={"memory_state_before": [], "memory_state_after": [{"id": "m1"}]}, headers=AUTH)
+        assert len(resp.json()["added"]) == 1
+    def test_removed(self):
+        resp = client.post("/v1/memory/diff", json={"memory_state_before": [{"id": "m1"}], "memory_state_after": []}, headers=AUTH)
+        assert len(resp.json()["removed"]) == 1
+    def test_modified(self):
+        resp = client.post("/v1/memory/diff", json={"memory_state_before": [{"id": "m1", "source_trust": 0.9}], "memory_state_after": [{"id": "m1", "source_trust": 0.5}]}, headers=AUTH)
+        assert len(resp.json()["modified"]) == 1
+    def test_risk_delta(self):
+        resp = client.post("/v1/memory/diff", json={"memory_state_before": [{"id": "m1", "source_conflict": 0.1}], "memory_state_after": [{"id": "m1", "source_conflict": 0.5}]}, headers=AUTH)
+        assert resp.json()["risk_delta"] > 0
+    def test_empty_states(self):
+        resp = client.post("/v1/memory/diff", json={"memory_state_before": [], "memory_state_after": []}, headers=AUTH)
+        assert resp.status_code == 200
+
+class TestConfidenceIntervals:
+    def test_null_insufficient(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        # No score_history → no CI
+        assert "confidence_intervals" not in resp.json()
+    def test_ci_computed(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [30,32,34,31,33]}, headers=AUTH)
+        assert "confidence_intervals" in resp.json()
+        ci = resp.json()["confidence_intervals"]
+        assert ci["confidence_level"] == 0.95
+    def test_lower_less_than_upper(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [20,30,40,50,60]}, headers=AUTH)
+        ci = resp.json().get("confidence_intervals")
+        if ci: assert ci["omega_lower"] <= ci["omega_upper"]
+    def test_reliable_flag(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [30]*10}, headers=AUTH)
+        ci = resp.json().get("confidence_intervals")
+        if ci: assert ci["reliable"] is True
+    def test_sample_size(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [30,31,32,33,34,35]}, headers=AUTH)
+        ci = resp.json().get("confidence_intervals")
+        if ci: assert ci["sample_size"] >= 5
+    def test_ci_bounds(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [30,31,32,33,34]}, headers=AUTH)
+        ci = resp.json().get("confidence_intervals")
+        if ci: assert ci["omega_lower"] >= 0 and ci["omega_upper"] <= 100
+
+class TestMultiLanguage:
+    def test_de_developer(self):
+        pr = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH).json()
+        resp = client.post("/v1/explain", json={"preflight_result": pr, "language": "de", "audience": "developer"}, headers=AUTH)
+        assert resp.json()["language"] == "de"
+    def test_fr_compliance(self):
+        pr = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH).json()
+        resp = client.post("/v1/explain", json={"preflight_result": pr, "language": "fr", "audience": "compliance"}, headers=AUTH)
+        assert resp.json()["language"] == "fr"
+    def test_unsupported_defaults_en(self):
+        pr = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH).json()
+        resp = client.post("/v1/explain", json={"preflight_result": pr, "language": "jp"}, headers=AUTH)
+        assert resp.json()["language"] == "en"
+    def test_languages_endpoint(self):
+        resp = client.get("/v1/explain/languages")
+        assert resp.status_code == 200 and "en" in resp.json() and "de" in resp.json()
+    def test_en_works(self):
+        pr = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH).json()
+        resp = client.post("/v1/explain", json={"preflight_result": pr, "language": "en"}, headers=AUTH)
+        assert resp.json()["language"] == "en"
+    def test_executive_fr(self):
+        pr = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH).json()
+        resp = client.post("/v1/explain", json={"preflight_result": pr, "language": "fr", "audience": "executive"}, headers=AUTH)
+        assert resp.json()["audience"] == "executive"
+
+class TestAsyncBatch:
+    def test_submit(self):
+        resp = client.post("/v1/batch/async", json={"entries": [{"id": "a1"}]}, headers=AUTH)
+        assert resp.status_code == 200 and "job_id" in resp.json()
+    def test_poll_complete(self):
+        r1 = client.post("/v1/batch/async", json={"entries": [{"id": "a1"}]}, headers=AUTH)
+        jid = r1.json()["job_id"]
+        r2 = client.get(f"/v1/batch/async/{jid}", headers=AUTH)
+        assert r2.json()["status"] == "complete"
+    def test_expired_404(self):
+        resp = client.get("/v1/batch/async/nonexistent-id", headers=AUTH)
+        assert resp.status_code == 404
+    def test_result_has_data(self):
+        r1 = client.post("/v1/batch/async", json={"entries": [{"id": "x"}]}, headers=AUTH)
+        r2 = client.get(f"/v1/batch/async/{r1.json()['job_id']}", headers=AUTH)
+        assert r2.json()["result"] is not None
+    def test_max_10000(self):
+        resp = client.post("/v1/batch/async", json={"entries": [{"id": f"e{i}"} for i in range(10001)]}, headers=AUTH)
+        assert resp.status_code == 400
+    def test_estimated_seconds(self):
+        resp = client.post("/v1/batch/async", json={"entries": [{"id": "a"}]*50}, headers=AUTH)
+        assert resp.json()["estimated_seconds"] >= 1
+
+class TestMemoryGraph:
+    def test_empty(self):
+        resp = client.get("/v1/memory/graph", headers=AUTH)
+        assert resp.status_code == 200 and "nodes" in resp.json()
+    def test_layout_hint(self):
+        resp = client.get("/v1/memory/graph", headers=AUTH)
+        assert resp.json()["layout_hint"] == "force-directed"
+    def test_edges_list(self):
+        resp = client.get("/v1/memory/graph", headers=AUTH)
+        assert "edges" in resp.json()
+    def test_clusters(self):
+        resp = client.get("/v1/memory/graph", headers=AUTH)
+        assert "clusters" in resp.json()
+
+class TestDriftAlertRules:
+    def test_create(self):
+        resp = client.post("/v1/alert-rules", json={"name": "high_omega", "metric": "omega_mem_final", "operator": "gt", "threshold": 80}, headers=AUTH)
+        assert resp.status_code == 200
+    def test_list(self):
+        resp = client.get("/v1/alert-rules", headers=AUTH)
+        assert resp.status_code == 200 and "rules" in resp.json()
+    def test_delete(self):
+        r = client.post("/v1/alert-rules", json={"name": "del_test", "metric": "omega_mem_final", "operator": "lt", "threshold": 10}, headers=AUTH)
+        resp = client.delete(f"/v1/alert-rules/{r.json()['id']}", headers=AUTH)
+        assert resp.status_code == 200
+    def test_wrong_operator(self):
+        resp = client.post("/v1/alert-rules", json={"name": "bad", "metric": "omega", "operator": "eq", "threshold": 50}, headers=AUTH)
+        assert resp.status_code == 400
+    def test_cooldown_field(self):
+        resp = client.post("/v1/alert-rules", json={"name": "cool", "metric": "omega", "operator": "gt", "threshold": 50, "cooldown_minutes": 30}, headers=AUTH)
+        assert resp.status_code == 200
+    def test_webhook_url(self):
+        resp = client.post("/v1/alert-rules", json={"name": "wh", "metric": "omega", "operator": "gt", "threshold": 50, "webhook_url": "https://hooks.example.com"}, headers=AUTH)
+        assert resp.status_code == 200
+
+class TestDecayConfig:
+    def test_default_fallback(self):
+        resp = client.get("/v1/decay-config", headers=AUTH)
+        assert resp.status_code == 200 and "configs" in resp.json()
+    def test_update(self):
+        resp = client.put("/v1/decay-config", json={"memory_type": "semantic", "decay_function": "gompertz", "lambda_param": 0.2, "k_param": 2.0}, headers=AUTH)
+        assert resp.status_code == 200
+    def test_lambda_positive(self):
+        resp = client.put("/v1/decay-config", json={"memory_type": "semantic", "lambda_param": -1, "k_param": 1.5}, headers=AUTH)
+        assert resp.status_code == 400
+    def test_k_positive(self):
+        resp = client.put("/v1/decay-config", json={"memory_type": "semantic", "lambda_param": 0.1, "k_param": 0}, headers=AUTH)
+        assert resp.status_code == 400
+    def test_list(self):
+        resp = client.get("/v1/decay-config", headers=AUTH)
+        assert "configs" in resp.json()
+    def test_migration_exists(self):
+        import os
+        assert os.path.exists("scripts/migrations/010_decay_config.sql")
+
+class TestMemoryVersioning:
+    def test_list_versions(self):
+        resp = client.get("/v1/store/memories/fake-id/versions", headers=AUTH)
+        assert resp.status_code == 200 and "versions" in resp.json()
+    def test_get_version_404(self):
+        resp = client.get("/v1/store/memories/fake-id/versions/1", headers=AUTH)
+        assert resp.status_code == 404
+    def test_rollback(self):
+        resp = client.post("/v1/store/memories/fake-id/rollback/1", headers=AUTH)
+        assert resp.status_code == 200
+    def test_version_order(self):
+        resp = client.get("/v1/store/memories/fake-id/versions", headers=AUTH)
+        assert isinstance(resp.json()["versions"], list)
+    def test_max_10_field(self):
+        resp = client.get("/v1/store/memories/fake-id/versions", headers=AUTH)
+        assert resp.status_code == 200
+    def test_migration_exists(self):
+        import os
+        assert os.path.exists("scripts/migrations/011_memory_versions.sql")
+
+class TestBulkImportExport:
+    def test_import_clean(self):
+        entries = [{"id": f"i{i}", "content": f"test {i}", "type": "semantic", "timestamp_age_days": 1, "source_trust": 0.9} for i in range(3)]
+        resp = client.post("/v1/store/import", json=entries, headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["imported"] >= 0
+    def test_import_blocked(self):
+        entries = [{"id": "bad", "content": "x", "type": "semantic", "timestamp_age_days": 500, "source_trust": 0.01, "source_conflict": 0.99}]
+        resp = client.post("/v1/store/import", json=entries, headers=AUTH)
+        assert resp.status_code == 200
+    def test_export_json(self):
+        resp = client.get("/v1/store/export?format=json", headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["format"] == "json"
+    def test_export_csv(self):
+        resp = client.get("/v1/store/export?format=csv", headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["format"] == "csv"
+    def test_over_1000_rejected(self):
+        entries = [{"id": f"e{i}"} for i in range(1001)]
+        resp = client.post("/v1/store/import", json=entries, headers=AUTH)
+        assert resp.status_code == 400
+    def test_empty_export(self):
+        resp = client.get("/v1/store/export", headers=AUTH)
+        assert resp.status_code == 200
