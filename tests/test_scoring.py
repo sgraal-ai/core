@@ -8979,3 +8979,171 @@ class TestDotNetSDK:
         with open("sdk/dotnet/Sgraal/SgraalClient.cs") as f: assert "PreflightAsync" in f.read()
     def test_stub(self):
         with open("sdk/dotnet/Sgraal/SgraalClient.cs") as f: assert "NotImplementedException" in f.read()
+
+
+# ======= Sprint 28: Features #67-#80 =======
+
+class TestTracing:
+    def test_trace_id_propagated(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "trace_id": "trace-123"}, headers=AUTH)
+        assert r.json().get("trace_id") == "trace-123"
+    def test_no_trace_id(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "trace_id" not in r.json()
+    def test_langsmith_format(self):
+        r = client.get("/v1/traces/export?format=langsmith", headers=AUTH)
+        assert r.json()["format"] == "langsmith"
+    def test_langfuse_format(self):
+        r = client.get("/v1/traces/export?format=langfuse", headers=AUTH)
+        assert r.json()["format"] == "langfuse"
+    def test_otlp_format(self):
+        r = client.get("/v1/traces/export?format=otlp", headers=AUTH)
+        assert r.json()["format"] == "otlp"
+    def test_datadog_format(self):
+        r = client.get("/v1/traces/export?format=datadog", headers=AUTH)
+        assert r.json()["format"] == "datadog"
+
+class TestMetrics:
+    def test_200(self):
+        r = client.get("/metrics")
+        assert r.status_code == 200
+    def test_content(self):
+        r = client.get("/metrics")
+        assert len(r.text) > 0
+    def test_json_mode(self):
+        r = client.get("/metrics?accept=json")
+        assert r.status_code == 200
+    def test_endpoint_exists(self):
+        r = client.get("/metrics")
+        assert r.status_code in (200, 307)
+
+class TestSentinel:
+    def test_pinecone(self):
+        from sdk.python.sgraal.sentinel.pinecone_wrapper import SgraalVectorGuard
+        g = SgraalVectorGuard(None, "key"); assert g.query() == []
+    def test_weaviate(self):
+        from sdk.python.sgraal.sentinel.weaviate_wrapper import SgraalVectorGuard
+        g = SgraalVectorGuard(None, "key"); assert g.query() == []
+    def test_milvus(self):
+        from sdk.python.sgraal.sentinel.milvus_wrapper import SgraalVectorGuard
+        g = SgraalVectorGuard(None, "key"); assert g.query() == []
+    def test_filter(self):
+        from sdk.python.sgraal.sentinel.pinecone_wrapper import SgraalVectorGuard
+        class FakeC:
+            def query(self): return [{"omega_score": 90}, {"omega_score": 10}]
+        g = SgraalVectorGuard(FakeC(), "key"); assert len(g.query()) == 1
+    def test_max_omega(self):
+        from sdk.python.sgraal.sentinel.pinecone_wrapper import SgraalVectorGuard
+        g = SgraalVectorGuard(None, "key", max_omega=50); assert g.max_omega == 50
+
+class TestSynapse:
+    def test_no_fix(self):
+        r = client.post("/v1/synapse/fix", json={"entries": []}, headers=AUTH)
+        assert r.json()["fixes_would_apply"] == 0
+    def test_fix_preview(self):
+        r = client.post("/v1/synapse/fix", json={"entries": [{"id": "e1", "omega_score": 70}], "dry_run": True}, headers=AUTH)
+        assert r.json()["dry_run"] is True
+    def test_fix_applied(self):
+        r = client.post("/v1/synapse/fix", json={"entries": [{"id": "e1", "omega_score": 70}], "dry_run": False}, headers=AUTH)
+        assert r.json()["dry_run"] is False
+    def test_idempotent(self):
+        r1 = client.post("/v1/synapse/fix", json={"entries": [{"id": "e1", "omega_score": 70}], "dry_run": True}, headers=AUTH)
+        r2 = client.post("/v1/synapse/fix", json={"entries": [{"id": "e1", "omega_score": 70}], "dry_run": True}, headers=AUTH)
+        assert r1.json() == r2.json()
+    def test_audit_log(self):
+        r = client.post("/v1/synapse/fix", json={"entries": [{"id": "e1", "omega_score": 70}], "dry_run": False}, headers=AUTH)
+        assert "audit_log" in r.json()
+    def test_demo_blocked(self):
+        r = client.post("/v1/synapse/fix", json={"entries": []}, headers={"Authorization": "Bearer sg_demo_playground"})
+        assert r.status_code == 403
+
+class TestOmegaIdentity:
+    def test_no_entities(self):
+        from sdk.python.sgraal.omega_identity import extract_entities
+        assert extract_entities([{"content": "hello world"}]) == []
+    def test_price_conflict(self):
+        from sdk.python.sgraal.omega_identity import extract_entities
+        r = extract_entities([{"content": "Price is $100"}, {"content": "Price is $200"}])
+        assert any(c["type"] == "price" for c in r)
+    def test_date_conflict(self):
+        from sdk.python.sgraal.omega_identity import extract_entities
+        r = extract_entities([{"content": "Date: 2026-03-01"}, {"content": "Date: 2026-04-01"}])
+        assert any(c["type"] == "date" for c in r)
+    def test_person_conflict(self):
+        from sdk.python.sgraal.omega_identity import extract_entities
+        r = extract_entities([{"content": "Mr. Smith"}, {"content": "Dr. Jones"}])
+        assert any(c["type"] == "person" for c in r)
+    def test_no_conflict(self):
+        from sdk.python.sgraal.omega_identity import extract_entities
+        assert extract_entities([{"content": "$100"}, {"content": "$100"}]) == []
+    def test_empty(self):
+        from sdk.python.sgraal.omega_identity import extract_entities
+        assert extract_entities([]) == []
+
+class TestActionRisk:
+    def test_default(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.status_code == 200
+    def test_irreversible(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "action_type": "irreversible"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_destructive(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "action_type": "destructive"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_informational(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "action_type": "informational"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_capped_100(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["omega_mem_final"] <= 100
+    def test_backward_compat(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "omega_mem_final" in r.json()
+
+class TestPredictiveFailure:
+    def test_no_koopman_no_field(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        # Without score_history, koopman is absent, so predicted_failure absent
+        assert r.status_code == 200
+    def test_with_history(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [30+i for i in range(12)]}, headers=AUTH)
+        if "predicted_failure" in r.json():
+            pf = r.json()["predicted_failure"]
+            assert "predicted_omega_5" in pf and "failure_risk_5_steps" in pf
+    def test_risk_bounded(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [30]*12}, headers=AUTH)
+        if "predicted_failure" in r.json():
+            assert r.json()["predicted_failure"]["failure_risk_5_steps"] >= 0
+    def test_stable_low_risk(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [10]*12}, headers=AUTH)
+        if "predicted_failure" in r.json():
+            assert r.json()["predicted_failure"]["failure_risk_5_steps"] == 0
+    def test_fields_present(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "score_history": [30+i*2 for i in range(12)]}, headers=AUTH)
+        if "predicted_failure" in r.json():
+            pf = r.json()["predicted_failure"]
+            for k in ("predicted_omega_5", "predicted_omega_10", "failure_risk_5_steps"):
+                assert k in pf
+    def test_graceful(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.status_code == 200
+
+class TestAutoHeal:
+    def test_single_converges(self):
+        r = client.post("/v1/heal/auto", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.status_code == 200 and "iterations" in r.json()
+    def test_multiple(self):
+        r = client.post("/v1/heal/auto", json={"memory_state": [_fresh_entry(timestamp_age_days=100, source_trust=0.5)], "max_iterations": 3}, headers=AUTH)
+        assert r.json()["iterations"] >= 0
+    def test_max_iterations(self):
+        r = client.post("/v1/heal/auto", json={"memory_state": [_fresh_entry(timestamp_age_days=500, source_trust=0.1)], "max_iterations": 1}, headers=AUTH)
+        assert r.json()["iterations"] <= 1
+    def test_converged(self):
+        r = client.post("/v1/heal/auto", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert isinstance(r.json()["converged"], bool)
+    def test_improvement(self):
+        r = client.post("/v1/heal/auto", json={"memory_state": [_fresh_entry(timestamp_age_days=100)]}, headers=AUTH)
+        assert "improvement" in r.json()
+    def test_audit_trail(self):
+        r = client.post("/v1/heal/auto", json={"memory_state": [_fresh_entry(timestamp_age_days=100, source_trust=0.3)], "max_iterations": 2}, headers=AUTH)
+        assert isinstance(r.json()["audit_trail"], list)

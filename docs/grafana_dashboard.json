@@ -1,0 +1,1 @@
+{"dashboard": {"title": "Sgraal Overview", "panels": [{"title": "Preflight Total", "type": "stat"}, {"title": "Omega Score", "type": "gauge"}, {"title": "Decision Distribution", "type": "piechart"}]}}

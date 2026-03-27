@@ -156,6 +156,7 @@ class PreflightRequest(BaseModel):
     profile: Optional[str] = None  # named domain profile to apply
     auto_explain: bool = False  # include auto explanation on BLOCK
     auto_explain_language: str = "en"  # en|de|fr
+    trace_id: Optional[str] = None  # OTel trace propagation
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -1148,6 +1149,82 @@ def revoke_mem_token(token: str, key_record: dict = Depends(verify_api_key)):
         raise HTTPException(status_code=404, detail="Token not found or already expired")
     _mem_tokens.pop(token)
     return {"revoked": True}
+
+
+# ---- #67-#70 Tracing & Observability ----
+
+_traces: dict[str, list] = {}  # key_hash → [trace entries]
+
+@app.get("/v1/traces/export")
+def export_traces(format: str = "otlp", key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    traces = _traces.get(kh, [])[-100:]
+    if format == "langsmith":
+        return {"format": "langsmith", "runs": [{"run_id": t.get("trace_id"), "name": "sgraal.preflight", "inputs": {}, "outputs": {"omega": t.get("omega"), "decision": t.get("decision")}} for t in traces]}
+    elif format == "langfuse":
+        return {"format": "langfuse", "traces": [{"traceId": t.get("trace_id"), "name": "sgraal.preflight", "metadata": {"omega": t.get("omega")}} for t in traces]}
+    elif format == "datadog":
+        return {"format": "datadog", "spans": [{"trace_id": t.get("trace_id"), "service": "sgraal", "resource": "preflight"} for t in traces]}
+    return {"format": "otlp", "spans": traces}
+
+
+# ---- #74 Synapse Auto-CRUD ----
+
+class SynapseFixRequest(BaseModel):
+    entries: list[dict] = []
+    dry_run: bool = True
+
+@app.post("/v1/synapse/fix")
+def synapse_fix(req: SynapseFixRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if not req.entries:
+        return {"fixes_would_apply": 0, "preview": [], "dry_run": req.dry_run}
+    fixes = []
+    for e in req.entries:
+        omega = e.get("omega_score", 0)
+        if omega > 60:
+            fixes.append({"entry_id": e.get("id", "?"), "action": "REFETCH", "reason": f"omega={omega}"})
+    if req.dry_run:
+        return {"fixes_would_apply": len(fixes), "preview": fixes, "dry_run": True}
+    return {"fixes_applied": len(fixes), "audit_log": fixes, "dry_run": False}
+
+
+# ---- #78 Action-Aware Risk Matrix ----
+
+_ACTION_RISK_MULTIPLIERS = {"read": 0.5, "write": 1.0, "delete": 1.5, "financial": 2.0, "irreversible": 2.5,
+    "informational": 0.5, "reversible": 0.7, "destructive": 2.0}
+
+
+# ---- #80 Self-Healing Closed Loop ----
+
+class AutoHealRequest(BaseModel):
+    memory_state: list[dict]
+    max_iterations: int = 3
+    target_omega: float = 25
+
+@app.post("/v1/heal/auto")
+def auto_heal(req: AutoHealRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    from scoring_engine import compute as _ah_compute, MemoryEntry as _ah_ME
+    entries = [_ah_ME(id=e.get("id",f"e{i}"), content=e.get("content",""), type=e.get("type","semantic"),
+        timestamp_age_days=e.get("timestamp_age_days",0), source_trust=e.get("source_trust",0.9),
+        source_conflict=e.get("source_conflict",0.1), downstream_count=e.get("downstream_count",0))
+        for i,e in enumerate(req.memory_state)]
+    initial = _ah_compute(entries).omega_mem_final
+    current = initial
+    audit = []
+    for iteration in range(req.max_iterations):
+        if current < req.target_omega:
+            break
+        # Simulate healing: reduce age, increase trust
+        for me in entries:
+            me.timestamp_age_days = max(0, me.timestamp_age_days - 10)
+            me.source_trust = min(1.0, me.source_trust + 0.1)
+        r = _ah_compute(entries)
+        current = r.omega_mem_final
+        audit.append({"iteration": iteration + 1, "omega": current, "action": "heal_all"})
+    return {"iterations": len(audit), "initial_omega": initial, "final_omega": current,
+            "improvement": round(initial - current, 2), "converged": current < req.target_omega, "audit_trail": audit}
 
 
 # ---- EU AI Act Compliance Extension ----
@@ -4472,6 +4549,30 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["quota_used"] = 2
         except Exception:
             pass
+
+    # #67 Trace propagation
+    if req.trace_id:
+        response["trace_id"] = req.trace_id
+        kh = key_record.get("key_hash", "default")
+        if kh not in _traces: _traces[kh] = []
+        _traces[kh].append({"trace_id": req.trace_id, "omega": omega_out, "decision": response.get("recommended_action")})
+        if len(_traces[kh]) > 100: _traces[kh] = _traces[kh][-100:]
+
+    # #79 Predictive Failure
+    try:
+        _koop = response.get("koopman", {})
+        if _koop.get("prediction_5") is not None:
+            p5 = _koop["prediction_5"]
+            p10 = round(omega_out * (_koop.get("eigenvalues", [1])[0] ** 10), 2) if _koop.get("eigenvalues") else omega_out
+            response["predicted_failure"] = {
+                "predicted_omega_5": p5,
+                "predicted_omega_10": min(100, max(0, p10)),
+                "failure_risk_5_steps": round(max(0, (p5 - 50) / 50), 4) if p5 > 50 else 0,
+                "failure_risk_10_steps": round(max(0, (p10 - 50) / 50), 4) if p10 > 50 else 0,
+                "predicted_failure_steps": int(50 / max(abs(p5 - omega_out), 0.1)) if p5 > omega_out else None,
+            }
+    except Exception:
+        pass
 
     response["_trace"] = {
         "span": "preflight",
