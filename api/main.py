@@ -1151,6 +1151,43 @@ def revoke_mem_token(token: str, key_record: dict = Depends(verify_api_key)):
     return {"revoked": True}
 
 
+# ---- #105-#115 Content endpoints ----
+@app.get("/v1/content/videos")
+def content_videos():
+    return {"videos": [{"title": "Sgraal in 60s", "url": "https://youtube.com/watch?v=demo1", "duration": "1:00"},
+        {"title": "Memory Governance Deep Dive", "url": "https://youtube.com/watch?v=demo2", "duration": "15:00"},
+        {"title": "LangChain Integration", "url": "https://youtube.com/watch?v=demo3", "duration": "8:00"}]}
+
+@app.get("/v1/content/advocates")
+def content_advocates():
+    return {"program": "Sgraal Developer Advocate", "apply_to": "advocates@sgraal.com",
+            "benefits": ["Early access", "Swag", "Conference sponsorship", "Revenue share"]}
+
+@app.get("/v1/content/certification")
+def content_certification():
+    return {"program": "Sgraal Certified Memory Governance Professional",
+            "curriculum": ["Memory Risk Fundamentals", "Omega_MEM Scoring", "Compliance", "Advanced Patterns"],
+            "status": "waitlist", "badge_url": "/certification/badge.png"}
+
+@app.get("/v1/content/events")
+def content_events():
+    return {"events": [{"name": "Sgraal AMA", "date": "Monthly last Friday", "platform": "Discord"},
+        {"name": "Memory Governance Hackathon", "date": "Q2 2026", "platform": "GitHub"}]}
+
+@app.get("/v1/security/policy")
+def security_policy():
+    return {"policy": "Sgraal Security Policy", "version": "1.0", "disclosure": "security@sgraal.com",
+            "response_time": "72 hours", "scope": ["API", "SDK", "Dashboard", "MCP"],
+            "rewards": "Responsible disclosure acknowledged publicly"}
+
+@app.get("/v1/content/case-studies")
+def content_case_studies():
+    return {"case_studies": [
+        {"id": 1, "industry": "Fintech", "title": "Preventing stale market data", "omega_improvement": "82 to 12"},
+        {"id": 2, "industry": "Healthcare", "title": "HIPAA-compliant memory governance", "omega_improvement": "67 to 15"},
+        {"id": 3, "industry": "Legal", "title": "Current regulation citations", "omega_improvement": "71 to 8"}]}
+
+
 # ---- #84 Memory Compression ----
 class CompressRequest(BaseModel):
     memory_state: list[dict]

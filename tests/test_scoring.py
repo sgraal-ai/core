@@ -9428,3 +9428,70 @@ class TestPartnerBadge:
     def test_format(self):
         r = client.get("/v1/partner/badge/crewai")
         assert r.headers.get("content-type", "").startswith("image/svg")
+
+
+# ======= FINAL Sprint: Features #105-#115 + SEO =======
+
+class TestVideos:
+    def test_endpoint(self):
+        assert client.get("/v1/content/videos").status_code == 200
+    def test_has_videos(self):
+        assert len(client.get("/v1/content/videos").json()["videos"]) >= 3
+
+class TestAdvocate:
+    def test_endpoint(self):
+        assert client.get("/v1/content/advocates").status_code == 200
+    def test_email(self):
+        assert "advocates@sgraal.com" in client.get("/v1/content/advocates").json()["apply_to"]
+
+class TestCertification:
+    def test_endpoint(self):
+        assert client.get("/v1/content/certification").status_code == 200
+    def test_curriculum(self):
+        assert len(client.get("/v1/content/certification").json()["curriculum"]) >= 4
+
+class TestEvents:
+    def test_endpoint(self):
+        assert client.get("/v1/content/events").status_code == 200
+    def test_has_events(self):
+        assert len(client.get("/v1/content/events").json()["events"]) >= 2
+
+class TestSecurityPolicy:
+    def test_endpoint(self):
+        assert client.get("/v1/security/policy").status_code == 200
+    def test_disclosure(self):
+        assert "security@sgraal.com" in client.get("/v1/security/policy").json()["disclosure"]
+
+class TestCaseStudies:
+    def test_endpoint(self):
+        assert client.get("/v1/content/case-studies").status_code == 200
+    def test_three(self):
+        assert len(client.get("/v1/content/case-studies").json()["case_studies"]) == 3
+    def test_fields(self):
+        cs = client.get("/v1/content/case-studies").json()["case_studies"][0]
+        assert all(k in cs for k in ("id", "industry", "title", "omega_improvement"))
+    def test_industries(self):
+        industries = [cs["industry"] for cs in client.get("/v1/content/case-studies").json()["case_studies"]]
+        assert "Fintech" in industries and "Healthcare" in industries
+
+class TestSEO:
+    def test_llms_txt(self):
+        import os; assert os.path.exists("web/public/llms.txt")
+        with open("web/public/llms.txt") as f: assert "POST /v1/preflight" in f.read()
+    def test_sitemap(self):
+        import os; assert os.path.exists("web/app/sitemap.ts")
+        with open("web/app/sitemap.ts") as f: c = f.read()
+        assert "sgraal.com" in c and "playground" in c
+    def test_robots_txt(self):
+        import os; assert os.path.exists("web/public/robots.txt")
+    def test_pages_exist(self):
+        import os
+        for pg in ["videos", "advocate", "certification", "community", "compatibility", "security", "customers"]:
+            assert os.path.exists(f"web/app/{pg}/page.tsx"), f"Missing page: {pg}"
+
+class TestCompatibilityPage:
+    def test_endpoint_reused(self):
+        r = client.get("/v1/compatibility")
+        assert "frameworks" in r.json()
+    def test_page_exists(self):
+        import os; assert os.path.exists("web/app/compatibility/page.tsx")
