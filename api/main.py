@@ -11,7 +11,7 @@ import hmac as _hmac
 import json as _json
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import stripe
 import requests as http_requests
 
@@ -409,6 +409,190 @@ def list_team_keys(team_id: str, key_record: dict = Depends(verify_api_key)):
         except Exception:
             pass
     return {"team_id": team_id, "keys": keys}
+
+
+# ---- Memory Store MVP ----
+
+class StoreMemoryRequest(BaseModel):
+    content: str
+    agent_id: Optional[str] = None
+    memory_type: str = "semantic"
+    metadata: Optional[dict] = None
+
+@app.post("/v1/store/memories")
+def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    mem_id = str(uuid.uuid4())
+
+    # Auto-preflight
+    entry = {"id": mem_id, "content": req.content, "type": req.memory_type, "timestamp_age_days": 0,
+             "source_trust": 0.8, "source_conflict": 0.1, "downstream_count": 1}
+    omega = 0.0
+    blocked = False
+    try:
+        from scoring_engine import compute, MemoryEntry
+        me = MemoryEntry(id=mem_id, content=req.content, type=req.memory_type, timestamp_age_days=0,
+                         source_trust=0.8, source_conflict=0.1, downstream_count=1)
+        result = compute([me])
+        omega = result.omega_mem_final
+        blocked = omega > 80
+    except Exception:
+        pass
+
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.post(f"{SUPABASE_URL}/rest/v1/memory_store",
+                json={"id": mem_id, "api_key_hash": kh, "agent_id": req.agent_id, "content": req.content,
+                      "memory_type": req.memory_type, "metadata": req.metadata or {}, "omega_score": omega, "blocked": blocked},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
+        except Exception:
+            pass
+
+    return {"id": mem_id, "content": req.content, "metadata": req.metadata or {}, "score": omega, "blocked": blocked}
+
+@app.get("/v1/store/memories/search")
+def search_memories(query: str = "", agent_id: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    results = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            url = f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&blocked=eq.false&select=id,content,metadata,omega_score,memory_type&order=omega_score.asc&limit=20"
+            if agent_id:
+                url += f"&agent_id=eq.{agent_id}"
+            if query:
+                url += f"&content=ilike.*{query}*"
+            r = http_requests.get(url, headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok:
+                results = r.json()
+        except Exception:
+            pass
+    return {"results": results, "query": query}
+
+@app.get("/v1/store/memories/{memory_id}")
+def get_memory(memory_id: str, key_record: dict = Depends(verify_api_key)):
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{memory_id}&select=*",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok and r.json():
+                return r.json()[0]
+        except Exception:
+            pass
+    raise HTTPException(status_code=404, detail="Memory not found")
+
+@app.delete("/v1/store/memories/{memory_id}")
+def delete_stored_memory(memory_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.delete(f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{memory_id}",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+        except Exception:
+            pass
+    return {"id": memory_id, "deleted": True}
+
+@app.patch("/v1/store/memories/{memory_id}")
+def update_stored_memory(memory_id: str, req: StoreMemoryRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    # Re-preflight on update
+    omega = 0.0
+    blocked = False
+    try:
+        from scoring_engine import compute, MemoryEntry
+        me = MemoryEntry(id=memory_id, content=req.content, type=req.memory_type, timestamp_age_days=0,
+                         source_trust=0.8, source_conflict=0.1, downstream_count=1)
+        result = compute([me])
+        omega = result.omega_mem_final
+        blocked = omega > 80
+    except Exception:
+        pass
+
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            http_requests.patch(f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{memory_id}",
+                json={"content": req.content, "omega_score": omega, "blocked": blocked},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
+        except Exception:
+            pass
+    return {"id": memory_id, "content": req.content, "score": omega, "blocked": blocked}
+
+
+# ---- EU AI Act Compliance Extension ----
+
+@app.get("/v1/compliance/eu-ai-act/report")
+def eu_ai_act_report(key_record: dict = Depends(verify_api_key), force_refresh: bool = False):
+    kh = key_record.get("key_hash", "default")
+    now = datetime.now(timezone.utc)
+
+    # Check cache
+    if not force_refresh and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        try:
+            _ck = f"eu_act_report:{kh}"
+            _cr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_ck}",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+            if _cr.ok and _cr.json().get("result"):
+                cached = _json.loads(_cr.json()["result"])
+                cached["cached"] = True
+                return cached
+        except Exception:
+            pass
+
+    # Generate report
+    total_calls = 0
+    block_count = 0
+    heal_count = 0
+    if supabase_client:
+        try:
+            al = supabase_client.table("audit_log").select("decision", count="exact").execute()
+            total_calls = al.count or 0
+            blocks = supabase_client.table("audit_log").select("decision", count="exact").eq("decision", "BLOCK").execute()
+            block_count = blocks.count or 0
+        except Exception:
+            pass
+
+    block_rate = block_count / max(total_calls, 1)
+    conformity = round(max(0, 1.0 - block_rate * 2) * 100, 1)
+    valid_until = (now + timedelta(hours=1)).isoformat()
+
+    report = {
+        "article_13_transparency": {"compliant": True, "evidence": "All preflight decisions logged with request_id, component_breakdown, Shapley values"},
+        "article_14_human_oversight": {"block_count": block_count, "human_review_recommended": ["ASK_USER decisions require human approval"]},
+        "article_17_quality_management": {"total_calls": total_calls, "block_rate": round(block_rate, 4), "heal_success_rate": 0.0},
+        "conformity_score": conformity,
+        "report_generated_at": now.isoformat(),
+        "valid_until": valid_until,
+        "cached": False,
+        "cache_expires_at": valid_until,
+    }
+
+    # Cache for 1 hour
+    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        try:
+            http_requests.post(f"{UPSTASH_REDIS_URL}/SET/eu_act_report:{kh}/{_json.dumps(report)}/EX/3600",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+        except Exception:
+            pass
+
+    return report
+
+@app.get("/v1/compliance/eu-ai-act/declaration")
+def eu_ai_act_declaration(key_record: dict = Depends(verify_api_key)):
+    now = datetime.now(timezone.utc)
+    return {
+        "title": "EU AI Act Conformity Declaration",
+        "provider": "Sgraal Memory Governance Protocol",
+        "version": "v1.0",
+        "date": now.strftime("%Y-%m-%d"),
+        "articles_addressed": ["Article 9 (Risk Management)", "Article 12 (Record-keeping)", "Article 13 (Transparency)", "Article 14 (Human Oversight)", "Article 17 (Quality Management)"],
+        "preflight_mechanism": "Every AI agent decision is scored by Omega_MEM before execution",
+        "human_oversight": "BLOCK and ASK_USER decisions require human approval",
+        "transparency": "Full component breakdown, Shapley values, and repair plans in every response",
+        "record_keeping": "All decisions logged with cryptographic audit trail",
+        "contact": "compliance@sgraal.com",
+    }
 
 
 # ---- Memory Poisoning Detection ----

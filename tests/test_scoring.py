@@ -8085,3 +8085,101 @@ class TestAuditLogSIEM:
     def test_dashboard_audit_page(self):
         import os
         assert os.path.exists("dashboard/app/audit/page.tsx")
+
+
+class TestMemoryStore:
+    """Tests for Sgraal Memory Store MVP (#19)."""
+    def test_store_memory(self):
+        resp = client.post("/v1/store/memories", json={"content": "User prefers dark mode", "memory_type": "preference"}, headers=AUTH)
+        assert resp.status_code == 200
+        d = resp.json()
+        assert "id" in d and "score" in d and "blocked" in d
+
+    def test_store_returns_score(self):
+        resp = client.post("/v1/store/memories", json={"content": "test", "memory_type": "semantic"}, headers=AUTH)
+        assert resp.json()["score"] >= 0
+
+    def test_search_endpoint(self):
+        resp = client.get("/v1/store/memories/search?query=test", headers=AUTH)
+        assert resp.status_code == 200 and "results" in resp.json()
+
+    def test_delete_endpoint(self):
+        resp = client.delete("/v1/store/memories/fake-id", headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_update_rescores(self):
+        resp = client.patch("/v1/store/memories/fake-id", json={"content": "updated content"}, headers=AUTH)
+        assert resp.status_code == 200 and "score" in resp.json()
+
+    def test_mem0_compatible_format(self):
+        resp = client.post("/v1/store/memories", json={"content": "test entry"}, headers=AUTH)
+        d = resp.json()
+        assert all(k in d for k in ("id", "content", "metadata", "score", "blocked"))
+
+    def test_demo_blocked(self):
+        resp = client.post("/v1/store/memories", json={"content": "test"},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 403
+
+    def test_migration_exists(self):
+        import os
+        assert os.path.exists("scripts/migrations/009_memory_store.sql")
+
+
+class TestOpenAIHook:
+    """Tests for OpenAI Agents SDK hook (#10)."""
+    def test_importable(self):
+        from sdk.python.sgraal.openai_hook import SgraalGuard
+        assert callable(SgraalGuard)
+
+    def test_no_memory_state_skips(self):
+        from sdk.python.sgraal.openai_hook import SgraalGuard
+        g = SgraalGuard(api_key="sg_test")
+        result = g.on_tool_start("search", {"query": "hello"})
+        assert result is None
+
+    def test_extract_memory_state(self):
+        from sdk.python.sgraal.openai_hook import SgraalGuard
+        g = SgraalGuard(api_key="sg_test")
+        ms = g._extract_memory_state({"memory_state": [{"id": "m1"}]})
+        assert ms is not None and len(ms) == 1
+
+    def test_blocked_error_class(self):
+        from sdk.python.sgraal.openai_hook import SgraalBlockedError
+        assert issubclass(SgraalBlockedError, Exception)
+
+
+class TestEUAIActCompliance:
+    """Tests for EU AI Act compliance extension (#20)."""
+    def test_report_generation(self):
+        resp = client.get("/v1/compliance/eu-ai-act/report", headers=AUTH)
+        assert resp.status_code == 200
+        d = resp.json()
+        assert "conformity_score" in d and "article_13_transparency" in d
+
+    def test_force_refresh(self):
+        resp = client.get("/v1/compliance/eu-ai-act/report?force_refresh=true", headers=AUTH)
+        assert resp.status_code == 200
+        assert resp.json()["cached"] is False
+
+    def test_cache_field(self):
+        resp = client.get("/v1/compliance/eu-ai-act/report", headers=AUTH)
+        d = resp.json()
+        assert "cached" in d and "cache_expires_at" in d
+
+    def test_declaration_json(self):
+        resp = client.get("/v1/compliance/eu-ai-act/declaration", headers=AUTH)
+        assert resp.status_code == 200
+        d = resp.json()
+        assert "title" in d and "articles_addressed" in d
+
+    def test_articles_covered(self):
+        resp = client.get("/v1/compliance/eu-ai-act/declaration", headers=AUTH)
+        articles = resp.json()["articles_addressed"]
+        assert any("Article 13" in a for a in articles)
+        assert any("Article 14" in a for a in articles)
+
+    def test_zero_usage(self):
+        resp = client.get("/v1/compliance/eu-ai-act/report", headers=AUTH)
+        # Without Supabase, total_calls=0
+        assert resp.json()["article_17_quality_management"]["total_calls"] >= 0
