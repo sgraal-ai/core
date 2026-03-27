@@ -95,7 +95,7 @@ export default function PlaygroundPage() {
             <div>
               <p className={`text-2xl font-bold ${actionColor}`}>{action}</p>
               <p className="text-gray-400 text-sm mt-1">{(result as Record<string, unknown>).assurance_score as number}% assurance</p>
-              {result.demo && <span className="text-xs text-[#C9A962] font-mono mt-2 block">DEMO MODE</span>}
+              {Boolean((result as Record<string, unknown>).demo) ? <span className="text-xs text-[#C9A962] font-mono mt-2 block">DEMO MODE</span> : null}
             </div>
           </div>
 
