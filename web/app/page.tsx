@@ -18,12 +18,14 @@ function Hero() {
         Stale memory. Conflicting sources. Silent drift. Sgraal catches it
         before your agent acts — in under 10&nbsp;ms.
       </p>
-      <a
-        href="#signup"
-        className="mt-10 bg-gold text-background font-semibold px-8 py-3 rounded-lg hover:bg-gold-dim transition"
-      >
-        Get Your API Key
-      </a>
+      <div className="mt-10 flex gap-4">
+        <a href="#signup" className="bg-gold text-background font-semibold px-8 py-3 rounded-lg hover:bg-gold-dim transition">
+          Get Your API Key
+        </a>
+        <a href="/playground" className="border border-gold text-gold font-semibold px-8 py-3 rounded-lg hover:bg-gold/10 transition">
+          Try it live →
+        </a>
+      </div>
     </section>
   );
 }

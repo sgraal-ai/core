@@ -1,0 +1,70 @@
+{
+  "info": {
+    "name": "Sgraal API",
+    "description": "Memory governance protocol for AI agents. Preflight scoring engine that evaluates memory reliability.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "BASE_URL", "value": "https://api.sgraal.com"},
+    {"key": "SGRAAL_API_KEY", "value": "sg_live_your_key_here"}
+  ],
+  "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{SGRAAL_API_KEY}}"}]},
+  "item": [
+    {
+      "name": "Preflight (fintech)",
+      "request": {
+        "method": "POST", "url": "{{BASE_URL}}/v1/preflight",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"memory_state\":[{\"id\":\"trade_hist\",\"content\":\"EUR/USD trading history\",\"type\":\"tool_state\",\"timestamp_age_days\":2,\"source_trust\":0.95,\"source_conflict\":0.05,\"downstream_count\":5}],\"domain\":\"fintech\",\"action_type\":\"irreversible\"}"}
+      }
+    },
+    {
+      "name": "Batch Preflight",
+      "request": {
+        "method": "POST", "url": "{{BASE_URL}}/v1/preflight/batch",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"entries\":[{\"id\":\"e1\",\"content\":\"entry 1\",\"type\":\"semantic\",\"timestamp_age_days\":5,\"source_trust\":0.9,\"source_conflict\":0.1,\"downstream_count\":2},{\"id\":\"e2\",\"content\":\"entry 2\",\"type\":\"tool_state\",\"timestamp_age_days\":1,\"source_trust\":0.95,\"source_conflict\":0.05,\"downstream_count\":1}]}"}
+      }
+    },
+    {
+      "name": "Heal",
+      "request": {
+        "method": "POST", "url": "{{BASE_URL}}/v1/heal",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"entry_id\":\"trade_hist\",\"action\":\"REFETCH\"}"}
+      }
+    },
+    {
+      "name": "Explain",
+      "request": {
+        "method": "POST", "url": "{{BASE_URL}}/v1/explain",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"preflight_result\":{\"omega_mem_final\":35,\"recommended_action\":\"WARN\",\"component_breakdown\":{\"s_freshness\":20,\"s_drift\":40}},\"audience\":\"developer\",\"language\":\"en\"}"}
+      }
+    },
+    {
+      "name": "Outcome",
+      "request": {
+        "method": "POST", "url": "{{BASE_URL}}/v1/outcome",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"outcome_id\":\"your-outcome-id\",\"status\":\"success\"}"}
+      }
+    },
+    {
+      "name": "Signup",
+      "request": {
+        "method": "POST", "url": "{{BASE_URL}}/v1/signup",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"email\":\"dev@example.com\"}"}
+      }
+    },
+    {
+      "name": "Health",
+      "request": {"method": "GET", "url": "{{BASE_URL}}/health"}
+    },
+    {
+      "name": "Verify",
+      "request": {"method": "GET", "url": "{{BASE_URL}}/v1/verify"}
+    }
+  ]
+}

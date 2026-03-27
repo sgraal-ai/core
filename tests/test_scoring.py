@@ -7507,3 +7507,81 @@ class TestMem0Bridge:
     def test_on_block_heal_behavior(self):
         """on_block='heal' should attempt repair."""
         assert "heal" in ("raise", "warn", "skip", "heal")
+
+
+class TestPlaygroundDemoKey:
+    """Tests for playground demo API key."""
+
+    def test_demo_key_preflight(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 200
+        assert resp.json().get("demo") is True
+
+    def test_demo_key_explain(self):
+        pr = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]},
+            headers={"Authorization": "Bearer sg_demo_playground"}).json()
+        resp = client.post("/v1/explain", json={"preflight_result": pr},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 200
+
+    def test_demo_key_blocks_heal(self):
+        resp = client.post("/v1/heal", json={"entry_id": "t", "action": "REFETCH"},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 403
+
+    def test_demo_key_blocks_outcome(self):
+        resp = client.post("/v1/outcome", json={"outcome_id": "fake", "status": "success"},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 403
+
+    def test_demo_key_blocks_batch(self):
+        entries = [{"id": "b1", "content": "t", "type": "semantic", "timestamp_age_days": 1,
+            "source_trust": 0.9, "source_conflict": 0.1, "downstream_count": 0}]
+        resp = client.post("/v1/preflight/batch", json={"entries": entries},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 403
+
+    def test_demo_key_blocks_webhooks(self):
+        resp = client.post("/v1/webhooks", json={"url": "https://x.com", "events": ["BLOCK"], "secret": "s"},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 403
+
+
+class TestPostmanEndpoint:
+    """Tests for /docs/postman endpoint."""
+
+    def test_postman_collection_accessible(self):
+        resp = client.get("/docs/postman")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "info" in data
+        assert data["info"]["name"] == "Sgraal API"
+
+    def test_postman_has_items(self):
+        resp = client.get("/docs/postman")
+        data = resp.json()
+        assert len(data["item"]) >= 6
+
+
+class TestDiagnoseCLI:
+    """Tests for sgraal diagnose CLI module."""
+
+    def test_diagnose_module_importable(self):
+        from sdk.python.sgraal.diagnose import run_diagnose
+        assert callable(run_diagnose)
+
+    def test_check_function(self):
+        from sdk.python.sgraal.diagnose import _check
+        result = _check("test_ok", lambda: True)
+        assert result is True
+
+    def test_check_failure(self):
+        from sdk.python.sgraal.diagnose import _check
+        result = _check("test_fail", lambda: False)
+        assert result is False
+
+    def test_check_exception(self):
+        from sdk.python.sgraal.diagnose import _check
+        result = _check("test_err", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        assert result is False

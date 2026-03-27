@@ -82,6 +82,10 @@ def verify_api_key(
     """Validate Bearer token and return the key record with tier/usage info."""
     api_key = credentials.credentials
 
+    # Demo playground key — limited to /v1/preflight and /v1/explain only
+    if api_key == "sg_demo_playground":
+        return {"customer_id": "demo", "tier": "demo", "calls_this_month": 0, "key_hash": "demo", "demo": True}
+
     # Check in-memory store first (test keys skip rate limiting)
     if api_key in API_KEYS:
         return {"customer_id": API_KEYS[api_key], "tier": "free", "calls_this_month": 0, "key_hash": None}
@@ -192,6 +196,17 @@ def root():
 def health():
     return {"status": "ok", "port": os.environ.get("PORT", "not set")}
 
+@app.get("/docs/postman")
+def postman_collection():
+    """Download Postman collection for Sgraal API."""
+    import json as _pjson
+    _postman_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "postman_collection.json")
+    try:
+        with open(_postman_path) as f:
+            return _pjson.load(f)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Postman collection not found")
+
 
 # ---- /v1/explain ----
 
@@ -258,7 +273,7 @@ _TEMPLATES = {
 
 @app.post("/v1/explain")
 def explain(req: ExplainRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record)
+    _check_rate_limit(key_record, allow_demo=True)
     pr = req.preflight_result
     omega = pr.get("omega_mem_final", 0)
     action = pr.get("recommended_action", "USE_MEMORY")
@@ -782,8 +797,10 @@ _HEAL_IMPROVEMENTS = {
 }
 
 
-def _check_rate_limit(key_record: dict):
+def _check_rate_limit(key_record: dict, allow_demo: bool = False):
     """Shared rate limit check for all mutating endpoints."""
+    if key_record.get("demo") and not allow_demo:
+        raise HTTPException(status_code=403, detail="Demo key only allows /v1/preflight and /v1/explain")
     tier = key_record.get("tier", "free")
     calls = key_record.get("calls_this_month", 0)
     limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
@@ -885,6 +902,7 @@ def delete_webhook(webhook_id: str, key_record: dict = Depends(verify_api_key)):
 
 @app.post("/v1/preflight/batch")
 def preflight_batch(req: BatchRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
     if len(req.entries) == 0:
         raise HTTPException(status_code=400, detail="entries cannot be empty")
     if len(req.entries) > 100:
@@ -3039,5 +3057,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "request_id": request_id,
         "duration_ms": round(_duration * 1000, 2),
     }
+
+    if key_record.get("demo"):
+        response["demo"] = True
 
     return response
