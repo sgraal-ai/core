@@ -7585,3 +7585,100 @@ class TestDiagnoseCLI:
         from sdk.python.sgraal.diagnose import _check
         result = _check("test_err", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
         assert result is False
+
+
+class TestMemCubeV2:
+    """Tests for MemCube v2 schema fields."""
+
+    def test_v2_fields_accepted(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [{
+            "id": "v2_test", "content": "test", "type": "semantic", "timestamp_age_days": 5,
+            "source_trust": 0.9, "source_conflict": 0.1, "downstream_count": 1,
+            "memory_type_v2": "procedural", "ttl_seconds": 3600, "tags": ["test"],
+            "importance": 0.8, "verified_at": "2026-03-25T14:30:00Z",
+        }]}, headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_ttl_seconds_caps_age(self):
+        # ttl=86400 (1 day) with age=100 days → effective age capped to 1 day
+        resp = client.post("/v1/preflight", json={"memory_state": [{
+            "id": "ttl_test", "content": "test", "type": "tool_state", "timestamp_age_days": 100,
+            "source_trust": 0.9, "source_conflict": 0.1, "downstream_count": 1, "ttl_seconds": 86400,
+        }]}, headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_v1_backward_compat(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_embedding_field(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [{
+            "id": "emb", "content": "test", "type": "semantic", "timestamp_age_days": 1,
+            "source_trust": 0.9, "source_conflict": 0.1, "downstream_count": 0,
+            "embedding": [0.1, 0.2, 0.3, 0.4],
+        }]}, headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_tags_field(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [{
+            "id": "tags_test", "content": "test", "type": "semantic", "timestamp_age_days": 1,
+            "source_trust": 0.9, "downstream_count": 0, "tags": ["priority", "customer"],
+        }]}, headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_importance_field(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [{
+            "id": "imp", "content": "test", "type": "policy", "timestamp_age_days": 1,
+            "source_trust": 0.9, "downstream_count": 0, "importance": 0.95,
+        }]}, headers=AUTH)
+        assert resp.status_code == 200
+
+
+class TestCLI:
+    """Tests for sgraal CLI command suite."""
+
+    def test_cli_importable(self):
+        from sdk.python.sgraal.cli import main
+        assert callable(main)
+
+    def test_load_config_missing(self):
+        from sdk.python.sgraal.cli import _load_config
+        # Should not crash even if config doesn't exist
+        result = _load_config()
+        assert isinstance(result, dict)
+
+    def test_color_disabled(self):
+        from sdk.python.sgraal.cli import _color
+        g, y, r, b, x = _color(False)
+        assert g == "" and x == ""
+
+    def test_color_enabled(self):
+        from sdk.python.sgraal.cli import _color
+        g, y, r, b, x = _color(True)
+        assert len(g) > 0 and len(x) > 0
+
+
+class TestSgraalAutoJS:
+    """Tests for sgraal.auto.js browser embed."""
+
+    def test_file_exists(self):
+        import os
+        assert os.path.exists("web/public/sgraal.auto.js")
+
+    def test_v1_pinned_exists(self):
+        import os
+        assert os.path.exists("web/public/sgraal.auto.v1.js")
+
+    def test_contains_validate_key(self):
+        with open("web/public/sgraal.auto.js") as f:
+            content = f.read()
+        assert "validateKey" in content
+        assert "sg_live_" in content
+
+    def test_contains_window_sgraal(self):
+        with open("web/public/sgraal.auto.js") as f:
+            content = f.read()
+        assert "window.sgraal" in content
+        assert "preflight" in content
+        assert "guard" in content
+        assert "configure" in content

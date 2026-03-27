@@ -152,6 +152,69 @@ Common values: ISO country codes (`HU`, `US`, `DE`), regions (`EU`, `US-CA`), or
 
 ---
 
+## v2 Optional Fields
+
+These fields were added in MemCube v2. All are backward compatible — v1 entries work without them.
+
+### `embedding` (array of floats)
+
+Pre-computed vector embedding of the memory content. Used by spectral analysis, RMT, and consolidation modules instead of hash-based pseudo-embeddings.
+
+```json
+"embedding": [0.12, -0.45, 0.78, ...]
+```
+
+### `memory_type_v2` (enum)
+
+Extended memory type taxonomy based on cognitive science memory models.
+
+| Type | Description |
+|------|-------------|
+| `episodic` | Events and experiences |
+| `semantic` | Facts and general knowledge |
+| `procedural` | How to do things (skills) |
+| `working` | Active, short-term context |
+| `autobiographical` | Personal history |
+| `prospective` | Future intentions and plans |
+
+```json
+"memory_type_v2": "procedural"
+```
+
+### `ttl_seconds` (integer)
+
+Time-to-live override. When set, overrides Weibull decay model — the entry's effective age is capped at `ttl_seconds / 86400` days.
+
+```json
+"ttl_seconds": 3600
+```
+
+### `verified_at` (string, ISO 8601)
+
+Timestamp of last human verification. Entries with recent verification score lower provenance risk.
+
+```json
+"verified_at": "2026-03-25T14:30:00Z"
+```
+
+### `tags` (array of strings)
+
+Freeform tags for filtering and grouping. Distinct from `context_tags` — these are user-defined labels.
+
+```json
+"tags": ["high-priority", "customer-facing"]
+```
+
+### `importance` (number, 0.0–1.0)
+
+User-declared importance score. Feeds into importance_detector as an override signal.
+
+```json
+"importance": 0.85
+```
+
+---
+
 ## Full Example
 
 ```json

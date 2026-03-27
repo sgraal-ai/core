@@ -104,9 +104,29 @@ function InTheWild() {
 }
 
 function Quickstart() {
-  const [active, setActive] = useState<"curl" | "python" | "node">("curl");
+  const [active, setActive] = useState<"curl" | "python" | "node" | "cdn">("curl");
 
-  const examples = {
+  const examples: Record<string, string> = {
+    cdn: `<!-- Zero-config embed — add to any HTML page -->
+<script src="https://sgraal.com/sgraal.auto.js"
+        data-api-key="sg_live_..."></script>
+
+<script>
+  // Preflight before using agent memory
+  const result = await sgraal.preflight([
+    { id: "mem_001", content: "User prefers dark mode",
+      type: "preference", timestamp_age_days: 5,
+      source_trust: 0.9, source_conflict: 0.1,
+      downstream_count: 2 }
+  ]);
+  console.log(result.recommended_action);
+
+  // Guard: wraps any function with preflight
+  await sgraal.guard(
+    (r) => agent.execute(r),
+    memoryState, { domain: "fintech" }
+  );
+</script>`,
     curl: `curl -X POST https://api.sgraal.com/v1/preflight \\
   -H "Authorization: Bearer sg_live_..." \\
   -H "Content-Type: application/json" \\
@@ -169,12 +189,14 @@ const result = await guard({
     { key: "curl" as const, label: "REST API" },
     { key: "python" as const, label: "Python" },
     { key: "node" as const, label: "Node.js" },
+    { key: "cdn" as const, label: "CDN / JS" },
   ];
 
-  const installs = {
+  const installs: Record<string, string> = {
     curl: "No SDK needed — works with any language",
     python: "pip install sgraal",
     node: "npm install @sgraal/mcp",
+    cdn: '<script src="https://sgraal.com/sgraal.auto.js">',
   };
 
   return (

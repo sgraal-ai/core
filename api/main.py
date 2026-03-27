@@ -119,6 +119,13 @@ class MemoryEntryRequest(BaseModel):
     source: Optional[str] = None
     has_backup_source: bool = True
     action_context: str = "reversible"
+    # MemCube v2 optional fields (backward compatible)
+    embedding: Optional[list[float]] = None
+    memory_type_v2: Optional[str] = None  # episodic|semantic|procedural|working|autobiographical|prospective
+    ttl_seconds: Optional[int] = None     # overrides Weibull decay if provided
+    verified_at: Optional[str] = None     # ISO timestamp of last human verification
+    tags: Optional[list[str]] = None
+    importance: Optional[float] = None    # 0-1
 
 class StepRequest(BaseModel):
     step_id: str
@@ -1206,7 +1213,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     entries = [MemoryEntry(
         id=e.id, content=e.content, type=e.type,
-        timestamp_age_days=e.timestamp_age_days,
+        timestamp_age_days=e.timestamp_age_days if e.ttl_seconds is None else min(e.timestamp_age_days, e.ttl_seconds / 86400),
         source_trust=e.source_trust,
         source_conflict=e.source_conflict if e.source_conflict is not None else auto_conflict,
         downstream_count=e.downstream_count,
