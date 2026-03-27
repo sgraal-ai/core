@@ -411,6 +411,156 @@ def list_team_keys(team_id: str, key_record: dict = Depends(verify_api_key)):
     return {"team_id": team_id, "keys": keys}
 
 
+# ---- Memory Poisoning Detection ----
+
+def _detect_poisoning(entries, component_breakdown: dict, key_hash: str) -> Optional[dict]:
+    """Detect memory poisoning signals. Returns analysis or None."""
+    try:
+        signals = []
+        # Statistical outlier: any component > 80 (simple heuristic without baseline DB)
+        for k, v in component_breakdown.items():
+            if v > 80:
+                signals.append(f"outlier:{k}={v:.0f}")
+
+        # Source injection: low trust + high downstream
+        for e in entries:
+            if e.source_trust < 0.3 and e.downstream_count > 10:
+                signals.append(f"injection_suspected:{e.id}")
+
+        if not signals:
+            return None
+
+        confidence = min(1.0, len(signals) * 0.3)
+        ts = datetime.now(timezone.utc).isoformat()
+        fid = hashlib.sha256(f"{key_hash}:{','.join(s for s in signals[:3])}:{ts[:13]}".encode()).hexdigest()[:16]
+
+        return {
+            "poisoning_suspected": True,
+            "confidence": round(confidence, 2),
+            "signals": signals[:5],
+            "forensics_id": fid,
+        }
+    except Exception:
+        return None
+
+
+# ---- Cross-Agent Check ----
+
+class CrossAgentRequest(BaseModel):
+    agents: list[dict]
+
+@app.post("/v1/cross-agent-check")
+def cross_agent_check(req: CrossAgentRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if not req.agents:
+        raise HTTPException(status_code=400, detail="agents list cannot be empty")
+    if len(req.agents) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 agents per call")
+    if len(req.agents) < 2:
+        return {"conflict_detected": False, "conflict_score": 0, "conflict_graph": [], "arbitration": None, "cross_agent_action": "USE_MEMORY"}
+
+    import math as _cmath
+    def _cos(a, b):
+        dot = sum(x*y for x,y in zip(a,b))
+        na = _cmath.sqrt(sum(x*x for x in a))
+        nb = _cmath.sqrt(sum(x*x for x in b))
+        return dot/(na*nb) if na>0 and nb>0 else 0
+
+    conflicts = []
+    for i in range(len(req.agents)):
+        for j in range(i+1, len(req.agents)):
+            ai, aj = req.agents[i], req.agents[j]
+            ms_i = ai.get("memory_state", [])
+            ms_j = aj.get("memory_state", [])
+            for ei in ms_i:
+                for ej in ms_j:
+                    vi = [ei.get("source_trust",0.5), ei.get("timestamp_age_days",0)/100, ei.get("source_conflict",0.1)]
+                    vj = [ej.get("source_trust",0.5), ej.get("timestamp_age_days",0)/100, ej.get("source_conflict",0.1)]
+                    sim = _cos(vi, vj)
+                    trust_diff = abs(ei.get("source_trust",0.5) - ej.get("source_trust",0.5))
+                    if sim > 0.8 and trust_diff > 0.3:
+                        sev = "high" if trust_diff > 0.5 else "medium"
+                        conflicts.append({"agent_a": ai.get("agent_id","?"), "agent_b": aj.get("agent_id","?"),
+                            "conflicting_entries": [ei.get("id","?"), ej.get("id","?")], "severity": sev})
+
+    conflict_score = min(1.0, len(conflicts) * 0.3) if conflicts else 0.0
+    action = "BLOCK" if conflict_score > 0.7 else "WARN" if conflict_score > 0.3 else "USE_MEMORY"
+
+    arb = None
+    if conflicts:
+        # Recommend agent with higher average trust
+        trust_sums = {}
+        for a in req.agents:
+            aid = a.get("agent_id", "?")
+            ms = a.get("memory_state", [])
+            trust_sums[aid] = sum(e.get("source_trust", 0.5) for e in ms) / max(len(ms), 1)
+        best = max(trust_sums, key=trust_sums.get)
+        arb = {"recommended_agent": best, "reason": f"Highest average source_trust ({trust_sums[best]:.2f})"}
+
+    return {"conflict_detected": len(conflicts) > 0, "conflict_score": round(conflict_score, 2),
+            "conflict_graph": conflicts, "arbitration": arb, "cross_agent_action": action}
+
+
+# ---- Audit Log + SIEM Export ----
+
+@app.get("/v1/audit-log")
+def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, decision: Optional[str] = None):
+    if key_record.get("demo"):
+        raise HTTPException(status_code=403, detail="Demo key cannot access audit logs")
+    entries = []
+    if supabase_client:
+        try:
+            q = supabase_client.table("audit_log").select("*").order("created_at", desc=True).limit(limit)
+            if decision:
+                q = q.eq("decision", decision)
+            entries = q.execute().data or []
+        except Exception:
+            pass
+    return {"entries": entries, "count": len(entries)}
+
+@app.get("/v1/audit-log/export")
+def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_api_key), limit: int = 100):
+    if key_record.get("demo"):
+        raise HTTPException(status_code=403, detail="Demo key cannot export audit logs")
+    entries = []
+    if supabase_client:
+        try:
+            entries = supabase_client.table("audit_log").select("*").order("created_at", desc=True).limit(limit).execute().data or []
+        except Exception:
+            pass
+
+    if format == "splunk":
+        lines = [f'{e.get("created_at","")} decision={e.get("decision","")} omega={e.get("omega_score","")} key={e.get("api_key_id","")}' for e in entries]
+        return {"format": "splunk", "data": lines}
+    elif format == "datadog":
+        events = [{"timestamp": e.get("created_at"), "tags": [f"decision:{e.get('decision','')}", f"omega:{e.get('omega_score','')}"],
+                   "message": f"Sgraal preflight: {e.get('decision','')} omega={e.get('omega_score','')}"} for e in entries]
+        return {"format": "datadog", "events": events}
+    elif format == "elastic":
+        docs = [{"_index": "sgraal-audit", "_source": e} for e in entries]
+        return {"format": "elastic", "documents": docs}
+    return {"format": format, "data": entries}
+
+@app.get("/v1/audit-log/verify")
+def verify_audit_integrity(key_record: dict = Depends(verify_api_key)):
+    """Verify cryptographic integrity of audit log entries."""
+    if key_record.get("demo"):
+        raise HTTPException(status_code=403, detail="Demo key cannot verify audit logs")
+    tampered = 0
+    total = 0
+    if supabase_client:
+        try:
+            entries = supabase_client.table("audit_log").select("*").limit(200).execute().data or []
+            total = len(entries)
+            for e in entries:
+                expected = hashlib.sha256(f"{e.get('created_at','')}{e.get('api_key_id','')}{e.get('decision','')}{e.get('omega_score','')}".encode()).hexdigest()[:16]
+                if e.get("integrity_hash") and e["integrity_hash"] != expected:
+                    tampered += 1
+        except Exception:
+            pass
+    return {"valid": tampered == 0, "tampered_count": tampered, "total_checked": total}
+
+
 # ---- Aging Rules ----
 
 class AgingRuleRequest(BaseModel):
@@ -3449,6 +3599,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Metrics + tracing
     _duration = _time.monotonic() - _t_start
     _metrics.record_preflight(result.recommended_action, omega_out, _duration)
+    # Memory Poisoning Detection
+    try:
+        poison = _detect_poisoning(entries, result.component_breakdown, key_record.get("key_hash", "default"))
+        if poison:
+            response["poisoning_analysis"] = poison
+            # Emit webhook
+            _dispatch_webhooks("POISONING_SUSPECTED", request_id, omega_out, [e.id for e in entries])
+    except Exception:
+        pass
+
     # Aging rules (graceful — never crashes preflight)
     try:
         aging = _apply_aging_rules(entries, key_record.get("key_hash", "default"))

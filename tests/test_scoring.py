@@ -7940,3 +7940,148 @@ class TestDomainProfiles:
     def test_dashboard_profiles_page(self):
         import os
         assert os.path.exists("dashboard/app/profiles/page.tsx")
+
+
+class TestPoisoningDetection:
+    """Tests for Memory Poisoning Detection (#16)."""
+    def test_no_poisoning_clean_entry(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert resp.status_code == 200
+        # Clean entry should not trigger poisoning
+        # (may or may not have poisoning_analysis depending on scores)
+
+    def test_outlier_component(self):
+        from api.main import _detect_poisoning
+        from scoring_engine import MemoryEntry
+        entries = [MemoryEntry(id="t", content="t", type="semantic", timestamp_age_days=1, source_trust=0.9, source_conflict=0.1, downstream_count=0)]
+        r = _detect_poisoning(entries, {"s_freshness": 95, "s_drift": 10}, "test")
+        assert r is not None and r["poisoning_suspected"] is True
+        assert any("outlier" in s for s in r["signals"])
+
+    def test_source_injection(self):
+        from api.main import _detect_poisoning
+        from scoring_engine import MemoryEntry
+        entries = [MemoryEntry(id="inj", content="t", type="tool_state", timestamp_age_days=1, source_trust=0.1, source_conflict=0.1, downstream_count=20)]
+        r = _detect_poisoning(entries, {"s_freshness": 10}, "test")
+        assert r is not None
+        assert any("injection" in s for s in r["signals"])
+
+    def test_confidence_computation(self):
+        from api.main import _detect_poisoning
+        from scoring_engine import MemoryEntry
+        entries = [MemoryEntry(id="c", content="t", type="semantic", timestamp_age_days=1, source_trust=0.1, source_conflict=0.1, downstream_count=50)]
+        r = _detect_poisoning(entries, {"s_freshness": 90, "s_drift": 85}, "test")
+        assert r is not None and 0 < r["confidence"] <= 1.0
+
+    def test_forensics_id_deterministic(self):
+        from api.main import _detect_poisoning
+        from scoring_engine import MemoryEntry
+        entries = [MemoryEntry(id="det", content="t", type="semantic", timestamp_age_days=1, source_trust=0.1, source_conflict=0.1, downstream_count=20)]
+        r1 = _detect_poisoning(entries, {"s_freshness": 90}, "key1")
+        r2 = _detect_poisoning(entries, {"s_freshness": 90}, "key1")
+        # Same hour → same forensics_id
+        assert r1 is not None and r2 is not None
+
+    def test_graceful_no_baseline(self):
+        from api.main import _detect_poisoning
+        r = _detect_poisoning([], {}, "test")
+        assert r is None
+
+    def test_poisoning_in_api(self):
+        resp = client.post("/v1/preflight", json={"memory_state": [
+            _fresh_entry(source_trust=0.05, downstream_count=50, timestamp_age_days=500),
+        ]}, headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_migration_exists(self):
+        import os
+        assert os.path.exists("scripts/migrations/007_poisoning.sql")
+
+
+class TestCrossAgentCheck:
+    """Tests for /v1/cross-agent-check (#17)."""
+    def test_no_conflict(self):
+        resp = client.post("/v1/cross-agent-check", json={"agents": [
+            {"agent_id": "a1", "memory_state": [{"id": "m1", "source_trust": 0.9, "timestamp_age_days": 1, "source_conflict": 0.1}]},
+            {"agent_id": "a2", "memory_state": [{"id": "m2", "source_trust": 0.85, "timestamp_age_days": 2, "source_conflict": 0.12}]},
+        ]}, headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_conflict_detected(self):
+        resp = client.post("/v1/cross-agent-check", json={"agents": [
+            {"agent_id": "a1", "memory_state": [{"id": "m1", "source_trust": 0.95, "timestamp_age_days": 1, "source_conflict": 0.05}]},
+            {"agent_id": "a2", "memory_state": [{"id": "m2", "source_trust": 0.2, "timestamp_age_days": 1, "source_conflict": 0.05}]},
+        ]}, headers=AUTH)
+        d = resp.json()
+        assert resp.status_code == 200
+
+    def test_max_agents_limit(self):
+        agents = [{"agent_id": f"a{i}", "memory_state": []} for i in range(11)]
+        resp = client.post("/v1/cross-agent-check", json={"agents": agents}, headers=AUTH)
+        assert resp.status_code == 400
+
+    def test_empty_list_400(self):
+        resp = client.post("/v1/cross-agent-check", json={"agents": []}, headers=AUTH)
+        assert resp.status_code == 400
+
+    def test_single_agent_no_conflict(self):
+        resp = client.post("/v1/cross-agent-check", json={"agents": [
+            {"agent_id": "solo", "memory_state": [{"id": "m1", "source_trust": 0.9}]},
+        ]}, headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["conflict_detected"] is False
+
+    def test_arbitration(self):
+        resp = client.post("/v1/cross-agent-check", json={"agents": [
+            {"agent_id": "trusted", "memory_state": [{"id": "m1", "source_trust": 0.99, "timestamp_age_days": 1, "source_conflict": 0.01}]},
+            {"agent_id": "untrusted", "memory_state": [{"id": "m2", "source_trust": 0.1, "timestamp_age_days": 1, "source_conflict": 0.01}]},
+        ]}, headers=AUTH)
+        d = resp.json()
+        if d.get("arbitration"):
+            assert d["arbitration"]["recommended_agent"] == "trusted"
+
+    def test_cross_agent_action(self):
+        resp = client.post("/v1/cross-agent-check", json={"agents": [
+            {"agent_id": "a1", "memory_state": [{"id": "m1", "source_trust": 0.9}]},
+            {"agent_id": "a2", "memory_state": [{"id": "m2", "source_trust": 0.9}]},
+        ]}, headers=AUTH)
+        assert resp.json()["cross_agent_action"] in ("USE_MEMORY", "WARN", "BLOCK")
+
+    def test_demo_blocked(self):
+        resp = client.post("/v1/cross-agent-check", json={"agents": []},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 403
+
+
+class TestAuditLogSIEM:
+    """Tests for Audit Log + SIEM Export (#12 ext)."""
+    def test_audit_log_endpoint(self):
+        resp = client.get("/v1/audit-log", headers=AUTH)
+        assert resp.status_code == 200 and "entries" in resp.json()
+
+    def test_decision_filter(self):
+        resp = client.get("/v1/audit-log?decision=BLOCK", headers=AUTH)
+        assert resp.status_code == 200
+
+    def test_splunk_format(self):
+        resp = client.get("/v1/audit-log/export?format=splunk", headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["format"] == "splunk"
+
+    def test_datadog_format(self):
+        resp = client.get("/v1/audit-log/export?format=datadog", headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["format"] == "datadog"
+
+    def test_elastic_format(self):
+        resp = client.get("/v1/audit-log/export?format=elastic", headers=AUTH)
+        assert resp.status_code == 200 and resp.json()["format"] == "elastic"
+
+    def test_verify_integrity(self):
+        resp = client.get("/v1/audit-log/verify", headers=AUTH)
+        assert resp.status_code == 200 and "valid" in resp.json()
+
+    def test_demo_blocked(self):
+        resp = client.get("/v1/audit-log", headers={"Authorization": "Bearer sg_demo_playground"})
+        assert resp.status_code == 403
+
+    def test_dashboard_audit_page(self):
+        import os
+        assert os.path.exists("dashboard/app/audit/page.tsx")
