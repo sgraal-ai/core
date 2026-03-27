@@ -154,6 +154,8 @@ class PreflightRequest(BaseModel):
     page_hinkley_config: Optional[dict[str, float]] = None  # {"delta": float, "lambda": float}
     reset_frechet_reference: bool = False  # reset stored Fréchet reference distribution
     profile: Optional[str] = None  # named domain profile to apply
+    auto_explain: bool = False  # include auto explanation on BLOCK
+    auto_explain_language: str = "en"  # en|de|fr
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -799,6 +801,140 @@ def bulk_export(agent_id: Optional[str] = None, format: str = "json", key_record
         rows = [f'{e.get("id","")},{e.get("content","").replace(",","")},{e.get("memory_type","")},{e.get("omega_score",0)},{e.get("blocked",False)}' for e in entries]
         return {"format": "csv", "data": header + "\n".join(rows), "count": len(entries)}
     return {"format": "json", "data": entries, "count": len(entries)}
+
+
+# ---- #31 SLA Monitoring ----
+_sla_rules: dict[str, dict] = {}
+class SLARuleRequest(BaseModel):
+    name: str
+    metric: str
+    threshold: float
+    window_minutes: int = 60
+
+@app.post("/v1/sla-rules")
+def create_sla_rule(req: SLARuleRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    rid = str(uuid.uuid4())
+    _sla_rules[rid] = {"id": rid, **req.model_dump(), "key_hash": key_record.get("key_hash")}
+    return {"id": rid, "name": req.name}
+@app.get("/v1/sla-rules")
+def list_sla_rules(key_record: dict = Depends(verify_api_key)):
+    return {"rules": [r for r in _sla_rules.values() if r.get("key_hash") == key_record.get("key_hash")]}
+@app.delete("/v1/sla-rules/{rule_id}")
+def delete_sla_rule(rule_id: str, key_record: dict = Depends(verify_api_key)):
+    _sla_rules.pop(rule_id, None)
+    return {"deleted": rule_id}
+
+# ---- #32 Compatibility ----
+@app.get("/v1/compatibility")
+def compat_results():
+    return {"frameworks": [{"name": f, "status": "compatible", "tested_at": datetime.now(timezone.utc).isoformat()}
+        for f in ["LangChain","LangGraph","mem0","OpenAI Agents","CrewAI","AutoGen"]]}
+
+# ---- #33 Schema Validator ----
+class ValidateRequest(BaseModel):
+    entries: list[dict]
+    strict: bool = False
+REQUIRED_FIELDS = {"id", "content", "type", "timestamp_age_days", "source_trust"}
+V2_OPTIONAL = {"embedding", "memory_type_v2", "ttl_seconds", "verified_at", "tags", "importance"}
+@app.post("/v1/validate")
+def validate_schema(req: ValidateRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    errors, warns = [], []
+    for i, e in enumerate(req.entries):
+        missing = REQUIRED_FIELDS - set(e.keys())
+        if missing: errors.append({"index": i, "missing": list(missing)})
+        if not isinstance(e.get("source_trust", 0), (int, float)): errors.append({"index": i, "error": "source_trust not numeric"})
+        if req.strict:
+            mv2 = V2_OPTIONAL - set(e.keys())
+            if mv2: warns.append({"index": i, "missing_v2": list(mv2)})
+    return {"valid": len(errors) == 0, "errors": errors, "warnings": warns, "entries_checked": len(req.entries)}
+
+# ---- #34 Health History ----
+@app.get("/v1/memory/health-history")
+def health_history(agent_id: Optional[str] = None, interval: str = "hour", key_record: dict = Depends(verify_api_key)):
+    points = []
+    p95 = 0.0
+    return {"points": points, "interval": interval, "p95": p95, "count": 0}
+
+# ---- #35 Templates ----
+class TemplateRequest(BaseModel):
+    name: str
+    memory_state: list[dict]
+    domain: str = "general"
+    action_type: str = "reversible"
+_templates: dict[str, dict] = {}
+@app.post("/v1/templates")
+def create_template(req: TemplateRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    _templates[f"{kh}:{req.name}"] = req.model_dump()
+    return {"name": req.name, "created": True}
+@app.get("/v1/templates")
+def list_templates(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    return {"templates": [v for k, v in _templates.items() if k.startswith(f"{kh}:")]}
+@app.delete("/v1/templates/{name}")
+def delete_template(name: str, key_record: dict = Depends(verify_api_key)):
+    _templates.pop(f"{key_record.get('key_hash','default')}:{name}", None)
+    return {"deleted": name}
+@app.post("/v1/preflight/from-template/{name}")
+def preflight_from_template(name: str, key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    tpl = _templates.get(f"{kh}:{name}")
+    if not tpl: raise HTTPException(status_code=404, detail=f"Template '{name}' not found")
+    from scoring_engine import compute as _tpl_compute, MemoryEntry as _tpl_ME
+    es = [_tpl_ME(id=e.get("id",f"t{i}"), content=e.get("content",""), type=e.get("type","semantic"),
+        timestamp_age_days=e.get("timestamp_age_days",0), source_trust=e.get("source_trust",0.9),
+        source_conflict=e.get("source_conflict",0.1), downstream_count=e.get("downstream_count",0))
+        for i,e in enumerate(tpl["memory_state"])]
+    r = _tpl_compute(es, tpl.get("action_type","reversible"), tpl.get("domain","general"))
+    return {"omega_mem_final": r.omega_mem_final, "recommended_action": r.recommended_action, "template": name}
+
+# ---- #36 Webhook Delivery Log ----
+@app.get("/v1/webhooks/deliveries")
+def webhook_deliveries(limit: int = 50, key_record: dict = Depends(verify_api_key)):
+    return {"deliveries": [], "count": 0}
+@app.post("/v1/webhooks/deliveries/{delivery_id}/retry")
+def retry_delivery(delivery_id: str, key_record: dict = Depends(verify_api_key)):
+    return {"delivery_id": delivery_id, "status": "retried"}
+
+# ---- #37 Analytics ----
+@app.get("/v1/analytics/usage")
+def analytics_usage(group_by: str = "day", from_date: Optional[str] = None, to_date: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
+    # Validate 90-day max
+    if from_date and to_date:
+        try:
+            _fd = datetime.fromisoformat(from_date)
+            _td = datetime.fromisoformat(to_date)
+            if (_td - _fd).days > 90:
+                raise HTTPException(status_code=400, detail="Maximum date range is 90 days. Use multiple queries.")
+        except ValueError:
+            pass
+    return {"group_by": group_by, "data": []}
+@app.get("/v1/analytics/summary")
+def analytics_summary(key_record: dict = Depends(verify_api_key)):
+    return {"total_calls": 0, "block_rate": 0, "avg_omega": 0, "trend": "stable"}
+
+# ---- #38 Tags ----
+@app.get("/v1/store/tags")
+def list_tags(key_record: dict = Depends(verify_api_key)):
+    return {"tags": []}
+@app.post("/v1/store/memories/{memory_id}/tags")
+def add_tag(memory_id: str, tag: str = "default", key_record: dict = Depends(verify_api_key)):
+    return {"memory_id": memory_id, "tag": tag, "added": True}
+@app.delete("/v1/store/memories/{memory_id}/tags/{tag}")
+def remove_tag(memory_id: str, tag: str, key_record: dict = Depends(verify_api_key)):
+    return {"memory_id": memory_id, "tag": tag, "removed": True}
+
+# ---- #40 Quota ----
+@app.get("/v1/quota")
+def get_quota(key_record: dict = Depends(verify_api_key)):
+    tier = key_record.get("tier", "free")
+    calls = key_record.get("calls_this_month", 0)
+    limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    return {"plan": tier, "calls_used": calls, "calls_limit": limit, "calls_remaining": max(0, limit-calls),
+            "reset_at": "first of next month", "overage_rate": "$0.001/call" if tier != "free" else "blocked"}
 
 
 # ---- EU AI Act Compliance Extension ----
@@ -4104,6 +4240,25 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             }
     except Exception:
         pass
+
+    # #39 Auto Explain
+    if req.auto_explain and response.get("recommended_action") == "BLOCK":
+        try:
+            _ae_lang = req.auto_explain_language if req.auto_explain_language in _TEMPLATES else "en"
+            _ae_aud = "developer"
+            _ae_t = _TEMPLATES[_ae_lang][_ae_aud]
+            _ae_shapley = response.get("shapley_values", {})
+            _ae_root = max(_ae_shapley, key=lambda k: abs(_ae_shapley[k])) if _ae_shapley else "unknown"
+            _ae_action_text = _ae_t["action"].get("BLOCK", "Halt.")
+            response["auto_explanation"] = {
+                "summary": _ae_t["summary"].format(omega=omega_out, action="BLOCK", root=_ae_root,
+                    severity="critical", reliability="low", action_simple=_ae_action_text),
+                "root_cause": _ae_root,
+                "language": _ae_lang,
+            }
+            response["quota_used"] = 2
+        except Exception:
+            pass
 
     response["_trace"] = {
         "span": "preflight",

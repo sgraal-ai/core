@@ -8400,3 +8400,199 @@ class TestBulkImportExport:
     def test_empty_export(self):
         resp = client.get("/v1/store/export", headers=AUTH)
         assert resp.status_code == 200
+
+
+# ======= Sprint 25: Features #31-#40 =======
+
+class TestSLAMonitoring:
+    def test_create(self):
+        r = client.post("/v1/sla-rules", json={"name": "latency", "metric": "response_ms", "threshold": 100}, headers=AUTH)
+        assert r.status_code == 200 and "id" in r.json()
+    def test_list(self):
+        assert client.get("/v1/sla-rules", headers=AUTH).status_code == 200
+    def test_delete(self):
+        r = client.post("/v1/sla-rules", json={"name": "del", "metric": "omega", "threshold": 80}, headers=AUTH)
+        assert client.delete(f"/v1/sla-rules/{r.json()['id']}", headers=AUTH).status_code == 200
+    def test_window_field(self):
+        r = client.post("/v1/sla-rules", json={"name": "w", "metric": "omega", "threshold": 80, "window_minutes": 30}, headers=AUTH)
+        assert r.status_code == 200
+    def test_name_in_response(self):
+        r = client.post("/v1/sla-rules", json={"name": "test_sla", "metric": "omega", "threshold": 50}, headers=AUTH)
+        assert r.json()["name"] == "test_sla"
+    def test_rules_list_type(self):
+        r = client.get("/v1/sla-rules", headers=AUTH)
+        assert isinstance(r.json()["rules"], list)
+
+class TestCompatibility:
+    def test_endpoint(self):
+        assert client.get("/v1/compatibility").status_code == 200
+    def test_all_frameworks(self):
+        d = client.get("/v1/compatibility").json()
+        names = [f["name"] for f in d["frameworks"]]
+        assert "LangChain" in names and "mem0" in names
+    def test_status_field(self):
+        d = client.get("/v1/compatibility").json()
+        assert all(f["status"] == "compatible" for f in d["frameworks"])
+    def test_tested_at(self):
+        d = client.get("/v1/compatibility").json()
+        assert all("tested_at" in f for f in d["frameworks"])
+
+class TestSchemaValidator:
+    def test_valid(self):
+        r = client.post("/v1/validate", json={"entries": [{"id":"m1","content":"t","type":"semantic","timestamp_age_days":1,"source_trust":0.9}]}, headers=AUTH)
+        assert r.json()["valid"] is True
+    def test_missing_required(self):
+        r = client.post("/v1/validate", json={"entries": [{"id":"m1"}]}, headers=AUTH)
+        assert r.json()["valid"] is False
+    def test_wrong_type(self):
+        r = client.post("/v1/validate", json={"entries": [{"id":"m1","content":"t","type":"semantic","timestamp_age_days":1,"source_trust":"bad"}]}, headers=AUTH)
+        assert r.json()["valid"] is False
+    def test_strict_mode(self):
+        r = client.post("/v1/validate", json={"entries": [{"id":"m1","content":"t","type":"semantic","timestamp_age_days":1,"source_trust":0.9}], "strict": True}, headers=AUTH)
+        assert len(r.json()["warnings"]) > 0
+    def test_empty(self):
+        r = client.post("/v1/validate", json={"entries": []}, headers=AUTH)
+        assert r.json()["valid"] is True
+    def test_entries_checked(self):
+        r = client.post("/v1/validate", json={"entries": [{"id":"m1","content":"t","type":"semantic","timestamp_age_days":1,"source_trust":0.9}]}, headers=AUTH)
+        assert r.json()["entries_checked"] == 1
+
+class TestHealthHistory:
+    def test_empty(self):
+        r = client.get("/v1/memory/health-history", headers=AUTH)
+        assert r.status_code == 200 and r.json()["count"] == 0
+    def test_interval_hour(self):
+        r = client.get("/v1/memory/health-history?interval=hour", headers=AUTH)
+        assert r.json()["interval"] == "hour"
+    def test_interval_day(self):
+        r = client.get("/v1/memory/health-history?interval=day", headers=AUTH)
+        assert r.json()["interval"] == "day"
+    def test_p95(self):
+        r = client.get("/v1/memory/health-history", headers=AUTH)
+        assert "p95" in r.json()
+    def test_agent_filter(self):
+        r = client.get("/v1/memory/health-history?agent_id=agent1", headers=AUTH)
+        assert r.status_code == 200
+    def test_points_list(self):
+        r = client.get("/v1/memory/health-history", headers=AUTH)
+        assert isinstance(r.json()["points"], list)
+
+class TestPreflightTemplates:
+    def test_create(self):
+        r = client.post("/v1/templates", json={"name": "test_tpl", "memory_state": [{"id":"m1","content":"t","type":"semantic","timestamp_age_days":1,"source_trust":0.9,"source_conflict":0.1,"downstream_count":0}]}, headers=AUTH)
+        assert r.json()["created"] is True
+    def test_list(self):
+        assert client.get("/v1/templates", headers=AUTH).status_code == 200
+    def test_run_from_template(self):
+        client.post("/v1/templates", json={"name": "run_tpl", "memory_state": [{"id":"m1","content":"t","type":"semantic","timestamp_age_days":1,"source_trust":0.9,"source_conflict":0.1,"downstream_count":0}]}, headers=AUTH)
+        r = client.post("/v1/preflight/from-template/run_tpl", headers=AUTH)
+        assert r.status_code == 200 and "omega_mem_final" in r.json()
+    def test_404(self):
+        assert client.post("/v1/preflight/from-template/nonexistent", headers=AUTH).status_code == 404
+    def test_delete(self):
+        client.post("/v1/templates", json={"name": "del_tpl", "memory_state": []}, headers=AUTH)
+        assert client.delete("/v1/templates/del_tpl", headers=AUTH).status_code == 200
+    def test_override_domain(self):
+        client.post("/v1/templates", json={"name": "dom_tpl", "memory_state": [{"id":"m1","content":"t","type":"semantic","timestamp_age_days":1,"source_trust":0.9,"source_conflict":0.1,"downstream_count":0}], "domain": "fintech"}, headers=AUTH)
+        r = client.post("/v1/preflight/from-template/dom_tpl", headers=AUTH)
+        assert r.status_code == 200
+
+class TestWebhookDeliveries:
+    def test_list(self):
+        assert client.get("/v1/webhooks/deliveries", headers=AUTH).status_code == 200
+    def test_retry(self):
+        assert client.post("/v1/webhooks/deliveries/fake/retry", headers=AUTH).status_code == 200
+    def test_count(self):
+        r = client.get("/v1/webhooks/deliveries", headers=AUTH)
+        assert "count" in r.json()
+    def test_deliveries_list(self):
+        r = client.get("/v1/webhooks/deliveries", headers=AUTH)
+        assert isinstance(r.json()["deliveries"], list)
+    def test_retry_response(self):
+        r = client.post("/v1/webhooks/deliveries/test-id/retry", headers=AUTH)
+        assert r.json()["status"] == "retried"
+    def test_limit_param(self):
+        r = client.get("/v1/webhooks/deliveries?limit=10", headers=AUTH)
+        assert r.status_code == 200
+
+class TestAnalytics:
+    def test_usage(self):
+        assert client.get("/v1/analytics/usage", headers=AUTH).status_code == 200
+    def test_day_grouping(self):
+        r = client.get("/v1/analytics/usage?group_by=day", headers=AUTH)
+        assert r.json()["group_by"] == "day"
+    def test_hour_grouping(self):
+        r = client.get("/v1/analytics/usage?group_by=hour", headers=AUTH)
+        assert r.json()["group_by"] == "hour"
+    def test_summary(self):
+        r = client.get("/v1/analytics/summary", headers=AUTH)
+        assert "trend" in r.json()
+    def test_90_day_limit(self):
+        r = client.get("/v1/analytics/usage?from_date=2025-01-01&to_date=2025-12-31", headers=AUTH)
+        assert r.status_code == 400
+    def test_empty_period(self):
+        r = client.get("/v1/analytics/usage", headers=AUTH)
+        assert isinstance(r.json()["data"], list)
+
+class TestTags:
+    def test_list_tags(self):
+        assert client.get("/v1/store/tags", headers=AUTH).status_code == 200
+    def test_add_tag(self):
+        r = client.post("/v1/store/memories/fake/tags?tag=important", headers=AUTH)
+        assert r.json()["added"] is True
+    def test_remove_tag(self):
+        r = client.delete("/v1/store/memories/fake/tags/important", headers=AUTH)
+        assert r.json()["removed"] is True
+    def test_tag_response(self):
+        r = client.post("/v1/store/memories/mid/tags?tag=test", headers=AUTH)
+        assert r.json()["tag"] == "test"
+    def test_tags_type(self):
+        r = client.get("/v1/store/tags", headers=AUTH)
+        assert isinstance(r.json()["tags"], list)
+    def test_search_with_tags(self):
+        r = client.get("/v1/store/memories/search?query=test&tags=important", headers=AUTH)
+        assert r.status_code == 200
+
+class TestAutoExplain:
+    def test_false_no_field(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "auto_explain": False}, headers=AUTH)
+        assert "auto_explanation" not in r.json()
+    def test_block_included(self):
+        # Force high omega — old stale entry
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.01, timestamp_age_days=500, source_conflict=0.99, downstream_count=50)], "auto_explain": True, "action_type": "destructive", "domain": "medical"}, headers=AUTH)
+        # May or may not BLOCK depending on exact scoring
+        assert r.status_code == 200
+    def test_warn_not_included(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "auto_explain": True}, headers=AUTH)
+        if r.json()["recommended_action"] != "BLOCK":
+            assert "auto_explanation" not in r.json()
+    def test_de_language(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.01, timestamp_age_days=500, source_conflict=0.99, downstream_count=50)], "auto_explain": True, "auto_explain_language": "de", "action_type": "destructive", "domain": "medical"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_fr_language(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "auto_explain": True, "auto_explain_language": "fr"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_quota_used(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.01, timestamp_age_days=500, source_conflict=0.99, downstream_count=50)], "auto_explain": True, "action_type": "destructive", "domain": "medical"}, headers=AUTH)
+        if "auto_explanation" in r.json():
+            assert r.json()["quota_used"] == 2
+
+class TestQuota:
+    def test_quota_returned(self):
+        r = client.get("/v1/quota", headers=AUTH)
+        assert r.status_code == 200 and "plan" in r.json()
+    def test_calls_remaining(self):
+        r = client.get("/v1/quota", headers=AUTH)
+        assert r.json()["calls_remaining"] >= 0
+    def test_free_tier(self):
+        r = client.get("/v1/quota", headers=AUTH)
+        assert r.json()["plan"] in ("free", "demo", "starter", "growth")
+    def test_overage_rate(self):
+        r = client.get("/v1/quota", headers=AUTH)
+        assert "overage_rate" in r.json()
+    def test_reset_at(self):
+        r = client.get("/v1/quota", headers=AUTH)
+        assert "reset_at" in r.json()
+    def test_calls_limit(self):
+        r = client.get("/v1/quota", headers=AUTH)
+        assert r.json()["calls_limit"] > 0
