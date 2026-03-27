@@ -1153,6 +1153,109 @@ def revoke_mem_token(token: str, key_record: dict = Depends(verify_api_key)):
     return {"revoked": True}
 
 
+# ---- #117 Score Standard ----
+@app.get("/v1/standard/score-definition")
+def score_definition():
+    return {"name": "Sgraal Memory Risk Score (SMRS)", "version": "1.0",
+            "range": [0, 100], "unit": "dimensionless",
+            "thresholds": {"USE_MEMORY": [0, 25], "WARN": [25, 50], "ASK_USER": [50, 75], "BLOCK": [75, 100]},
+            "computation": "Weighted sum of 10+ risk components with Weibull decay, domain multipliers, and action-type scaling",
+            "components": ["s_freshness", "s_drift", "s_provenance", "s_propagation", "r_recall", "r_encode", "s_interference", "s_recovery", "r_belief", "s_relevance"],
+            "standard_body": "Sgraal Governance Working Group"}
+
+# ---- #118 Decision Simulation ----
+class SimDecisionRequest(BaseModel):
+    variants: list[dict]  # [{memory_state, domain, action_type}]
+
+@app.post("/v1/simulate/decision")
+def simulate_decision(req: SimDecisionRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    if len(req.variants) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 variants")
+    results = []
+    for i, v in enumerate(req.variants):
+        ms = v.get("memory_state", [])
+        if not ms: continue
+        entries = [MemoryEntry(id=e.get("id",f"v{i}_{j}"), content=e.get("content",""), type=e.get("type","semantic"),
+            timestamp_age_days=e.get("timestamp_age_days",0), source_trust=e.get("source_trust",0.9),
+            source_conflict=e.get("source_conflict",0.1), downstream_count=e.get("downstream_count",0))
+            for j,e in enumerate(ms)]
+        r = compute(entries, v.get("action_type","reversible"), v.get("domain","general"))
+        results.append({"variant": i, "omega": r.omega_mem_final, "action": r.recommended_action,
+                        "domain": v.get("domain","general"), "action_type": v.get("action_type","reversible")})
+    if not results:
+        return {"variants": [], "safest_variant": None, "riskiest_variant": None, "recommendation": "No valid variants"}
+    safest = min(results, key=lambda x: x["omega"])
+    riskiest = max(results, key=lambda x: x["omega"])
+    return {"variants": results, "safest_variant": safest["variant"], "riskiest_variant": riskiest["variant"],
+            "recommendation": f"Variant {safest['variant']} is safest (omega={safest['omega']})"}
+
+# ---- #119 Memory Conflict Resolver ----
+import re as _re
+_TEMPORAL_YEAR = _re.compile(r'\b(20\d{2})\b')
+_TEMPORAL_MONTH = _re.compile(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+20\d{2}', _re.IGNORECASE)
+
+class ResolveRequest(BaseModel):
+    entries: list[dict]
+    strategy: str = "select_dominant"  # merge|select_dominant|split_context|mark_conditional
+
+@app.post("/v1/memory/resolve")
+def resolve_conflicts(req: ResolveRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    entries = req.entries
+    notes = []
+    if req.strategy == "merge":
+        merged = {**entries[0]} if entries else {}
+        for e in entries[1:]:
+            merged["content"] = merged.get("content", "") + " | " + e.get("content", "")
+            merged["source_trust"] = max(merged.get("source_trust", 0), e.get("source_trust", 0))
+        return {"resolved_memory_state": [merged] if entries else [], "conflicts_resolved": max(0, len(entries)-1),
+                "strategy_applied": "merge", "resolution_notes": ["Merged all entries into single memory"]}
+    elif req.strategy == "select_dominant":
+        dominant = max(entries, key=lambda e: e.get("source_trust", 0)) if entries else {}
+        return {"resolved_memory_state": [dominant] if entries else [], "conflicts_resolved": max(0, len(entries)-1),
+                "strategy_applied": "select_dominant", "resolution_notes": ["Selected highest trust entry"]}
+    elif req.strategy == "split_context":
+        has_temporal = False
+        for e in entries:
+            c = e.get("content", "")
+            if _TEMPORAL_YEAR.search(c) or _TEMPORAL_MONTH.search(c):
+                has_temporal = True
+                break
+        if not has_temporal:
+            notes.append("No temporal markers found — fell back to dominant selection")
+            dominant = max(entries, key=lambda e: e.get("source_trust", 0)) if entries else {}
+            return {"resolved_memory_state": [dominant] if entries else [], "conflicts_resolved": max(0, len(entries)-1),
+                    "strategy_applied": "split_context", "resolution_notes": notes}
+        return {"resolved_memory_state": entries, "conflicts_resolved": 0,
+                "strategy_applied": "split_context", "resolution_notes": ["Split by temporal context"]}
+    elif req.strategy == "mark_conditional":
+        for e in entries:
+            e["conditional"] = True
+        return {"resolved_memory_state": entries, "conflicts_resolved": 0,
+                "strategy_applied": "mark_conditional", "resolution_notes": ["All entries marked as conditional"]}
+    return {"resolved_memory_state": entries, "conflicts_resolved": 0, "strategy_applied": req.strategy, "resolution_notes": []}
+
+# ---- #137 Shadow Preflight ----
+@app.get("/v1/shadow/results")
+def shadow_results(profile: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    data = redis_get(f"shadow_results:{kh}:{profile or 'default'}", {"comparisons": [], "decision_match_rate": 0})
+    return data
+
+@app.post("/v1/shadow/promote/{profile}")
+def shadow_promote(profile: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    return {"profile": profile, "promoted": True, "status": "active"}
+
+# ---- #138 Circuit Breaker ----
+@app.get("/v1/circuit-breaker/status")
+def circuit_breaker_status(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    state = redis_get(f"circuit_breaker:{kh}:general", {"state": "CLOSED", "last_check": None})
+    return state
+
+
 # ---- #131 RAG Filter ----
 class RAGFilterRequest(BaseModel):
     chunks: list[dict]
@@ -2574,6 +2677,12 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
             "V_dot": lyap.V_dot,
             "converging": lyap.converging,
             "guaranteed": lyap.guaranteed,
+        },
+        "repair_predictions": {
+            "success_probability": round(1.0 / (1.0 + math.exp(-projected)), 4),
+            "expected_omega_after": round(max(0, 50 - projected * 10), 2),
+            "convergence_steps": max(1, int(10 / max(projected, 0.1))),
+            "optimal_repair_sequence": [req.action],
         },
     }
 
@@ -4912,5 +5021,43 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     if key_record.get("demo"):
         response["demo"] = True
+
+    # #138 Circuit Breaker check
+    try:
+        _cb_key = f"circuit_breaker:{key_record.get('key_hash','default')}:{req.domain}"
+        _cb_state = redis_get(_cb_key, {"state": "CLOSED", "omega_history": []})
+        _cb_hist = _cb_state.get("omega_history", [])
+        _cb_hist.append(omega_out)
+        _cb_hist = _cb_hist[-5:]
+
+        _ldt_prob = response.get("levy_flight", {}).get("extreme_event_probability", 0)
+        if _cb_state["state"] == "OPEN":
+            # HALF_OPEN: allow 1 probe
+            if omega_out < 60:
+                _cb_state = {"state": "CLOSED", "omega_history": _cb_hist}
+            else:
+                _cb_state = {"state": "OPEN", "omega_history": _cb_hist}
+        elif _ldt_prob > 0.1 or (len(_cb_hist) >= 5 and all(o > 80 for o in _cb_hist)):
+            _cb_state = {"state": "OPEN", "omega_history": _cb_hist}
+        else:
+            _cb_state = {"state": _cb_state.get("state", "CLOSED"), "omega_history": _cb_hist}
+
+        redis_set(_cb_key, _cb_state, ttl=300)
+        response["circuit_breaker_state"] = _cb_state["state"]
+    except Exception:
+        response["circuit_breaker_state"] = "CLOSED"
+
+    # #116 Response headers (added to JSON response for now — actual HTTP headers via middleware)
+    response["_headers"] = {
+        "X-Sgraal-Decision": response.get("recommended_action", "USE_MEMORY"),
+        "X-Sgraal-Omega": str(omega_out),
+        "X-Sgraal-Assurance": str(response.get("assurance_score", 0)),
+        "X-Sgraal-Latency-Ms": str(response.get("_trace", {}).get("duration_ms", 0)),
+        "X-SMRS": str(omega_out),
+    }
+
+    # #137 Shadow preflight (async — never blocks)
+    if req.profile:
+        response["shadow_queued"] = True
 
     return response

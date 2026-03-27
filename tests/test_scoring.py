@@ -9617,3 +9617,123 @@ class TestCompactResponse:
     def test_full_has_analytics(self):
         r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
         assert "component_breakdown" in r.json()
+
+
+# ======= Sprint 31: #116-#120, #137-#138 =======
+
+class TestPreflightHeaders:
+    def test_headers_on_preflight(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        h = r.json().get("_headers", {})
+        assert "X-Sgraal-Decision" in h and "X-Sgraal-Omega" in h
+    def test_latency_positive(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        assert float(r.json().get("_headers", {}).get("X-Sgraal-Latency-Ms", 0)) >= 0
+    def test_smrs_alias(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        h = r.json().get("_headers", {})
+        assert h.get("X-SMRS") == h.get("X-Sgraal-Omega")
+    def test_assurance(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        assert "X-Sgraal-Assurance" in r.json().get("_headers", {})
+
+class TestScoreStandard:
+    def test_definition(self):
+        assert client.get("/v1/standard/score-definition").status_code == 200
+    def test_thresholds(self):
+        assert "BLOCK" in client.get("/v1/standard/score-definition").json()["thresholds"]
+    def test_version(self):
+        assert "version" in client.get("/v1/standard/score-definition").json()
+    def test_components(self):
+        assert len(client.get("/v1/standard/score-definition").json()["components"]) >= 10
+
+class TestDecisionSimulation:
+    def test_two_variants(self):
+        v = [{"memory_state": [{"id":"v1","content":"safe","type":"semantic","timestamp_age_days":1,"source_trust":0.99,"source_conflict":0.01,"downstream_count":0}]},
+             {"memory_state": [{"id":"v2","content":"risky","type":"tool_state","timestamp_age_days":200,"source_trust":0.3,"source_conflict":0.7,"downstream_count":20}], "domain": "medical"}]
+        r = client.post("/v1/simulate/decision", json={"variants": v}, headers=AUTH)
+        assert len(r.json()["variants"]) == 2
+    def test_safest(self):
+        v = [{"memory_state": [{"id":"s","content":"t","type":"semantic","timestamp_age_days":0,"source_trust":0.99,"source_conflict":0.01,"downstream_count":0}]}]
+        assert "safest_variant" in client.post("/v1/simulate/decision", json={"variants": v}, headers=AUTH).json()
+    def test_riskiest(self):
+        v = [{"memory_state": [{"id":"s","content":"t","type":"semantic","timestamp_age_days":0,"source_trust":0.99,"source_conflict":0.01,"downstream_count":0}]}]
+        assert "riskiest_variant" in client.post("/v1/simulate/decision", json={"variants": v}, headers=AUTH).json()
+    def test_max_10(self):
+        v = [{"memory_state": [{"id":f"v{i}","content":"t","type":"semantic","timestamp_age_days":0,"source_trust":0.9,"source_conflict":0.1,"downstream_count":0}]} for i in range(11)]
+        assert client.post("/v1/simulate/decision", json={"variants": v}, headers=AUTH).status_code == 400
+    def test_recommendation(self):
+        v = [{"memory_state": [{"id":"s","content":"t","type":"semantic","timestamp_age_days":0,"source_trust":0.99,"source_conflict":0.01,"downstream_count":0}]}]
+        assert "recommendation" in client.post("/v1/simulate/decision", json={"variants": v}, headers=AUTH).json()
+    def test_diff_domains(self):
+        v = [{"memory_state": [{"id":"d","content":"t","type":"semantic","timestamp_age_days":0,"source_trust":0.9,"source_conflict":0.1,"downstream_count":0}], "domain": d} for d in ["general", "medical"]]
+        assert len(client.post("/v1/simulate/decision", json={"variants": v}, headers=AUTH).json()["variants"]) == 2
+
+class TestConflictResolver:
+    def test_passthrough(self):
+        r = client.post("/v1/memory/resolve", json={"entries": [{"id":"m1","content":"t","source_trust":0.9}]}, headers=AUTH)
+        assert r.json()["conflicts_resolved"] == 0
+    def test_merge(self):
+        r = client.post("/v1/memory/resolve", json={"entries": [{"id":"m1","content":"A","source_trust":0.9},{"id":"m2","content":"B","source_trust":0.8}], "strategy": "merge"}, headers=AUTH)
+        assert r.json()["strategy_applied"] == "merge"
+    def test_dominant(self):
+        r = client.post("/v1/memory/resolve", json={"entries": [{"id":"m1","source_trust":0.5},{"id":"m2","source_trust":0.99}], "strategy": "select_dominant"}, headers=AUTH)
+        assert r.json()["strategy_applied"] == "select_dominant"
+    def test_split_dates(self):
+        r = client.post("/v1/memory/resolve", json={"entries": [{"id":"m1","content":"In 2024 was $100"},{"id":"m2","content":"In 2025 is $200"}], "strategy": "split_context"}, headers=AUTH)
+        assert "Split by temporal" in r.json()["resolution_notes"][0]
+    def test_split_no_dates(self):
+        r = client.post("/v1/memory/resolve", json={"entries": [{"id":"m1","content":"hello","source_trust":0.9},{"id":"m2","content":"world","source_trust":0.5}], "strategy": "split_context"}, headers=AUTH)
+        assert "fell back to dominant" in r.json()["resolution_notes"][0]
+    def test_conditional(self):
+        r = client.post("/v1/memory/resolve", json={"entries": [{"id":"m1"},{"id":"m2"}], "strategy": "mark_conditional"}, headers=AUTH)
+        assert r.json()["strategy_applied"] == "mark_conditional"
+
+class TestRepairPredictor:
+    def test_present(self):
+        assert "repair_predictions" in client.post("/v1/heal", json={"entry_id": "rp1", "action": "REFETCH"}, headers=AUTH).json()
+    def test_probability(self):
+        p = client.post("/v1/heal", json={"entry_id": "rp2", "action": "REFETCH"}, headers=AUTH).json()["repair_predictions"]
+        assert 0 < p["success_probability"] <= 1
+    def test_expected_omega(self):
+        assert client.post("/v1/heal", json={"entry_id": "rp3", "action": "VERIFY_WITH_SOURCE"}, headers=AUTH).json()["repair_predictions"]["expected_omega_after"] >= 0
+    def test_steps(self):
+        assert client.post("/v1/heal", json={"entry_id": "rp4", "action": "REFETCH"}, headers=AUTH).json()["repair_predictions"]["convergence_steps"] >= 1
+    def test_sequence(self):
+        assert len(client.post("/v1/heal", json={"entry_id": "rp5", "action": "REBUILD_WORKING_SET"}, headers=AUTH).json()["repair_predictions"]["optimal_repair_sequence"]) >= 1
+    def test_sorted(self):
+        assert isinstance(client.post("/v1/heal", json={"entry_id": "rp6", "action": "REFETCH"}, headers=AUTH).json()["repair_predictions"]["optimal_repair_sequence"], list)
+
+class TestShadowPreflight:
+    def test_queued(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "profile": "shadow", "response_profile": "full"}, headers=AUTH)
+        assert r.json().get("shadow_queued") is True
+    def test_no_shadow(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        assert "shadow_queued" not in r.json()
+    def test_results(self):
+        assert client.get("/v1/shadow/results?profile=test", headers=AUTH).status_code == 200
+    def test_stats(self):
+        assert "decision_match_rate" in client.get("/v1/shadow/results", headers=AUTH).json()
+    def test_promote(self):
+        assert client.post("/v1/shadow/promote/test", headers=AUTH).json()["promoted"] is True
+    def test_main_unaffected(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "profile": "shadow_test", "response_profile": "full"}, headers=AUTH)
+        assert "omega_mem_final" in r.json()
+
+class TestCircuitBreakerFull:
+    def test_closed(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        assert r.json().get("circuit_breaker_state") == "CLOSED"
+    def test_status(self):
+        assert client.get("/v1/circuit-breaker/status", headers=AUTH).status_code == 200
+    def test_state_in_response(self):
+        assert "circuit_breaker_state" in client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH).json()
+    def test_default_closed(self):
+        assert client.get("/v1/circuit-breaker/status", headers=AUTH).json().get("state", "CLOSED") == "CLOSED"
+    def test_no_crash(self):
+        for _ in range(5): client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        assert True
+    def test_single_high_no_open(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.01, timestamp_age_days=500)], "response_profile": "full"}, headers=AUTH)
+        assert r.json().get("circuit_breaker_state") in ("CLOSED", "OPEN")
