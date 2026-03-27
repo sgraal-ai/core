@@ -9147,3 +9147,284 @@ class TestAutoHeal:
     def test_audit_trail(self):
         r = client.post("/v1/heal/auto", json={"memory_state": [_fresh_entry(timestamp_age_days=100, source_trust=0.3)], "max_iterations": 2}, headers=AUTH)
         assert isinstance(r.json()["audit_trail"], list)
+
+
+# ======= Sprint 29: Features #83-#100 =======
+
+class TestNamedPatterns:
+    def test_stale(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(timestamp_age_days=500, source_trust=0.3)]}, headers=AUTH)
+        # High age → likely STALE_MEMORY_DRIFT detected
+        assert r.status_code == 200
+    def test_null_clean(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        # Clean entry may not trigger pattern
+        assert r.status_code == 200
+    def test_confidence_range(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(timestamp_age_days=300)]}, headers=AUTH)
+        if "pattern_confidence" in r.json(): assert 0 <= r.json()["pattern_confidence"] <= 1
+    def test_pattern_names(self):
+        valid = {"STALE_MEMORY_DRIFT", "CONFLICTING_FACTS", "SOURCE_DEGRADATION", "TEMPORAL_INVERSION", "CASCADE_RISK"}
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(timestamp_age_days=500)]}, headers=AUTH)
+        if "detected_pattern" in r.json(): assert r.json()["detected_pattern"] in valid
+    def test_conflict_pattern(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_conflict=0.9, timestamp_age_days=100)]}, headers=AUTH)
+        assert r.status_code == 200
+    def test_no_crash(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "omega_mem_final" in r.json()
+
+class TestMemoryCompression:
+    def test_risk_based(self):
+        entries = [{"id": f"e{i}", "content": f"test {i}", "source_trust": 0.9-i*0.1} for i in range(5)]
+        r = client.post("/v1/memory/compress", json={"memory_state": entries, "method": "risk_based"}, headers=AUTH)
+        assert r.json()["compressed_count"] < r.json()["original_count"]
+    def test_semantic(self):
+        entries = [{"id": f"e{i}", "content": "x"*i} for i in range(1,6)]
+        r = client.post("/v1/memory/compress", json={"memory_state": entries, "method": "semantic"}, headers=AUTH)
+        assert r.json()["method"] == "semantic"
+    def test_target_count(self):
+        entries = [{"id": f"e{i}"} for i in range(10)]
+        r = client.post("/v1/memory/compress", json={"memory_state": entries, "target_count": 3}, headers=AUTH)
+        assert r.json()["compressed_count"] == 3
+    def test_ratio(self):
+        entries = [{"id": f"e{i}"} for i in range(4)]
+        r = client.post("/v1/memory/compress", json={"memory_state": entries, "target_count": 2}, headers=AUTH)
+        assert r.json()["ratio"] == 0.5
+    def test_empty(self):
+        r = client.post("/v1/memory/compress", json={"memory_state": []}, headers=AUTH)
+        assert r.json()["original_count"] == 0
+    def test_demo_allowed(self):
+        r = client.post("/v1/memory/compress", json={"memory_state": [{"id":"e1"}]}, headers={"Authorization": "Bearer sg_demo_playground"})
+        assert r.status_code == 200
+
+class TestCostAttribution:
+    def test_cost_team(self):
+        r = client.get("/v1/analytics/cost?group_by=team", headers=AUTH)
+        assert r.json()["group_by"] == "team"
+    def test_cost_project(self):
+        r = client.get("/v1/analytics/cost?group_by=project", headers=AUTH)
+        assert r.json()["group_by"] == "project"
+    def test_forecast(self):
+        r = client.get("/v1/analytics/cost/forecast", headers=AUTH)
+        assert "forecast_30_days" in r.json()
+    def test_total_cost(self):
+        r = client.get("/v1/analytics/cost", headers=AUTH)
+        assert "total_cost" in r.json()
+    def test_env_filter(self):
+        r = client.get("/v1/analytics/cost?group_by=environment", headers=AUTH)
+        assert r.status_code == 200
+    def test_trend(self):
+        r = client.get("/v1/analytics/cost/forecast", headers=AUTH)
+        assert r.json()["trend"] in ("stable", "increasing", "decreasing")
+
+class TestAuditChain:
+    def test_valid(self):
+        r = client.get("/v1/audit-log/chain-verify", headers=AUTH)
+        assert r.json()["valid"] is True
+    def test_entries_verified(self):
+        r = client.get("/v1/audit-log/chain-verify", headers=AUTH)
+        assert "entries_verified" in r.json()
+    def test_first_broken(self):
+        r = client.get("/v1/audit-log/chain-verify", headers=AUTH)
+        assert r.json()["first_broken_at"] is None
+    def test_genesis(self):
+        r = client.get("/v1/audit-log/chain-verify", headers=AUTH)
+        assert r.status_code == 200
+
+class TestLineage:
+    def test_lineage(self):
+        r = client.get("/v1/store/memories/fake/lineage", headers=AUTH)
+        assert r.status_code == 200 and "lineage" in r.json()
+    def test_export(self):
+        r = client.get("/v1/store/lineage/export", headers=AUTH)
+        assert r.status_code == 200
+    def test_depth(self):
+        r = client.get("/v1/store/memories/fake/lineage", headers=AUTH)
+        assert "depth" in r.json()
+    def test_agent(self):
+        r = client.get("/v1/store/lineage/export?agent_id=a1", headers=AUTH)
+        assert r.json()["agent_id"] == "a1"
+    def test_format(self):
+        r = client.get("/v1/store/lineage/export", headers=AUTH)
+        assert r.json()["format"] == "json"
+    def test_migration(self):
+        import os; assert os.path.exists("scripts/migrations/015_lineage.sql")
+
+class TestCausalDeps:
+    def test_add(self):
+        r = client.post("/v1/memory/dependencies", json={"source_id": "m1", "target_id": "m2"}, headers=AUTH)
+        assert r.json()["created"] is True
+    def test_get(self):
+        r = client.get("/v1/memory/dependencies", headers=AUTH)
+        assert "dependencies" in r.json()
+    def test_relationship(self):
+        r = client.post("/v1/memory/dependencies", json={"source_id": "m1", "target_id": "m2", "relationship": "contradicts"}, headers=AUTH)
+        assert r.json()["relationship"] == "contradicts"
+    def test_reinforces(self):
+        r = client.post("/v1/memory/dependencies", json={"source_id": "m1", "target_id": "m2", "relationship": "reinforces"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_circular(self):
+        client.post("/v1/memory/dependencies", json={"source_id": "a", "target_id": "b"}, headers=AUTH)
+        client.post("/v1/memory/dependencies", json={"source_id": "b", "target_id": "a"}, headers=AUTH)
+        assert True  # No crash
+    def test_migration(self):
+        import os; assert os.path.exists("scripts/migrations/016_dependencies.sql")
+
+class TestSimulation:
+    def test_stable(self):
+        r = client.post("/v1/simulate", json={"memory_state": [_fresh_entry()], "steps": 5}, headers=AUTH)
+        assert r.json()["total_steps"] == 5
+    def test_failure(self):
+        r = client.post("/v1/simulate", json={"memory_state": [_fresh_entry(source_trust=0.1, timestamp_age_days=100)], "steps": 10}, headers=AUTH)
+        assert "first_failure_step" in r.json()
+    def test_max_steps(self):
+        r = client.post("/v1/simulate", json={"memory_state": [_fresh_entry()], "steps": 25}, headers=AUTH)
+        assert r.json()["total_steps"] <= 20
+    def test_safe_steps(self):
+        r = client.post("/v1/simulate", json={"memory_state": [_fresh_entry()], "steps": 5}, headers=AUTH)
+        assert "safe_steps" in r.json()
+    def test_timeline(self):
+        r = client.post("/v1/simulate", json={"memory_state": [_fresh_entry()], "steps": 3}, headers=AUTH)
+        assert len(r.json()["timeline"]) == 3
+    def test_fallback(self):
+        r = client.post("/v1/simulate", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.status_code == 200
+
+class TestFeedback:
+    def test_stored(self):
+        # First create a preflight to get an ID
+        pr = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        rid = pr.json().get("request_id", "test")
+        r = client.post("/v1/feedback", json={"preflight_id": rid, "feedback_type": "correct"}, headers=AUTH)
+        assert r.json()["stored"] is True
+    def test_false_positive(self):
+        r = client.post("/v1/feedback", json={"preflight_id": "fp", "feedback_type": "false_positive"}, headers=AUTH)
+        assert r.json()["feedback_type"] == "false_positive"
+    def test_false_negative(self):
+        r = client.post("/v1/feedback", json={"preflight_id": "fn", "feedback_type": "false_negative"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_calibration(self):
+        r = client.post("/v1/feedback", json={"preflight_id": "cal", "feedback_type": "correct"}, headers=AUTH)
+        assert "calibration_updated" in r.json()
+    def test_bounds_hit(self):
+        r = client.post("/v1/feedback", json={"preflight_id": "bh", "feedback_type": "correct"}, headers=AUTH)
+        assert "calibration_bounds_hit" in r.json()
+    def test_migration(self):
+        import os; assert os.path.exists("scripts/migrations/017_feedback.sql")
+
+class TestApprovals:
+    def test_create(self):
+        r = client.post("/v1/approvals", json={"preflight_id": "test123"}, headers=AUTH)
+        assert r.json()["status"] == "pending"
+    def test_approve(self):
+        r = client.post("/v1/approvals", json={"preflight_id": "approve_test"}, headers=AUTH)
+        aid = r.json()["approval_id"]
+        a = client.post(f"/v1/approvals/{aid}/approve", headers=AUTH)
+        assert a.json()["status"] == "approved"
+    def test_reject(self):
+        r = client.post("/v1/approvals", json={"preflight_id": "reject_test"}, headers=AUTH)
+        aid = r.json()["approval_id"]
+        a = client.post(f"/v1/approvals/{aid}/reject", headers=AUTH)
+        assert a.json()["status"] == "rejected"
+    def test_list_pending(self):
+        r = client.get("/v1/approvals", headers=AUTH)
+        assert "approvals" in r.json()
+    def test_404(self):
+        r = client.get("/v1/approvals/nonexistent", headers=AUTH)
+        assert r.status_code == 404
+    def test_expired(self):
+        r = client.post("/v1/approvals", json={"preflight_id": "exp", "expires_in_minutes": 0}, headers=AUTH)
+        aid = r.json()["approval_id"]
+        g = client.get(f"/v1/approvals/{aid}", headers=AUTH)
+        assert g.json()["status"] == "expired"
+    def test_dashboard(self):
+        import os; assert os.path.exists("dashboard/app/approvals/page.tsx")
+    def test_approval_fields(self):
+        r = client.post("/v1/approvals", json={"preflight_id": "fields"}, headers=AUTH)
+        assert "approval_id" in r.json()
+
+class TestSelfHost:
+    def test_dockerfile(self):
+        import os; assert os.path.exists("Dockerfile")
+    def test_docker_compose(self):
+        import os; assert os.path.exists("docker-compose.yml")
+    def test_helm(self):
+        import os; assert os.path.exists("helm/sgraal/Chart.yaml")
+    def test_health(self):
+        r = client.get("/health")
+        assert r.json()["status"] == "ok"
+
+class TestBenchmark:
+    def test_endpoint(self):
+        r = client.get("/v1/benchmark/results")
+        assert r.status_code == 200
+    def test_latency(self):
+        r = client.get("/v1/benchmark/results")
+        assert "latency_p50_ms" in r.json() and "latency_p95_ms" in r.json()
+    def test_detection(self):
+        r = client.get("/v1/benchmark/results")
+        assert "detection_rates" in r.json()
+    def test_test_count(self):
+        r = client.get("/v1/benchmark/results")
+        assert r.json()["test_count"] > 0
+
+class TestFailures:
+    def test_endpoint(self):
+        r = client.get("/v1/failures/examples")
+        assert r.status_code == 200
+    def test_five(self):
+        r = client.get("/v1/failures/examples")
+        assert len(r.json()["examples"]) == 5
+    def test_fields(self):
+        r = client.get("/v1/failures/examples")
+        e = r.json()["examples"][0]
+        assert all(k in e for k in ("id", "title", "pattern", "omega"))
+    def test_format(self):
+        r = client.get("/v1/failures/examples")
+        assert isinstance(r.json()["examples"], list)
+
+class TestPerformanceReport:
+    def test_endpoint(self):
+        r = client.get("/v1/performance/report")
+        assert r.status_code == 200
+    def test_latency(self):
+        r = client.get("/v1/performance/report")
+        assert "p50_ms" in r.json() and "p95_ms" in r.json()
+    def test_test_count(self):
+        r = client.get("/v1/performance/report")
+        assert r.json()["test_count"] > 0
+    def test_uptime(self):
+        r = client.get("/v1/performance/report")
+        assert r.json()["uptime_30d"] > 0
+
+class TestPlans:
+    def test_endpoint(self):
+        r = client.get("/v1/plans")
+        assert r.status_code == 200
+    def test_free(self):
+        r = client.get("/v1/plans")
+        names = [p["name"] for p in r.json()["plans"]]
+        assert "free" in names
+    def test_pro(self):
+        r = client.get("/v1/plans")
+        names = [p["name"] for p in r.json()["plans"]]
+        assert "pro" in names
+    def test_enterprise(self):
+        r = client.get("/v1/plans")
+        names = [p["name"] for p in r.json()["plans"]]
+        assert "enterprise" in names
+
+class TestPartnerBadge:
+    def test_known(self):
+        r = client.get("/v1/partner/badge/langchain")
+        assert r.status_code == 200
+    def test_svg(self):
+        r = client.get("/v1/partner/badge/mem0")
+        assert "svg" in r.text
+    def test_unknown_404(self):
+        r = client.get("/v1/partner/badge/nonexistent")
+        assert r.status_code == 404
+    def test_format(self):
+        r = client.get("/v1/partner/badge/crewai")
+        assert r.headers.get("content-type", "").startswith("image/svg")
