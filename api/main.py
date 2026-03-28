@@ -1925,6 +1925,34 @@ def reset_goal_baseline(agent_id: str, key_record: dict = Depends(verify_api_key
 
 
 # ---- #117 Score Standard ----
+@app.get("/v1/standard/memcube-spec")
+def memcube_spec():
+    """Full JSON Schema for MemCube v2."""
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "MemCube v2",
+        "description": "Standardized memory entry format for AI agent memory governance",
+        "version": "2.0.0",
+        "type": "object",
+        "required": ["id", "content", "type", "timestamp_age_days", "source_trust", "source_conflict", "downstream_count"],
+        "properties": {
+            "id": {"type": "string", "description": "Unique identifier for the memory entry"},
+            "content": {"type": "string", "description": "Memory content text"},
+            "type": {"type": "string", "enum": ["episodic", "semantic", "preference", "tool_state", "shared_workflow", "policy", "identity"],
+                      "description": "Memory type classification"},
+            "timestamp_age_days": {"type": "number", "minimum": 0, "description": "Age of the memory in days"},
+            "source_trust": {"type": "number", "minimum": 0, "maximum": 1, "description": "Trust score of the source (0-1)"},
+            "source_conflict": {"type": "number", "minimum": 0, "maximum": 1, "description": "Dempster-Shafer conflict measure (0-1)"},
+            "downstream_count": {"type": "integer", "minimum": 0, "description": "Number of downstream dependencies (blast radius)"},
+            "goal_id": {"type": "string", "description": "Optional: associated goal identifier"},
+            "source": {"type": "string", "description": "Optional: origin of memory (user_stated, api_response, etc.)"},
+            "provenance": {"type": "object", "description": "Optional: provenance metadata"},
+            "gsv": {"type": "integer", "description": "Optional: Global State Vector"},
+            "context_tags": {"type": "array", "items": {"type": "string"}, "description": "Optional: semantic tags"},
+            "geo_tag": {"type": "string", "description": "Optional: geographic context"},
+        },
+    }
+
 @app.get("/v1/standard/score-definition")
 def score_definition():
     return {"name": "Sgraal Memory Risk Score (SMRS)", "version": "1.0",
@@ -2132,8 +2160,45 @@ def audit_chain_verify(key_record: dict = Depends(verify_api_key)):
 def memory_lineage(memory_id: str, key_record: dict = Depends(verify_api_key)):
     return {"memory_id": memory_id, "lineage": [], "depth": 0}
 @app.get("/v1/store/lineage/export")
-def lineage_export(agent_id: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
-    return {"agent_id": agent_id, "entries": [], "format": "json"}
+def lineage_export(agent_id: Optional[str] = None, format: str = "json", key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    entries = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            _url = f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&select=id,content,memory_type,agent_id&limit=100"
+            if agent_id: _url += f"&agent_id=eq.{agent_id}"
+            r = http_requests.get(_url, headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok: entries = r.json()
+        except Exception: pass
+
+    if format == "graphml":
+        _xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        _xml += '<graphml xmlns="http://graphml.graphstruct.org/graphml">\n'
+        _xml += '  <key id="type" for="node" attr.name="type" attr.type="string"/>\n'
+        _xml += '  <graph id="G" edgedefault="directed">\n'
+        for e in entries:
+            _eid = e.get("id", "")
+            _etype = e.get("memory_type", "unknown")
+            _xml += f'    <node id="{_eid}"><data key="type">{_etype}</data></node>\n'
+        for i in range(len(entries) - 1):
+            _xml += f'    <edge source="{entries[i].get("id","")}" target="{entries[i+1].get("id","")}" />\n'
+        _xml += '  </graph>\n</graphml>'
+        from fastapi.responses import Response as _XmlResp
+        return _XmlResp(content=_xml, media_type="application/xml")
+
+    if format == "rdf":
+        _ttl = '@prefix sgraal: <https://sgraal.com/ontology#> .\n'
+        _ttl += '@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n\n'
+        for e in entries:
+            _eid = e.get("id", "")
+            _etype = e.get("memory_type", "unknown")
+            _ttl += f'sgraal:{_eid} a sgraal:MemoryEntry ;\n'
+            _ttl += f'    sgraal:memoryType "{_etype}" ;\n'
+            _ttl += f'    sgraal:agent "{e.get("agent_id", "anonymous")}" .\n\n'
+        from fastapi.responses import Response as _TtlResp
+        return _TtlResp(content=_ttl, media_type="text/turtle")
+
+    return {"agent_id": agent_id, "entries": entries, "format": "json"}
 
 # ---- #88 Causal Dependencies ----
 class DepRequest(BaseModel):
@@ -4103,6 +4168,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     response = {
         "omega_mem_final": omega_out,
+        "memcube_version": "2.0.0",
         "recommended_action": result.recommended_action,
         "assurance_score": result.assurance_score,
         "explainability_note": result.explainability_note,

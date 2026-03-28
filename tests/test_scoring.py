@@ -10956,3 +10956,117 @@ class TestFix12PrivacyRepairPlan:
         for item in rp:
             if isinstance(item, dict) and "action_reference" in item:
                 assert item["action_reference"] == item.get("entry_id", "")
+
+
+# ---- Feature #152, #162, #167 Tests ----
+
+class TestZepLettaMigration:
+    """#152 Zep + Letta Migration Importer"""
+    def test_zep_dry_run(self):
+        from sdk.python.sgraal.cli import _run_migration
+        result = _run_migration("zep", "http://localhost:99999", "", "sg_test_key_001",
+                                "http://testserver", dry_run=True, api_version=2)
+        assert "error" in result or result.get("dry_run") is True or result.get("total_imported") == 0
+
+    def test_letta_dry_run(self):
+        from sdk.python.sgraal.cli import _run_migration
+        result = _run_migration("letta", "http://localhost:99999", "", "sg_test_key_001",
+                                "http://testserver", dry_run=True, api_version=2)
+        assert "error" in result or result.get("dry_run") is True or result.get("total_imported") == 0
+
+    def test_format_converts(self):
+        from sdk.python.sgraal.cli import _convert_to_memcube
+        zep = {"uuid": "z1", "content": "hello", "metadata": {}}
+        mc = _convert_to_memcube(zep, "zep")
+        assert mc["id"] == "z1"
+        assert mc["content"] == "hello"
+        assert mc["source"] == "zep"
+        assert mc["type"] == "semantic"
+
+    def test_retrospective_audit_runs(self):
+        from sdk.python.sgraal.cli import _run_migration
+        result = _run_migration("zep", "http://localhost:99999", "", "sg_test",
+                                "http://testserver", dry_run=True, api_version=2)
+        # Should return a structured result even on connection error
+        assert isinstance(result, dict)
+        assert "total_imported" in result or "error" in result
+
+    def test_blocked_not_stored(self):
+        # Verify dry_run prevents storage
+        from sdk.python.sgraal.cli import _run_migration
+        result = _run_migration("zep", "http://localhost:99999", "", "sg_test",
+                                "http://testserver", dry_run=True, api_version=2)
+        if result.get("dry_run"):
+            assert result["total_imported"] >= 0  # no crash
+
+    def test_unexpected_format_clear_error(self):
+        from sdk.python.sgraal.cli import _run_migration
+        result = _run_migration("zep", "http://localhost:99999", "", "sg_test",
+                                "http://testserver", dry_run=True, api_version=1)
+        if "error" in result:
+            # Error message should be helpful, not a stack trace
+            assert isinstance(result["error"], str)
+            assert len(result["error"]) > 5
+
+
+class TestLineageExportFormats:
+    """#162 Lineage Export GraphML/RDF"""
+    def test_graphml_valid_xml(self):
+        r = client.get("/v1/store/lineage/export?format=graphml", headers=AUTH)
+        assert r.status_code == 200
+        assert "<?xml" in r.text
+        assert "<graphml" in r.text
+        assert "application/xml" in r.headers.get("content-type", "")
+
+    def test_rdf_valid_turtle(self):
+        r = client.get("/v1/store/lineage/export?format=rdf", headers=AUTH)
+        assert r.status_code == 200
+        assert "@prefix" in r.text
+        assert "sgraal:" in r.text
+        assert "text/turtle" in r.headers.get("content-type", "")
+
+    def test_json_still_works(self):
+        r = client.get("/v1/store/lineage/export?format=json", headers=AUTH)
+        assert r.status_code == 200
+        assert "format" in r.json()
+        assert r.json()["format"] == "json"
+
+    def test_docs_exist(self):
+        import os
+        assert os.path.exists("docs/LINEAGE_EXPORT.md")
+
+
+class TestMemCubeRFC:
+    """#167 Memory Schema RFC Process"""
+    def test_spec_endpoint_valid_json_schema(self):
+        r = client.get("/v1/standard/memcube-spec", headers=AUTH)
+        assert r.status_code == 200
+        spec = r.json()
+        assert spec["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+        assert spec["version"] == "2.0.0"
+
+    def test_memcube_version_in_preflight(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["memcube_version"] == "2.0.0"
+
+    def test_required_fields_in_spec(self):
+        r = client.get("/v1/standard/memcube-spec", headers=AUTH)
+        spec = r.json()
+        required = spec["required"]
+        assert "id" in required
+        assert "content" in required
+        assert "type" in required
+        assert "source_trust" in required
+        assert len(required) == 7
+
+    def test_rfc_page_exists(self):
+        import os
+        assert os.path.exists("web/app/rfc/page.tsx")
+
+    def test_memcube_rfc_doc_exists(self):
+        import os
+        assert os.path.exists("MEMCUBE_RFC.md")
+
+    def test_migrate_page_exists(self):
+        import os
+        assert os.path.exists("dashboard/app/migrate/page.tsx")

@@ -196,6 +196,138 @@ def cmd_status(args):
     return run_diagnose(key, url)
 
 
+def _convert_to_memcube(entry: dict, source: str = "zep") -> dict:
+    """Convert external memory format to MemCube v2."""
+    return {
+        "id": entry.get("id", entry.get("uuid", entry.get("memory_id", ""))),
+        "content": entry.get("content", entry.get("text", entry.get("message", ""))),
+        "type": entry.get("type", entry.get("memory_type", "semantic")),
+        "timestamp_age_days": entry.get("timestamp_age_days", 0),
+        "source_trust": entry.get("source_trust", 0.7),
+        "source_conflict": entry.get("source_conflict", 0.1),
+        "downstream_count": entry.get("downstream_count", 0),
+        "source": source,
+    }
+
+
+def _run_migration(source_name: str, source_url: str, source_key: str, sgraal_key: str,
+                   sgraal_url: str, dry_run: bool, api_version: int) -> dict:
+    """Run migration from external memory system to Sgraal."""
+    import requests
+
+    # Fetch entries from source
+    headers = {"Authorization": f"Bearer {source_key}" if source_key else "",
+               "Content-Type": "application/json"}
+    if source_name == "zep":
+        fetch_url = f"{source_url}/api/v{api_version}/sessions" if api_version >= 2 else f"{source_url}/api/v1/sessions"
+    else:
+        fetch_url = f"{source_url}/v1/memory" if api_version >= 2 else f"{source_url}/api/memories"
+
+    try:
+        resp = requests.get(fetch_url, headers=headers, timeout=15)
+        if not resp.ok:
+            return {"error": f"{source_name} API returned {resp.status_code}", "total_imported": 0}
+        data = resp.json()
+    except requests.exceptions.ConnectionError:
+        return {"error": f"Cannot connect to {source_name} at {source_url}", "total_imported": 0}
+    except (ValueError, KeyError):
+        return {"error": f"Unexpected {source_name} API format. Try --api-version {1 if api_version == 2 else 2} or check docs.",
+                "total_imported": 0}
+
+    # Parse entries based on format
+    if isinstance(data, list):
+        raw_entries = data
+    elif isinstance(data, dict):
+        raw_entries = data.get("sessions", data.get("memories", data.get("results", [])))
+        if not isinstance(raw_entries, list):
+            return {"error": f"Unexpected {source_name} API format. Try --api-version {1 if api_version == 2 else 2} or check docs.",
+                    "total_imported": 0}
+    else:
+        return {"error": f"Unexpected {source_name} API format. Try --api-version {1 if api_version == 2 else 2} or check docs.",
+                "total_imported": 0}
+
+    # Convert to MemCube
+    converted = [_convert_to_memcube(e, source_name) for e in raw_entries]
+
+    # Run preflight on each
+    sgraal_headers = {"Authorization": f"Bearer {sgraal_key}", "Content-Type": "application/json"}
+    healthy, at_risk, blocked_list, top_issues = 0, 0, 0, []
+
+    for entry in converted:
+        try:
+            pr = requests.post(f"{sgraal_url}/v1/preflight",
+                json={"memory_state": [entry], "dry_run": dry_run},
+                headers=sgraal_headers, timeout=10)
+            if pr.ok:
+                omega = pr.json().get("omega_mem_final", 0)
+                action = pr.json().get("recommended_action", "USE_MEMORY")
+                if action == "BLOCK":
+                    blocked_list += 1
+                    top_issues.append(f"BLOCKED: {entry['id']} (omega={omega})")
+                elif omega > 40:
+                    at_risk += 1
+                    top_issues.append(f"AT_RISK: {entry['id']} (omega={omega})")
+                else:
+                    healthy += 1
+                # Store non-blocked entries (skip in dry_run)
+                if not dry_run and action != "BLOCK":
+                    requests.post(f"{sgraal_url}/v1/store/memories",
+                        json={"content": entry["content"], "memory_type": entry["type"],
+                              "metadata": {"source": source_name, "original_id": entry["id"]}},
+                        headers=sgraal_headers, timeout=10)
+        except Exception:
+            pass
+
+    total = len(converted)
+    improvement = round((blocked_list + at_risk * 0.5) / max(total, 1) * 100, 1)
+    return {
+        "total_imported": total,
+        "healthy": healthy,
+        "at_risk": at_risk,
+        "blocked": blocked_list,
+        "top_issues": top_issues[:10],
+        "estimated_quality_improvement": f"{improvement}% of memories had issues you didn't know about",
+        "dry_run": dry_run,
+        "source": source_name,
+    }
+
+
+def cmd_migrate_zep(args):
+    """Migrate from Zep to Sgraal."""
+    g, y, r, b, x = _color(not args.no_color)
+    result = _run_migration("zep", args.zep_url, args.zep_api_key, args.sgraal_key or _get_api_key(args),
+                            _get_url(args), args.dry_run, args.api_version)
+    if result.get("error"):
+        print(f"  {r}❌{x} {result['error']}")
+        return 1
+    print(f"\n  {b}Zep Migration Report{x}")
+    print(f"  Total: {result['total_imported']} | {g}Healthy: {result['healthy']}{x} | {y}At risk: {result['at_risk']}{x} | {r}Blocked: {result['blocked']}{x}")
+    print(f"  {result['estimated_quality_improvement']}")
+    if args.dry_run:
+        print(f"  {y}DRY RUN — no entries stored{x}")
+    if args.output == "json":
+        print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_migrate_letta(args):
+    """Migrate from Letta to Sgraal."""
+    g, y, r, b, x = _color(not args.no_color)
+    result = _run_migration("letta", args.letta_url, args.letta_api_key, args.sgraal_key or _get_api_key(args),
+                            _get_url(args), args.dry_run, args.api_version)
+    if result.get("error"):
+        print(f"  {r}❌{x} {result['error']}")
+        return 1
+    print(f"\n  {b}Letta Migration Report{x}")
+    print(f"  Total: {result['total_imported']} | {g}Healthy: {result['healthy']}{x} | {y}At risk: {result['at_risk']}{x} | {r}Blocked: {result['blocked']}{x}")
+    print(f"  {result['estimated_quality_improvement']}")
+    if args.dry_run:
+        print(f"  {y}DRY RUN — no entries stored{x}")
+    if args.output == "json":
+        print(json.dumps(result, indent=2))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(prog="sgraal", description="Sgraal memory governance CLI")
     parser.add_argument("--api-key", help="Sgraal API key")
@@ -228,13 +360,28 @@ def main():
     sub.add_parser("status", help="Check API status")
     sub.add_parser("diagnose", help="Run diagnostics")
 
+    p_zep = sub.add_parser("migrate-from-zep", help="Migrate from Zep to Sgraal")
+    p_zep.add_argument("--zep-url", required=True, help="Zep API URL")
+    p_zep.add_argument("--zep-api-key", default="", help="Zep API key")
+    p_zep.add_argument("--sgraal-key", default=None, help="Sgraal API key")
+    p_zep.add_argument("--dry-run", action="store_true", help="Preview without storing")
+    p_zep.add_argument("--api-version", type=int, default=2, help="Zep API version (1 or 2)")
+
+    p_letta = sub.add_parser("migrate-from-letta", help="Migrate from Letta to Sgraal")
+    p_letta.add_argument("--letta-url", required=True, help="Letta API URL")
+    p_letta.add_argument("--letta-api-key", default="", help="Letta API key")
+    p_letta.add_argument("--sgraal-key", default=None, help="Sgraal API key")
+    p_letta.add_argument("--dry-run", action="store_true", help="Preview without storing")
+    p_letta.add_argument("--api-version", type=int, default=2, help="Letta API version (1 or 2)")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
         return 0
 
     cmds = {"init": cmd_init, "preflight": cmd_preflight, "heal": cmd_heal,
-            "batch": cmd_batch, "explain": cmd_explain, "status": cmd_status, "diagnose": cmd_status}
+            "batch": cmd_batch, "explain": cmd_explain, "status": cmd_status, "diagnose": cmd_status,
+            "migrate-from-zep": cmd_migrate_zep, "migrate-from-letta": cmd_migrate_letta}
     return cmds[args.command](args)
 
 
