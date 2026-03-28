@@ -427,6 +427,8 @@ class StoreMemoryRequest(BaseModel):
 @app.post("/v1/store/memories")
 def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    if req.content.startswith("Synthetic test entry"):
+        raise HTTPException(status_code=400, detail="Synthetic memory cannot be stored directly.")
     kh = key_record.get("key_hash", "default")
     mem_id = str(uuid.uuid4())
 
@@ -1151,6 +1153,71 @@ def revoke_mem_token(token: str, key_record: dict = Depends(verify_api_key)):
         raise HTTPException(status_code=404, detail="Token not found or already expired")
     _mem_tokens.pop(token)
     return {"revoked": True}
+
+
+# ---- #139 Synthetic Memory Generator ----
+_synthetic_calls: dict[str, list] = {}  # key_hash → [timestamps]
+
+class SyntheticRequest(BaseModel):
+    attack_type: str = "poison"  # poison|conflict|stale|mixed
+    intensity: float = 0.5
+    entry_count: int = 3
+
+@app.post("/v1/memory/synthetic")
+def generate_synthetic(req: SyntheticRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    # Rate limit: 10/hour
+    now = _time.time()
+    calls = _synthetic_calls.get(kh, [])
+    calls = [t for t in calls if now - t < 3600]
+    if len(calls) >= 10:
+        raise HTTPException(status_code=429, detail="Max 10 synthetic calls per hour")
+    calls.append(now)
+    _synthetic_calls[kh] = calls
+
+    entries = []
+    for i in range(min(req.entry_count, 20)):
+        e = {"id": f"synthetic_{i}", "content": f"Synthetic test entry {i}", "type": "semantic",
+             "timestamp_age_days": 0, "source_trust": 0.9, "source_conflict": 0.1, "downstream_count": 1,
+             "_synthetic": True}
+        if req.attack_type in ("poison", "mixed"):
+            e["source_trust"] = max(0.01, 0.9 - req.intensity * 0.8)
+            e["downstream_count"] = int(1 + req.intensity * 50)
+        if req.attack_type in ("conflict", "mixed"):
+            e["source_conflict"] = min(0.99, 0.1 + req.intensity * 0.8)
+        if req.attack_type in ("stale", "mixed"):
+            e["timestamp_age_days"] = int(req.intensity * 500)
+        entries.append(e)
+
+    omega_low = 10 + int(req.intensity * 40)
+    omega_high = 30 + int(req.intensity * 60)
+    return {"synthetic_memory_state": entries, "attack_applied": req.attack_type,
+            "expected_omega_range": [omega_low, omega_high], "injected_signals": [req.attack_type],
+            "_headers": {"X-Sgraal-Synthetic": "true"}}
+
+# ---- #145 Playground Shareable Links ----
+@app.post("/v1/playground/save")
+def playground_save(data: dict, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    share_id = secrets.token_urlsafe(12)
+    redis_set(f"playground_share:{share_id}", data, ttl=7*86400)
+    return {"share_id": share_id, "share_url": f"https://sgraal.com/playground?share={share_id}"}
+
+@app.get("/v1/playground/load/{share_id}")
+def playground_load(share_id: str):
+    data = redis_get(f"playground_share:{share_id}")
+    if not data:
+        raise HTTPException(status_code=404, detail="Share link expired or not found")
+    return data
+
+# ---- #122 Goal Drift ----
+@app.post("/v1/agents/{agent_id}/reset-goal-baseline")
+def reset_goal_baseline(agent_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    redis_set(f"agent_goal:{kh}:{agent_id}", None, ttl=1)  # Expire immediately
+    return {"agent_id": agent_id, "baseline_reset": True}
 
 
 # ---- #117 Score Standard ----
@@ -4950,6 +5017,74 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["quota_used"] = 2
         except Exception:
             pass
+
+    # #121 Trust Decay per Source
+    try:
+        _trust_adjustments = {}
+        for e in entries:
+            _src_key = f"source_errors:{key_record.get('key_hash','default')}:{e.id}"
+            _src_data = redis_get(_src_key, {"errors": 0, "total": 0})
+            _src_data["total"] = _src_data.get("total", 0) + 1
+            redis_set(_src_key, _src_data, ttl=30*86400)
+            if _src_data["total"] >= 5:
+                error_rate = _src_data.get("errors", 0) / max(_src_data["total"], 1)
+                adjusted = round(e.source_trust * math.exp(-error_rate * 0.1), 4)
+                _trust_adjustments[e.id] = adjusted
+        if _trust_adjustments:
+            response["source_trust_adjusted"] = _trust_adjustments
+            # Wire into s_provenance
+            if "component_breakdown" in response:
+                avg_adj = sum(_trust_adjustments.values()) / len(_trust_adjustments)
+                prov_boost = max(0, (1.0 - avg_adj) * 10)
+                old_prov = response["component_breakdown"].get("s_provenance", 0)
+                response["component_breakdown"]["s_provenance"] = round(min(100, old_prov + prov_boost), 2)
+    except Exception:
+        pass
+
+    # #122 Goal Drift Detector
+    try:
+        _agent_id = getattr(req, 'agent_id', None) or "anonymous"
+        _goal_key = f"agent_goal:{key_record.get('key_hash','default')}:{_agent_id}"
+        _comp_vec = list(result.component_breakdown.values())
+        _baseline = redis_get(_goal_key)
+        if _baseline is None:
+            redis_set(_goal_key, _comp_vec, ttl=7*86400)
+        else:
+            # Cosine similarity
+            _dot = sum(a*b for a, b in zip(_comp_vec, _baseline))
+            _na = math.sqrt(sum(a*a for a in _comp_vec)) or 1
+            _nb = math.sqrt(sum(b*b for b in _baseline)) or 1
+            _sim = _dot / (_na * _nb)
+            _drift = round(1 - _sim, 4)
+            response["goal_drift"] = {"drift_score": _drift, "goal_drifted": _drift > 0.3, "baseline_age_calls": 1}
+            if _drift > 0.3:
+                repair_plan_out.append({"action": "GOAL_DRIFT_WARNING", "entry_id": "*",
+                    "reason": f"Agent goal drift detected ({_drift:.2f}). Review memory alignment.", "projected_improvement": 0, "priority": "medium"})
+    except Exception:
+        pass
+
+    # #141 Meta-Learning Rate
+    try:
+        _ml_key = f"learning_rate:{key_record.get('key_hash','default')}:{req.domain}"
+        _ml_data = redis_get(_ml_key, {"eta": 0.01, "ewc_strength": 0.1})
+        _cons_key = f"outcome_consistency:{key_record.get('key_hash','default')}:{req.domain}"
+        _cons = redis_get(_cons_key, {"consistent": 0, "total": 0})
+        _cons_score = _cons["consistent"] / max(_cons["total"], 1) if _cons["total"] > 0 else 0.5
+        eta = _ml_data.get("eta", 0.01)
+        ewc = _ml_data.get("ewc_strength", 0.1)
+        eta_adjusted = False
+        ewc_at_max = False
+        if _cons_score > 0.7:
+            eta = min(0.1, eta * 1.1); eta_adjusted = True
+        elif _cons_score < 0.3:
+            eta = max(0.001, eta * 0.9); eta_adjusted = True
+            ewc = min(1.0, ewc * 1.1)
+            if ewc >= 1.0: ewc_at_max = True
+        redis_set(_ml_key, {"eta": round(eta, 6), "ewc_strength": round(ewc, 4)}, ttl=86400)
+        response["meta_learning"] = {"current_eta": round(eta, 6), "consistency_score": round(_cons_score, 4),
+            "eta_adjusted": eta_adjusted, "ewc_strength": round(ewc, 4), "ewc_at_maximum": ewc_at_max}
+    except Exception:
+        pass
 
     # #130 Auto outcome inference
     try:

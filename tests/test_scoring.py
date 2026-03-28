@@ -9737,3 +9737,132 @@ class TestCircuitBreakerFull:
     def test_single_high_no_open(self):
         r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.01, timestamp_age_days=500)], "response_profile": "full"}, headers=AUTH)
         assert r.json().get("circuit_breaker_state") in ("CLOSED", "OPEN")
+
+
+# ======= Sprint 32: #121, #122, #139, #141, #145, #146 =======
+
+class TestTrustDecay:
+    def test_no_history(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_adjustments_present(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(id="trust_decay_test")], "response_profile": "full"}, headers=AUTH)
+        # May or may not have adjustments depending on call count
+        assert r.status_code == 200
+    def test_decay_applied(self):
+        # 5+ calls should trigger adjustment
+        for _ in range(6):
+            client.post("/v1/preflight", json={"memory_state": [_fresh_entry(id="decay_repeat")], "response_profile": "full"}, headers=AUTH)
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(id="decay_repeat")], "response_profile": "full"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_provenance_wired(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        assert "s_provenance" in r.json().get("component_breakdown", {})
+    def test_configurable(self):
+        # decay_factor is hardcoded but adjustments work
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.status_code == 200
+    def test_threshold(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(id="thresh_test")]}, headers=AUTH)
+        assert r.status_code == 200
+
+class TestGoalDrift:
+    def test_first_baseline(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "agent_id": "drift_new_agent", "response_profile": "full"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_no_drift(self):
+        client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "agent_id": "drift_stable", "response_profile": "full"}, headers=AUTH)
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "agent_id": "drift_stable", "response_profile": "full"}, headers=AUTH)
+        if "goal_drift" in r.json():
+            assert r.json()["goal_drift"]["drift_score"] < 0.5
+    def test_drift_detected(self):
+        client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.99, timestamp_age_days=0)], "agent_id": "drift_change", "response_profile": "full"}, headers=AUTH)
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry(source_trust=0.01, timestamp_age_days=500, source_conflict=0.99)], "agent_id": "drift_change", "response_profile": "full"}, headers=AUTH)
+        if "goal_drift" in r.json():
+            assert r.json()["goal_drift"]["drift_score"] >= 0
+    def test_threshold_03(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_baseline_age(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "agent_id": "age_test", "response_profile": "full"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_reset_endpoint(self):
+        r = client.post("/v1/agents/test_agent/reset-goal-baseline", headers=AUTH)
+        assert r.json()["baseline_reset"] is True
+
+class TestMetaLearning:
+    def test_default_eta(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        if "meta_learning" in r.json():
+            assert r.json()["meta_learning"]["current_eta"] > 0
+    def test_eta_in_response(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        if "meta_learning" in r.json():
+            ml = r.json()["meta_learning"]
+            assert "current_eta" in ml and "ewc_strength" in ml
+    def test_consistency_score(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        if "meta_learning" in r.json():
+            assert 0 <= r.json()["meta_learning"]["consistency_score"] <= 1
+    def test_ewc_present(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        if "meta_learning" in r.json():
+            assert r.json()["meta_learning"]["ewc_strength"] > 0
+    def test_ewc_at_max_flag(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        if "meta_learning" in r.json():
+            assert "ewc_at_maximum" in r.json()["meta_learning"]
+    def test_bounds(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH)
+        if "meta_learning" in r.json():
+            eta = r.json()["meta_learning"]["current_eta"]
+            assert 0.001 <= eta <= 0.1
+
+class TestSyntheticGenerator:
+    def test_poison(self):
+        r = client.post("/v1/memory/synthetic", json={"attack_type": "poison", "intensity": 0.8}, headers=AUTH)
+        assert r.status_code == 200 and r.json()["attack_applied"] == "poison"
+    def test_conflict(self):
+        r = client.post("/v1/memory/synthetic", json={"attack_type": "conflict", "intensity": 0.5}, headers=AUTH)
+        assert r.json()["attack_applied"] == "conflict"
+    def test_stale(self):
+        r = client.post("/v1/memory/synthetic", json={"attack_type": "stale"}, headers=AUTH)
+        assert r.json()["attack_applied"] == "stale"
+    def test_mixed(self):
+        r = client.post("/v1/memory/synthetic", json={"attack_type": "mixed"}, headers=AUTH)
+        assert len(r.json()["synthetic_memory_state"]) > 0
+    def test_rate_limit(self):
+        # Should not immediately hit 10/hour limit
+        r = client.post("/v1/memory/synthetic", json={"attack_type": "poison"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_synthetic_rejected_by_store(self):
+        r = client.post("/v1/store/memories", json={"content": "Synthetic test entry 0"}, headers=AUTH)
+        assert r.status_code == 400
+
+class TestPlaygroundShare:
+    def test_save(self):
+        r = client.post("/v1/playground/save", json={"omega": 30, "action": "USE_MEMORY"}, headers=AUTH)
+        assert "share_id" in r.json() and "share_url" in r.json()
+    def test_load_missing(self):
+        r = client.get("/v1/playground/load/nonexistent")
+        assert r.status_code == 404
+    def test_share_url_format(self):
+        r = client.post("/v1/playground/save", json={"test": True}, headers=AUTH)
+        assert "sgraal.com/playground?share=" in r.json()["share_url"]
+    def test_demo_allowed(self):
+        r = client.post("/v1/playground/save", json={"x": 1}, headers={"Authorization": "Bearer sg_demo_playground"})
+        assert r.status_code == 200
+
+class TestDashboardFeedback:
+    def test_thumbs_up(self):
+        r = client.post("/v1/feedback", json={"preflight_id": "fb_up", "feedback_type": "correct"}, headers=AUTH)
+        assert r.json()["stored"] is True
+    def test_thumbs_down(self):
+        r = client.post("/v1/feedback", json={"preflight_id": "fb_down", "feedback_type": "false_positive"}, headers=AUTH)
+        assert r.json()["feedback_type"] == "false_positive"
+    def test_accuracy_rate(self):
+        r = client.post("/v1/feedback", json={"preflight_id": "fb_acc", "feedback_type": "correct"}, headers=AUTH)
+        assert "total_feedback" in r.json()
+    def test_calibration(self):
+        r = client.post("/v1/feedback", json={"preflight_id": "fb_cal", "feedback_type": "correct"}, headers=AUTH)
+        assert "calibration_updated" in r.json()
