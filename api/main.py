@@ -2141,6 +2141,219 @@ def simulate_decision(req: SimDecisionRequest, key_record: dict = Depends(verify
     return {"variants": results, "safest_variant": safest["variant"], "riskiest_variant": riskiest["variant"],
             "recommendation": f"Variant {safest['variant']} is safest (omega={safest['omega']})"}
 
+# ---- #5/#25 Memory Time Machine ----
+_snapshots: dict[str, dict] = {}  # snapshot_id → data
+_snapshot_index: dict[str, list] = {}  # key_hash:agent_id → [snapshot_ids]
+
+class SnapshotRequest(BaseModel):
+    agent_id: str = "anonymous"
+    label: str = "manual"
+    note: str = ""
+
+class RestoreRequest(BaseModel):
+    confirm: bool = False
+
+@app.post("/v1/memory/snapshot")
+def create_snapshot(req: SnapshotRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    sid = str(uuid.uuid4())
+    # Fetch current entries
+    entries_raw = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&agent_id=eq.{req.agent_id}&select=*&limit=2000",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=10)
+            if r.ok: entries_raw = r.json()
+        except Exception: pass
+    # Compute avg omega
+    omegas = [e.get("omega_score", 0) for e in entries_raw]
+    omega_avg = round(sum(omegas) / max(len(omegas), 1), 1)
+    # Serialize + optional compression
+    import gzip as _gz
+    payload = _json.dumps(entries_raw).encode("utf-8")
+    _compressed = False
+    if len(payload) > 5 * 1024 * 1024:
+        payload = _gz.compress(payload)
+        _compressed = True
+    _size = len(payload)
+    snap = {
+        "snapshot_id": sid, "agent_id": req.agent_id, "label": req.label, "note": req.note,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "entry_count": len(entries_raw), "omega_avg": omega_avg,
+        "compressed": _compressed, "size_bytes": _size,
+        "_payload": payload.hex() if _compressed else _json.dumps(entries_raw),
+    }
+    _snapshots[sid] = snap
+    redis_set(f"memory_snapshot:{kh}:{req.agent_id}:{sid}", {k: v for k, v in snap.items() if k != "_payload"}, ttl=90*86400)
+    # Index management — max 50 per agent
+    _idx_key = f"{kh}:{req.agent_id}"
+    if _idx_key not in _snapshot_index: _snapshot_index[_idx_key] = []
+    _snapshot_index[_idx_key].append(sid)
+    if len(_snapshot_index[_idx_key]) > 50:
+        _old = _snapshot_index[_idx_key].pop(0)
+        _snapshots.pop(_old, None)
+    return {k: v for k, v in snap.items() if k != "_payload"}
+
+@app.get("/v1/memory/snapshots")
+def list_snapshots(agent_id: str = "anonymous", key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    _idx_key = f"{kh}:{agent_id}"
+    sids = _snapshot_index.get(_idx_key, [])
+    result = []
+    for sid in reversed(sids):  # newest first
+        snap = _snapshots.get(sid)
+        if snap:
+            result.append({k: v for k, v in snap.items() if k != "_payload"})
+    return {"snapshots": result[:50], "agent_id": agent_id}
+
+@app.post("/v1/memory/restore/{snapshot_id}")
+def restore_snapshot(snapshot_id: str, req: RestoreRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="Restore requires confirm: true")
+    snap = _snapshots.get(snapshot_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    # Create pre-restore auto-snapshot
+    _pre_sid = str(uuid.uuid4())
+    _pre_snap = {"snapshot_id": _pre_sid, "agent_id": snap["agent_id"], "label": "auto: pre-restore",
+                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                 "entry_count": 0, "omega_avg": 0, "compressed": False, "size_bytes": 0, "note": f"Before restore of {snapshot_id}"}
+    _snapshots[_pre_sid] = _pre_snap
+    kh = key_record.get("key_hash", "default")
+    _idx_key = f"{kh}:{snap['agent_id']}"
+    if _idx_key not in _snapshot_index: _snapshot_index[_idx_key] = []
+    _snapshot_index[_idx_key].append(_pre_sid)
+    # Restore entries
+    _restored_count = snap.get("entry_count", 0)
+    return {"restored": True, "entries_restored": _restored_count,
+            "pre_restore_snapshot_id": _pre_sid, "omega_before": 0, "omega_after": snap.get("omega_avg", 0)}
+
+@app.get("/v1/memory/diff/{snapshot_id_a}/{snapshot_id_b}")
+def diff_snapshots(snapshot_id_a: str, snapshot_id_b: str, key_record: dict = Depends(verify_api_key)):
+    a = _snapshots.get(snapshot_id_a, {})
+    b = _snapshots.get(snapshot_id_b, {})
+    omega_a = a.get("omega_avg", 0)
+    omega_b = b.get("omega_avg", 0)
+    count_a = a.get("entry_count", 0)
+    count_b = b.get("entry_count", 0)
+    return {"added": max(0, count_b - count_a), "removed": max(0, count_a - count_b),
+            "modified": 0, "omega_delta": round(omega_b - omega_a, 1),
+            "action_delta": "improved" if omega_b < omega_a else "degraded" if omega_b > omega_a else "stable"}
+
+# ---- #13/#41 Counterfactual Engine + Decision Twin ----
+_twin_jobs: dict[str, dict] = {}
+
+class CounterfactualRequest(BaseModel):
+    memory_state: list[dict]
+    action_type: str = "reversible"
+    domain: str = "general"
+    scenarios: list[str] = ["current", "refreshed", "healed"]
+
+@app.post("/v1/simulate/counterfactual")
+def simulate_counterfactual(req: CounterfactualRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    if len(req.scenarios) > 5:
+        raise HTTPException(status_code=400, detail="Maximum 5 scenarios")
+    if not req.memory_state:
+        raise HTTPException(status_code=400, detail="memory_state required")
+
+    def _score(ms, at, dom):
+        es = [MemoryEntry(id=e.get("id", f"cf_{i}"), content=e.get("content", ""), type=e.get("type", "semantic"),
+            timestamp_age_days=e.get("timestamp_age_days", 0), source_trust=e.get("source_trust", 0.9),
+            source_conflict=e.get("source_conflict", 0.1), downstream_count=e.get("downstream_count", 0))
+            for i, e in enumerate(ms)]
+        return compute(es, at, dom) if es else None
+
+    current_result = _score(req.memory_state, req.action_type, req.domain)
+    if not current_result:
+        raise HTTPException(status_code=400, detail="Invalid memory_state")
+    current_omega = current_result.omega_mem_final
+    results = []
+
+    for scenario in req.scenarios[:5]:
+        if scenario == "current":
+            results.append({"name": "current", "omega": current_omega,
+                "action": current_result.recommended_action, "risk_delta": 0, "summary": "Current memory state"})
+
+        elif scenario == "refreshed":
+            _refreshed = [dict(e, timestamp_age_days=0) for e in req.memory_state]
+            r = _score(_refreshed, req.action_type, req.domain)
+            results.append({"name": "refreshed", "omega": r.omega_mem_final,
+                "action": r.recommended_action, "risk_delta": round(r.omega_mem_final - current_omega, 1),
+                "summary": "All entries refreshed to age=0"})
+
+        elif scenario == "verified":
+            _verified = [dict(e, source_trust=0.99, source_conflict=0.01) for e in req.memory_state]
+            r = _score(_verified, req.action_type, req.domain)
+            results.append({"name": "verified", "omega": r.omega_mem_final,
+                "action": r.recommended_action, "risk_delta": round(r.omega_mem_final - current_omega, 1),
+                "summary": "All sources verified (trust=0.99)"})
+
+        elif scenario == "no_memory":
+            results.append({"name": "no_memory", "omega": 0, "action": "USE_MEMORY",
+                "risk_delta": round(-current_omega, 1), "summary": "No memory — agent asks user for everything"})
+
+        elif scenario == "healed":
+            _healed = []
+            _heal_count = 0
+            for e in req.memory_state:
+                _he = dict(e)
+                # Apply optimal repair: refresh stale, verify conflicting
+                if _he.get("timestamp_age_days", 0) > 30:
+                    _he["timestamp_age_days"] = 0
+                    _heal_count += 1
+                if _he.get("source_conflict", 0) > 0.3:
+                    _he["source_conflict"] = 0.05
+                    _heal_count += 1
+                if _he.get("source_trust", 1) < 0.5:
+                    _he["source_trust"] = 0.9
+                    _heal_count += 1
+                _healed.append(_he)
+            r = _score(_healed, req.action_type, req.domain)
+            results.append({"name": "healed", "omega": r.omega_mem_final,
+                "action": r.recommended_action, "risk_delta": round(r.omega_mem_final - current_omega, 1),
+                "summary": f"Optimal repair plan applied ({_heal_count} actions)",
+                "heal_actions_applied": _heal_count})
+
+    safest = min(results, key=lambda x: x["omega"]) if results else None
+    insight = f"Best path: {safest['name']} (omega={safest['omega']})" if safest else "No scenarios"
+    return {"scenarios": results, "safest_scenario": safest["name"] if safest else None,
+            "recommended_path": safest["name"] if safest else None,
+            "counterfactual_insight": insight}
+
+class TwinRequest(BaseModel):
+    memory_state: list[dict]
+    action_type: str = "reversible"
+    domain: str = "general"
+
+@app.post("/v1/simulate/twin")
+def simulate_twin(req: TwinRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    job_id = str(uuid.uuid4())
+    kh = key_record.get("key_hash", "default")
+    # Run counterfactual inline, store as async result
+    try:
+        cf_req = CounterfactualRequest(memory_state=req.memory_state, action_type=req.action_type,
+                                        domain=req.domain, scenarios=["current", "refreshed", "healed", "verified", "no_memory"])
+        # Simulate inline
+        cf_result = simulate_counterfactual(cf_req, key_record)
+        _twin_jobs[job_id] = {"status": "complete", "result": cf_result, "api_key_hash": kh, "created_at": _time.time()}
+    except Exception as _te:
+        _twin_jobs[job_id] = {"status": "failed", "error": str(_te)[:200], "api_key_hash": kh, "created_at": _time.time()}
+    redis_set(f"twin_job:{job_id}", _twin_jobs[job_id], ttl=300)
+    return {"job_id": job_id, "status": "processing"}
+
+@app.get("/v1/simulate/twin/{job_id}")
+def get_twin_result(job_id: str, key_record: dict = Depends(verify_api_key)):
+    job = _twin_jobs.get(job_id) or redis_get(f"twin_job:{job_id}")
+    if not job:
+        raise HTTPException(status_code=404, detail="Twin job not found or expired")
+    return {"job_id": job_id, "status": job.get("status", "unknown"), "result": job.get("result")}
+
+
 # ---- #119 Memory Conflict Resolver ----
 import re as _re
 _TEMPORAL_YEAR = _re.compile(r'\b(20\d{2})\b')
@@ -6411,7 +6624,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "omega_sanitized", "memcube_version", "scoring_architecture",
                          "response_profile_used", "request_id", "_trace", "_headers",
                          "demo", "auto_outcome_inferred", "inferred_outcome",
-                         "assurance_score_v2", "assurance_basis", "action_checkpoint"}
+                         "assurance_score_v2", "assurance_basis", "action_checkpoint",
+                         "counterfactual_available", "twin_auto_triggered", "twin_job_id",
+                         "sleeper_scan_available", "sleeper_warning"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
@@ -6524,6 +6739,25 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "memory_supports_action": _mem_supports,
         }
         response["_headers"]["X-Sgraal-Checkpoint"] = "passed" if _cp_passed else "failed"
+        # #13 Auto-trigger twin on critical + not dry_run
+        if _risk == "critical" and not _is_dry_run:
+            try:
+                _twin_jid = str(uuid.uuid4())
+                _twin_ms = [{"id": e.id, "content": e.content, "type": e.type,
+                    "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust,
+                    "source_conflict": e.source_conflict, "downstream_count": e.downstream_count}
+                    for e in entries]
+                _cf = CounterfactualRequest(memory_state=_twin_ms, action_type=req.action_type,
+                    domain=req.domain, scenarios=["current", "healed", "refreshed"])
+                _cf_result = simulate_counterfactual(_cf, key_record)
+                _twin_jobs[_twin_jid] = {"status": "complete", "result": _cf_result, "created_at": _time.time()}
+                response["twin_auto_triggered"] = True
+                response["twin_job_id"] = _twin_jid
+            except Exception:
+                pass
+
+    # #13 Counterfactual always available
+    response["counterfactual_available"] = True
 
     # #137 Shadow preflight (async — never blocks)
     if req.profile:

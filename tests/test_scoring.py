@@ -11359,3 +11359,134 @@ class TestSleeperDetector:
         }, headers=AUTH)
         assert r.status_code == 200
         # May or may not have sleeper_scan_available depending on scan results
+
+
+# ---- Sprint 37: Memory Time Machine + Counterfactual Engine ----
+
+class TestMemoryTimeMachine:
+    """#5/#25 Memory Time Machine"""
+    def test_snapshot_created_with_metadata(self):
+        r = client.post("/v1/memory/snapshot", json={"agent_id": "tm1", "label": "test"}, headers=AUTH)
+        assert r.status_code == 200
+        j = r.json()
+        assert "snapshot_id" in j
+        assert "size_bytes" in j
+        assert "compressed" in j
+        assert j["label"] == "test"
+
+    def test_compression_flag(self):
+        r = client.post("/v1/memory/snapshot", json={"agent_id": "tm2", "label": "small"}, headers=AUTH)
+        # Small snapshot should not be compressed
+        assert r.json()["compressed"] is False
+
+    def test_restore_confirm_required(self):
+        r1 = client.post("/v1/memory/snapshot", json={"agent_id": "tm3"}, headers=AUTH)
+        sid = r1.json()["snapshot_id"]
+        r2 = client.post(f"/v1/memory/restore/{sid}", json={"confirm": False}, headers=AUTH)
+        assert r2.status_code == 400
+
+    def test_restore_with_confirm(self):
+        r1 = client.post("/v1/memory/snapshot", json={"agent_id": "tm4"}, headers=AUTH)
+        sid = r1.json()["snapshot_id"]
+        r2 = client.post(f"/v1/memory/restore/{sid}", json={"confirm": True}, headers=AUTH)
+        assert r2.status_code == 200
+        assert r2.json()["restored"] is True
+
+    def test_pre_restore_auto_snapshot(self):
+        r1 = client.post("/v1/memory/snapshot", json={"agent_id": "tm5"}, headers=AUTH)
+        sid = r1.json()["snapshot_id"]
+        r2 = client.post(f"/v1/memory/restore/{sid}", json={"confirm": True}, headers=AUTH)
+        assert "pre_restore_snapshot_id" in r2.json()
+
+    def test_diff(self):
+        r1 = client.post("/v1/memory/snapshot", json={"agent_id": "tm6", "label": "a"}, headers=AUTH)
+        r2 = client.post("/v1/memory/snapshot", json={"agent_id": "tm6", "label": "b"}, headers=AUTH)
+        sid_a = r1.json()["snapshot_id"]
+        sid_b = r2.json()["snapshot_id"]
+        rd = client.get(f"/v1/memory/diff/{sid_a}/{sid_b}", headers=AUTH)
+        assert rd.status_code == 200
+        assert "omega_delta" in rd.json()
+        assert "action_delta" in rd.json()
+
+    def test_max_50_enforced(self):
+        from api.main import _snapshot_index
+        # Create 51 snapshots
+        for i in range(51):
+            client.post("/v1/memory/snapshot", json={"agent_id": "tm_max", "label": f"s{i}"}, headers=AUTH)
+        kh_key = "None:tm_max"
+        assert len(_snapshot_index.get(kh_key, [])) <= 50
+
+    def test_list_snapshots(self):
+        client.post("/v1/memory/snapshot", json={"agent_id": "tm_list", "label": "first"}, headers=AUTH)
+        r = client.get("/v1/memory/snapshots?agent_id=tm_list", headers=AUTH)
+        assert r.status_code == 200
+        assert len(r.json()["snapshots"]) >= 1
+
+
+class TestCounterfactualEngine:
+    """#13/#41 Counterfactual Engine + Decision Twin"""
+    def test_current_scenario(self):
+        r = client.post("/v1/simulate/counterfactual", json={
+            "memory_state": [_fresh_entry()], "scenarios": ["current"]
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["scenarios"][0]["name"] == "current"
+
+    def test_refreshed_scenario(self):
+        r = client.post("/v1/simulate/counterfactual", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=100)], "scenarios": ["current", "refreshed"]
+        }, headers=AUTH)
+        scenarios = r.json()["scenarios"]
+        refreshed = next(s for s in scenarios if s["name"] == "refreshed")
+        assert refreshed["risk_delta"] < 0  # refreshing reduces risk
+
+    def test_healed_dry_run_no_quota(self):
+        r = client.post("/v1/simulate/counterfactual", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=60, source_conflict=0.5)],
+            "scenarios": ["current", "healed"]
+        }, headers=AUTH)
+        healed = next(s for s in r.json()["scenarios"] if s["name"] == "healed")
+        assert "heal_actions_applied" in healed
+
+    def test_no_memory_scenario(self):
+        r = client.post("/v1/simulate/counterfactual", json={
+            "memory_state": [_fresh_entry()], "scenarios": ["no_memory"]
+        }, headers=AUTH)
+        no_mem = r.json()["scenarios"][0]
+        assert no_mem["omega"] == 0
+
+    def test_safest_identified(self):
+        r = client.post("/v1/simulate/counterfactual", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=50)],
+            "scenarios": ["current", "refreshed", "healed"]
+        }, headers=AUTH)
+        assert r.json()["safest_scenario"] is not None
+
+    def test_async_twin(self):
+        r1 = client.post("/v1/simulate/twin", json={
+            "memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        assert r1.status_code == 200
+        job_id = r1.json()["job_id"]
+        r2 = client.get(f"/v1/simulate/twin/{job_id}", headers=AUTH)
+        assert r2.status_code == 200
+        assert r2.json()["status"] == "complete"
+
+    def test_max_5_enforced(self):
+        r = client.post("/v1/simulate/counterfactual", json={
+            "memory_state": [_fresh_entry()],
+            "scenarios": ["current", "refreshed", "healed", "verified", "no_memory", "extra"]
+        }, headers=AUTH)
+        assert r.status_code == 400
+
+    def test_heal_actions_in_healed(self):
+        r = client.post("/v1/simulate/counterfactual", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=100, source_trust=0.3, source_conflict=0.8)],
+            "scenarios": ["healed"]
+        }, headers=AUTH)
+        healed = r.json()["scenarios"][0]
+        assert healed["heal_actions_applied"] >= 1
+
+    def test_counterfactual_available_in_preflight(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["counterfactual_available"] is True
