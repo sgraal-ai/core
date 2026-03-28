@@ -56,9 +56,11 @@ export default function RootLayout({
           <div className="flex items-center gap-6">
             <a href="/" className="font-mono text-gold text-lg font-bold">Sgraal</a>
             <div className="hidden sm:flex items-center gap-5 text-sm text-muted">
-              <a href="#how-it-works" className="hover:text-foreground transition">How it works</a>
-              <a href="#quickstart" className="hover:text-foreground transition">Quickstart</a>
-              <a href="#pricing" className="hover:text-foreground transition">Pricing</a>
+              <a href="/#how-it-works" className="hover:text-foreground transition">How it works</a>
+              <a href="/#quickstart" className="hover:text-foreground transition">Quickstart</a>
+              <a href="/customers" className="hover:text-foreground transition">Customers</a>
+              <a href="/benchmark" className="hover:text-foreground transition">Benchmark</a>
+              <a href="/blog" className="hover:text-foreground transition">Blog</a>
               <a href="/docs/compliance" className="hover:text-foreground transition">Compliance</a>
             </div>
           </div>

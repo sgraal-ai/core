@@ -32,6 +32,11 @@ function Hero() {
           Examples →
         </a>
       </div>
+      <p className="mt-6 text-muted text-sm">
+        <a href="/benchmark" className="text-gold hover:underline">See benchmark →</a>
+        <span className="mx-2">·</span>
+        <span className="text-gold font-semibold">34.2%</span> of agent memories are unreliable
+      </p>
     </section>
   );
 }
@@ -105,6 +110,11 @@ function InTheWild() {
           </div>
         </div>
       </div>
+      <p className="text-center mt-6 text-sm">
+        <a href="/failures" className="text-gold hover:underline">See failure gallery →</a>
+        <span className="text-muted mx-2">·</span>
+        <span className="text-muted">5 failure patterns Sgraal catches before they happen</span>
+      </p>
     </section>
   );
 }
@@ -210,8 +220,11 @@ const result = await guard({
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
         Quickstart — <span className="text-gold">three ways</span>
       </h2>
-      <p className="text-muted text-center max-w-2xl mx-auto mb-10">
+      <p className="text-muted text-center max-w-2xl mx-auto mb-2">
         REST API, Python SDK, or Node.js — pick your stack.
+      </p>
+      <p className="text-center mb-10">
+        <a href="/compatibility" className="text-gold text-sm hover:underline">Works with your stack → 14 frameworks supported</a>
       </p>
 
       <div className="flex justify-center gap-2 mb-2">
@@ -434,8 +447,12 @@ function Footer() {
     <footer className="border-t border-surface-light py-10 mt-10">
       <div className="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-6">
         <p className="font-mono text-gold text-lg font-bold">Sgraal</p>
-        <div className="flex items-center gap-6 text-sm text-muted">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted">
           <a href="mailto:hello@sgraal.com" className="hover:text-foreground transition">Contact</a>
+          <a href="/security" className="hover:text-foreground transition">Security</a>
+          <a href="/partners" className="hover:text-foreground transition">Partners</a>
+          <a href="/compatibility" className="hover:text-foreground transition">Compatibility</a>
+          <a href="/failures" className="hover:text-foreground transition">Failures</a>
           <a href="/privacy" className="hover:text-foreground transition">Privacy Policy</a>
           <a href="/terms" className="hover:text-foreground transition">Terms of Service</a>
         </div>
