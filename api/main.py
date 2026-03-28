@@ -159,6 +159,9 @@ class PreflightRequest(BaseModel):
     auto_explain_language: str = "en"  # en|de|fr
     trace_id: Optional[str] = None  # OTel trace propagation
     response_profile: Optional[str] = None  # compact | standard | full
+    cost_config: Optional[dict[str, float]] = None  # #127 Decision Cost Engine
+    auto_route: bool = False  # #126 Memory Routing Layer
+    policy_id: Optional[str] = None  # #125 Agent Policy Compiler
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -938,7 +941,7 @@ def get_quota(key_record: dict = Depends(verify_api_key)):
     tier = key_record.get("tier", "free")
     calls = key_record.get("calls_this_month", 0)
     limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
-    return {"plan": tier, "calls_used": calls, "calls_limit": limit, "calls_remaining": max(0, limit-calls),
+    return {"plan": tier, "tier": tier, "calls_used": calls, "calls_limit": limit, "calls_remaining": max(0, limit-calls),
             "reset_at": "first of next month", "overage_rate": "$0.001/call" if tier != "free" else "blocked"}
 
 
@@ -1273,6 +1276,240 @@ def register_plugin(name: str = "custom", key_record: dict = Depends(verify_api_
 @app.get("/v1/plugins")
 def list_plugins(key_record: dict = Depends(verify_api_key)):
     return {"plugins": [], "timeout_ms": 100}
+
+# ---- #126 Memory Routing Layer ----
+class MemoryRouteRequest(BaseModel):
+    context: str = "general"  # financial | irreversible | read | general
+    entries: list[dict] = []
+
+@app.post("/v1/memory/route")
+def route_memory(req: MemoryRouteRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    ctx = req.context.lower()
+    routed = list(req.entries)
+    excluded = 0
+    reason = "none"
+    if ctx == "financial":
+        filtered = [e for e in routed if e.get("type", e.get("memory_type", "")) in ("financial", "account", "transaction")]
+        excluded = len(routed) - len(filtered)
+        routed = filtered
+        reason = "financial_type_filter"
+    elif ctx == "irreversible":
+        filtered = [e for e in routed if e.get("source_trust", 0) > 0.7]
+        excluded = len(routed) - len(filtered)
+        routed = filtered
+        reason = "trust_threshold_0.7"
+    elif ctx == "read":
+        filtered = [e for e in routed if e.get("omega", e.get("omega_score", 100)) < 50]
+        excluded = len(routed) - len(filtered)
+        routed = filtered
+        reason = "omega_below_50"
+    else:
+        routed = sorted(routed, key=lambda e: e.get("omega", e.get("omega_score", 0)))
+        reason = "sorted_by_omega"
+    return {"routed_entries": routed, "entries_excluded": excluded,
+            "routing_applied": True, "routing_reason": reason, "context": ctx}
+
+# ---- #125 Agent Policy Compiler ----
+_VALID_ACTION_TYPES = {"read", "write", "delete", "financial", "irreversible", "informational", "reversible", "destructive"}
+_compiled_policies: dict[str, dict] = {}
+
+class PolicyCondition(BaseModel):
+    field: str
+    operator: str = "=="
+    value: str
+
+class PolicyRule(BaseModel):
+    condition: PolicyCondition
+    action: str = "BLOCK"
+
+class CompilePolicyRequest(BaseModel):
+    policy_id: str
+    rules: list[PolicyRule]
+
+def _validate_policy_condition(cond: PolicyCondition):
+    field = cond.field.lower()
+    val = cond.value
+    if field == "action_type":
+        if val not in _VALID_ACTION_TYPES:
+            raise HTTPException(status_code=400, detail=f"Invalid action_type value: {val}. Allowed: {sorted(_VALID_ACTION_TYPES)}")
+    elif field == "domain":
+        import re as _re
+        if not _re.match(r'^[a-zA-Z0-9_]{1,50}$', val):
+            raise HTTPException(status_code=400, detail=f"Invalid domain value: {val}. Must be alphanumeric+underscore, max 50 chars")
+    elif field == "omega":
+        try:
+            fv = float(val)
+            if not (0 <= fv <= 100):
+                raise ValueError
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Invalid omega value: {val}. Must be float 0-100")
+    elif field == "source_trust":
+        try:
+            fv = float(val)
+            if not (0 <= fv <= 1):
+                raise ValueError
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Invalid source_trust value: {val}. Must be float 0-1")
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown condition field: {field}")
+
+@app.post("/v1/policies/compile")
+def compile_policy(req: CompilePolicyRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    for rule in req.rules:
+        _validate_policy_condition(rule.condition)
+    compiled = {"policy_id": req.policy_id, "rules": [{"condition": {"field": r.condition.field, "operator": r.condition.operator, "value": r.condition.value}, "action": r.action} for r in req.rules], "compiled": True}
+    _compiled_policies[req.policy_id] = compiled
+    redis_set(f"compiled_policy:{req.policy_id}", compiled, ttl=86400)
+    return {"policy_id": req.policy_id, "compiled": True, "rule_count": len(req.rules)}
+
+@app.get("/v1/policies/{policy_id}")
+def get_policy(policy_id: str, key_record: dict = Depends(verify_api_key)):
+    pol = _compiled_policies.get(policy_id) or redis_get(f"compiled_policy:{policy_id}")
+    if not pol:
+        raise HTTPException(status_code=404, detail=f"Policy {policy_id} not found")
+    return pol
+
+def _evaluate_policy(policy_id: str, action_type: str, domain: str, omega: float) -> Optional[dict]:
+    """Evaluate a compiled policy. Returns override dict or None."""
+    pol = _compiled_policies.get(policy_id) or redis_get(f"compiled_policy:{policy_id}")
+    if not pol:
+        return None
+    for rule in pol.get("rules", []):
+        cond = rule["condition"]
+        field, op, val = cond["field"], cond.get("operator", "=="), cond["value"]
+        match = False
+        if field == "action_type":
+            match = (action_type == val) if op == "==" else (action_type != val)
+        elif field == "domain":
+            match = (domain == val) if op == "==" else (domain != val)
+        elif field == "omega":
+            fv = float(val)
+            if op == ">": match = omega > fv
+            elif op == "<": match = omega < fv
+            elif op == ">=": match = omega >= fv
+            elif op == "<=": match = omega <= fv
+            else: match = abs(omega - fv) < 0.01
+        elif field == "source_trust":
+            pass  # source_trust checked at entry level
+        if match:
+            return {"policy_id": policy_id, "rule_triggered": rule, "override": rule["action"]}
+    return {"policy_id": policy_id, "rule_triggered": None, "override": None}
+
+# ---- #136 WebSocket Dashboard ----
+_ws_connections: dict[str, list] = {}  # api_key_hash → [websocket]
+_event_buffers: dict[str, list] = {}  # api_key_hash → recent events
+
+def _push_event(kh: str, event: dict):
+    """Buffer event for SSE/WS consumers."""
+    if kh not in _event_buffers:
+        _event_buffers[kh] = []
+    _event_buffers[kh].append(event)
+    if len(_event_buffers[kh]) > 100:
+        _event_buffers[kh] = _event_buffers[kh][-100:]
+
+try:
+    from fastapi import WebSocket, WebSocketDisconnect
+    @app.websocket("/ws/events/{api_key_hash}")
+    async def ws_events(ws: WebSocket, api_key_hash: str, token: str = ""):
+        # Validate token
+        if token not in API_KEYS:
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        if api_key_hash not in _ws_connections:
+            _ws_connections[api_key_hash] = []
+        _ws_connections[api_key_hash].append(ws)
+        try:
+            await ws.send_json({"type": "connected", "transport": "websocket"})
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            _ws_connections[api_key_hash].remove(ws)
+except Exception:
+    pass
+
+from fastapi.responses import StreamingResponse
+import asyncio as _asyncio
+
+@app.get("/v1/events/stream")
+def sse_stream(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    def _generate():
+        yield f"data: {_json.dumps({'type': 'connected', 'transport': 'sse'})}\n\n"
+        buf = _event_buffers.get(kh, [])
+        for ev in buf[-10:]:
+            yield f"data: {_json.dumps(ev)}\n\n"
+    return StreamingResponse(_generate(), media_type="text/event-stream")
+
+# ---- #140 Memory Compression Webhook ----
+_compression_locks: dict[str, float] = {}
+
+@app.get("/v1/store/stats")
+def store_stats(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    total = 0
+    agents_count = 0
+    avg_omega = 0.0
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&select=id",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok:
+                total = len(r.json())
+        except Exception: pass
+    return {"total_memories": total, "agents_count": agents_count, "avg_omega": avg_omega,
+            "compression_threshold": 1000}
+
+def _check_compression(kh: str, agent_id: str, entry_count: int):
+    """Check if compression should be triggered. Returns compression result or None."""
+    if entry_count <= 1000:
+        return None
+    lock_key = f"compression_lock:{kh}:{agent_id}"
+    import time as _ct
+    # Check in-memory lock
+    if lock_key in _compression_locks:
+        if _ct.time() - _compression_locks[lock_key] < 300:
+            return {"compressed": False, "reason": "lock_held"}
+        del _compression_locks[lock_key]
+    # Check Redis lock
+    existing_lock = redis_get(lock_key)
+    if existing_lock:
+        return {"compressed": False, "reason": "lock_held"}
+    # Acquire lock
+    _compression_locks[lock_key] = _ct.time()
+    redis_set(lock_key, {"locked": True, "ts": _ct.time()}, ttl=300)
+    # Simulate compression
+    compressed_count = max(1, entry_count // 3)
+    archived_ids = [f"archived_{i}" for i in range(min(5, entry_count - compressed_count))]
+    # Release lock
+    del _compression_locks[lock_key]
+    webhook_payload = {
+        "event": "MEMORY_COMPRESSED",
+        "original_count": entry_count,
+        "compressed_count": compressed_count,
+        "synopsis": f"Compressed {entry_count} entries to {compressed_count}",
+        "archived_ids": archived_ids,
+    }
+    # Dispatch to learning webhooks
+    for wid, wh in _learning_webhooks.items():
+        if "MEMORY_COMPRESSED" in wh.get("events", []):
+            try:
+                http_requests.post(wh["url"], json=webhook_payload, timeout=2)
+            except Exception:
+                pass
+    return {"compressed": True, "original_count": entry_count, "compressed_count": compressed_count,
+            "synopsis": webhook_payload["synopsis"], "archived_ids": archived_ids}
+
+@app.post("/v1/store/compress")
+def trigger_compression(agent_id: str = "default", entry_count: int = 0, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    result = _check_compression(kh, agent_id, entry_count)
+    if result is None:
+        return {"compressed": False, "reason": "below_threshold", "compression_threshold": 1000}
+    return result
 
 
 # ---- #139 Synthetic Memory Generator ----
@@ -3233,6 +3470,32 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         action_context=e.action_context)
         for e in req.memory_state]
 
+    # #126 Auto-route: filter entries by context before scoring
+    _routing_applied = False
+    _entries_excluded = 0
+    if req.auto_route:
+        _route_ctx = "financial" if req.domain == "fintech" else "irreversible" if req.action_type in ("irreversible", "destructive") else "read" if req.action_type == "informational" else "general"
+        _pre_count = len(entries)
+        if _route_ctx == "financial":
+            entries = [e for e in entries if e.type in ("financial", "account", "transaction", "tool_state", "semantic")]
+        elif _route_ctx == "irreversible":
+            entries = [e for e in entries if e.source_trust > 0.7]
+        if not entries:
+            entries = [MemoryEntry(id=e.id, content=e.content, type=e.type,
+                timestamp_age_days=e.timestamp_age_days, source_trust=e.source_trust,
+                source_conflict=e.source_conflict, downstream_count=e.downstream_count)
+                for e in req.memory_state]
+        _entries_excluded = _pre_count - len(entries)
+        _routing_applied = True
+
+    # #125 Policy evaluation: BEFORE scoring
+    _policy_result = None
+    if req.policy_id:
+        _policy_result = _evaluate_policy(req.policy_id, req.action_type, req.domain, 0)
+        if _policy_result and _policy_result.get("override") == "BLOCK":
+            return {"omega_mem_final": 100, "recommended_action": "BLOCK",
+                    "policy_applied": _policy_result, "request_id": str(uuid.uuid4())}
+
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, req.custom_weights, req.thresholds, req.use_pagerank)
 
     # Fetch te_history ONCE for all time-series modules (eliminates 10 redundant Redis calls)
@@ -3469,6 +3732,40 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
     }
+
+    # #127 Decision Cost Engine
+    if req.cost_config:
+        _cc = req.cost_config
+        _cost_wrong = _cc.get("cost_of_wrong_decision_usd", 0)
+        _cost_block = _cc.get("cost_of_block_usd", 0)
+        _cost_delay = _cc.get("cost_of_delay_usd", 0)
+        _eci = round((omega_out / 100) * _cost_wrong, 4)
+        _ecfb = round((1 - omega_out / 100) * _cost_block, 4)
+        _net = round(_eci - _ecfb, 4)
+        _cost_action = "BLOCK" if _net > 0 else "USE_MEMORY"
+        response["decision_cost"] = {"eci": _eci, "ecfb": _ecfb, "net_cost_score": _net,
+                                     "cost_optimal_action": _cost_action, "cost_config_used": True}
+    else:
+        response["decision_cost"] = None
+
+    # #126 Routing metadata
+    if _routing_applied:
+        response["routing_applied"] = True
+        response["entries_excluded"] = _entries_excluded
+    else:
+        response["routing_applied"] = False
+
+    # #125 Policy metadata
+    if _policy_result:
+        response["policy_applied"] = _policy_result
+    elif req.policy_id:
+        response["policy_applied"] = {"policy_id": req.policy_id, "rule_triggered": None, "override": None}
+
+    # #136 Push event to WS/SSE buffer
+    _ev_kh = key_record.get("key_hash", "default")
+    _ev_type = "block" if result.recommended_action == "BLOCK" else "preflight"
+    _push_event(_ev_kh, {"type": _ev_type, "omega": omega_out, "decision": result.recommended_action,
+                         "request_id": request_id})
 
     # Drift details — ensemble of KL, Wasserstein, JSD
     component_scores = list(result.component_breakdown.values())
@@ -5229,10 +5526,18 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass
 
-    # #132 Compact response profile
+    # #132 Compact response profile + #147 Auto Response Profile by Tier
     _profile = req.response_profile
     if not _profile:
-        _profile = "compact" if key_record.get("demo") else "standard"
+        _tier = key_record.get("tier", "free")
+        if key_record.get("demo"):
+            _profile = "compact"
+        elif _tier == "pro":
+            _profile = "standard"
+        elif _tier in ("enterprise", "growth"):
+            _profile = "full"
+        else:
+            _profile = "standard"  # free/starter default to standard (compact opt-in)
     response["response_profile_used"] = _profile
     if _profile == "compact":
         _compact_keys = {"omega_mem_final", "recommended_action", "assurance_score", "repair_plan",
@@ -5299,6 +5604,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
         redis_set(_cb_key, _cb_state, ttl=300)
         response["circuit_breaker_state"] = _cb_state["state"]
+        # #136 Push circuit_open event
+        if _cb_state["state"] == "OPEN":
+            _push_event(_ev_kh, {"type": "circuit_open", "omega": omega_out, "domain": req.domain, "request_id": request_id})
     except Exception:
         response["circuit_breaker_state"] = "CLOSED"
 

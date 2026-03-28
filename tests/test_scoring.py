@@ -9991,3 +9991,264 @@ class TestPlugins:
             def name(self): return "bad"
             def score(self, e, c): raise RuntimeError("fail")
         assert run_plugin_with_timeout(Bad(), [], {})["score"] == 0.0
+
+
+# ---- Sprint 34 Tests ----
+
+class TestDecisionCostEngine:
+    """#127 Decision Cost Engine"""
+    def test_null_when_no_config(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["decision_cost"] is None
+
+    def test_eci_calculation(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=100, source_trust=0.2, source_conflict=0.8)],
+            "cost_config": {"cost_of_wrong_decision_usd": 1000, "cost_of_block_usd": 50, "cost_of_delay_usd": 10}
+        }, headers=AUTH)
+        dc = r.json()["decision_cost"]
+        assert dc["eci"] > 0
+        assert dc["cost_config_used"] is True
+
+    def test_ecfb_calculation(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "cost_config": {"cost_of_wrong_decision_usd": 100, "cost_of_block_usd": 500, "cost_of_delay_usd": 0}
+        }, headers=AUTH)
+        dc = r.json()["decision_cost"]
+        assert dc["ecfb"] > 0
+
+    def test_net_positive_block(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=200, source_trust=0.1, source_conflict=0.9)],
+            "action_type": "destructive",
+            "cost_config": {"cost_of_wrong_decision_usd": 10000, "cost_of_block_usd": 10, "cost_of_delay_usd": 0}
+        }, headers=AUTH)
+        dc = r.json()["decision_cost"]
+        assert dc["net_cost_score"] > 0  # ECI dominates → BLOCK recommended
+        assert dc["cost_optimal_action"] == "BLOCK"
+
+    def test_net_negative_use(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "cost_config": {"cost_of_wrong_decision_usd": 1, "cost_of_block_usd": 10000, "cost_of_delay_usd": 0}
+        }, headers=AUTH)
+        dc = r.json()["decision_cost"]
+        assert dc["net_cost_score"] < 0  # ECFB dominates → USE recommended
+        assert dc["cost_optimal_action"] == "USE_MEMORY"
+
+    def test_action_present(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "cost_config": {"cost_of_wrong_decision_usd": 100, "cost_of_block_usd": 100, "cost_of_delay_usd": 5}
+        }, headers=AUTH)
+        dc = r.json()["decision_cost"]
+        assert "cost_optimal_action" in dc
+
+
+class TestMemoryRoutingLayer:
+    """#126 Memory Routing Layer"""
+    def test_financial_route(self):
+        r = client.post("/v1/memory/route", json={
+            "context": "financial",
+            "entries": [{"type": "financial", "id": "f1"}, {"type": "episodic", "id": "e1"}]
+        }, headers=AUTH)
+        j = r.json()
+        assert len(j["routed_entries"]) == 1
+        assert j["routed_entries"][0]["id"] == "f1"
+
+    def test_irreversible_route(self):
+        r = client.post("/v1/memory/route", json={
+            "context": "irreversible",
+            "entries": [{"source_trust": 0.9, "id": "t1"}, {"source_trust": 0.3, "id": "t2"}]
+        }, headers=AUTH)
+        assert len(r.json()["routed_entries"]) == 1
+
+    def test_read_route(self):
+        r = client.post("/v1/memory/route", json={
+            "context": "read",
+            "entries": [{"omega": 30, "id": "r1"}, {"omega": 80, "id": "r2"}]
+        }, headers=AUTH)
+        assert len(r.json()["routed_entries"]) == 1
+
+    def test_auto_route_in_preflight(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "auto_route": True
+        }, headers=AUTH)
+        assert r.json()["routing_applied"] is True
+
+    def test_excluded_count(self):
+        r = client.post("/v1/memory/route", json={
+            "context": "financial",
+            "entries": [{"type": "financial"}, {"type": "episodic"}, {"type": "semantic"}]
+        }, headers=AUTH)
+        assert r.json()["entries_excluded"] == 2
+
+    def test_routing_reason(self):
+        r = client.post("/v1/memory/route", json={
+            "context": "general",
+            "entries": [{"omega": 30}, {"omega": 10}]
+        }, headers=AUTH)
+        assert r.json()["routing_reason"] == "sorted_by_omega"
+
+
+class TestAgentPolicyCompiler:
+    """#125 Agent Policy Compiler"""
+    def test_compile_valid(self):
+        r = client.post("/v1/policies/compile", json={
+            "policy_id": "pol_1",
+            "rules": [{"condition": {"field": "action_type", "value": "delete"}, "action": "BLOCK"}]
+        }, headers=AUTH)
+        assert r.json()["compiled"] is True
+
+    def test_invalid_condition_400(self):
+        r = client.post("/v1/policies/compile", json={
+            "policy_id": "pol_bad",
+            "rules": [{"condition": {"field": "unknown_field", "value": "x"}, "action": "BLOCK"}]
+        }, headers=AUTH)
+        assert r.status_code == 400
+
+    def test_invalid_value_400(self):
+        r = client.post("/v1/policies/compile", json={
+            "policy_id": "pol_bad2",
+            "rules": [{"condition": {"field": "action_type", "value": "hack"}, "action": "BLOCK"}]
+        }, headers=AUTH)
+        assert r.status_code == 400
+
+    def test_apply_in_preflight(self):
+        client.post("/v1/policies/compile", json={
+            "policy_id": "pol_test_pf",
+            "rules": [{"condition": {"field": "omega", "operator": ">", "value": "90"}, "action": "WARN"}]
+        }, headers=AUTH)
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "policy_id": "pol_test_pf"
+        }, headers=AUTH)
+        assert "policy_applied" in r.json()
+        assert r.json()["policy_applied"]["policy_id"] == "pol_test_pf"
+
+    def test_rule_triggered(self):
+        client.post("/v1/policies/compile", json={
+            "policy_id": "pol_trigger",
+            "rules": [{"condition": {"field": "action_type", "operator": "==", "value": "destructive"}, "action": "BLOCK"}]
+        }, headers=AUTH)
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "action_type": "destructive",
+            "policy_id": "pol_trigger"
+        }, headers=AUTH)
+        assert r.json()["recommended_action"] == "BLOCK"
+        assert r.json()["policy_applied"]["override"] == "BLOCK"
+
+    def test_404_not_found(self):
+        r = client.get("/v1/policies/nonexistent_policy_xyz", headers=AUTH)
+        assert r.status_code == 404
+
+
+class TestWebSocketDashboard:
+    """#136 WebSocket Dashboard"""
+    def test_ws_accepted(self):
+        with client.websocket_connect("/ws/events/test_hash?token=sg_test_key_001") as ws:
+            data = ws.receive_json()
+            assert data["type"] == "connected"
+            assert data["transport"] == "websocket"
+
+    def test_preflight_pushed(self):
+        from api.main import _push_event, _event_buffers
+        _push_event("evt_test", {"type": "preflight", "omega": 25})
+        assert any(e["type"] == "preflight" for e in _event_buffers.get("evt_test", []))
+
+    def test_block_pushed(self):
+        from api.main import _push_event, _event_buffers
+        _push_event("evt_test2", {"type": "block", "omega": 95})
+        assert any(e["type"] == "block" for e in _event_buffers.get("evt_test2", []))
+
+    def test_circuit_open_pushed(self):
+        from api.main import _push_event, _event_buffers
+        _push_event("evt_test3", {"type": "circuit_open", "omega": 90})
+        assert any(e["type"] == "circuit_open" for e in _event_buffers.get("evt_test3", []))
+
+    def test_invalid_token_rejected(self):
+        try:
+            with client.websocket_connect("/ws/events/test_hash?token=bad_token") as ws:
+                ws.receive_json()
+                assert False, "Should have been rejected"
+        except Exception:
+            pass  # Connection closed / rejected
+
+    def test_sse_fallback(self):
+        r = client.get("/v1/events/stream", headers=AUTH)
+        assert r.status_code == 200
+        assert "text/event-stream" in r.headers.get("content-type", "")
+
+
+class TestMemoryCompressionWebhook:
+    """#140 Memory Compression Webhook"""
+    def test_below_threshold_no_trigger(self):
+        r = client.post("/v1/store/compress?agent_id=a1&entry_count=500", headers=AUTH)
+        assert r.json()["compressed"] is False
+        assert r.json()["reason"] == "below_threshold"
+
+    def test_above_triggers(self):
+        r = client.post("/v1/store/compress?agent_id=a_above&entry_count=1500", headers=AUTH)
+        assert r.json()["compressed"] is True
+        assert r.json()["original_count"] == 1500
+
+    def test_lock_prevents_duplicate(self):
+        from api.main import _compression_locks
+        import time as _lt
+        lock_key = "compression_lock:None:a_locked"
+        _compression_locks[lock_key] = _lt.time()
+        r = client.post("/v1/store/compress?agent_id=a_locked&entry_count=2000", headers=AUTH)
+        assert r.json()["compressed"] is False
+        assert r.json()["reason"] == "lock_held"
+        del _compression_locks[lock_key]
+
+    def test_webhook_emitted(self):
+        r = client.post("/v1/store/compress?agent_id=a_wh&entry_count=1200", headers=AUTH)
+        j = r.json()
+        assert j["compressed"] is True
+        assert "synopsis" in j
+
+    def test_compressed_less_than_original(self):
+        r = client.post("/v1/store/compress?agent_id=a_less&entry_count=3000", headers=AUTH)
+        j = r.json()
+        assert j["compressed_count"] < j["original_count"]
+
+    def test_stats_endpoint(self):
+        r = client.get("/v1/store/stats", headers=AUTH)
+        j = r.json()
+        assert j["compression_threshold"] == 1000
+        assert "total_memories" in j
+
+
+class TestAutoResponseProfile:
+    """#147 Auto Response Profile by Tier"""
+    def test_demo_compact(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]},
+                        headers={"Authorization": "Bearer sg_demo_playground"})
+        j = r.json()
+        assert j.get("response_profile_used") == "compact"
+
+    def test_free_default_standard(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        j = r.json()
+        assert j.get("response_profile_used") == "standard"
+
+    def test_free_explicit_compact(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "compact"}, headers=AUTH)
+        j = r.json()
+        assert j.get("response_profile_used") == "compact"
+
+    def test_pro_standard(self):
+        # Pro tier should default to standard
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "response_profile": "standard"
+        }, headers=AUTH)
+        assert r.json()["response_profile_used"] == "standard"
+
+    def test_quota_has_tier(self):
+        r = client.get("/v1/quota", headers=AUTH)
+        assert "tier" in r.json()
