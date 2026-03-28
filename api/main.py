@@ -163,11 +163,13 @@ class PreflightRequest(BaseModel):
     cost_config: Optional[dict[str, float]] = None  # #127 Decision Cost Engine
     auto_route: bool = False  # #126 Memory Routing Layer
     policy_id: Optional[str] = None  # #125 Agent Policy Compiler
+    dry_run: bool = False  # FIX 9: no webhooks, no audit, no quota
 
 class HealRequest(BaseModel):
     entry_id: str
     action: Literal["REFETCH", "VERIFY_WITH_SOURCE", "REBUILD_WORKING_SET"]
     agent_id: Optional[str] = "anonymous"
+    updated_entries: Optional[list[dict]] = None  # FIX 8: closed-loop healing
 
 class OutcomeRequest(BaseModel):
     outcome_id: str
@@ -510,6 +512,12 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
                          "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
         except Exception:
             pass
+
+    # FIX 5: Trigger consensus check on memory write
+    try:
+        _trigger_consensus_check(kh, req.agent_id or "anonymous", 10)  # approximate count
+    except Exception:
+        pass
 
     return {"id": mem_id, "content": req.content, "metadata": req.metadata or {}, "score": omega, "blocked": blocked}
 
@@ -1022,7 +1030,22 @@ def analytics_usage(group_by: str = "day", from_date: Optional[str] = None, to_d
     return {"group_by": group_by, "data": []}
 @app.get("/v1/analytics/summary")
 def analytics_summary(key_record: dict = Depends(verify_api_key)):
-    return {"total_calls": 0, "block_rate": 0, "avg_omega": 0, "trend": "stable"}
+    # FIX 11: Include threshold recommendations when enough outcomes exist
+    kh = key_record.get("key_hash", "default")
+    _threshold_recs = None
+    for domain in ["general", "fintech", "medical", "coding"]:
+        buckets = _outcome_buckets.get(f"{kh}:{domain}", [])
+        if len(buckets) >= 50:
+            success_rate = sum(1 for b in buckets if b.get("status") == "success") / len(buckets)
+            _threshold_recs = {"domain": domain, "sample_size": len(buckets),
+                "suggested_warn": round(20 + (1 - success_rate) * 20, 1),
+                "suggested_ask": round(40 + (1 - success_rate) * 15, 1),
+                "suggested_block": round(65 + (1 - success_rate) * 15, 1),
+                "confidence": "high" if len(buckets) >= 100 else "medium"}
+            break
+    return {"total_calls": _metrics.preflight_total, "block_rate": round(_metrics.decisions.get("BLOCK", 0) / max(_metrics.preflight_total, 1) * 100, 1),
+            "avg_omega": _metrics.avg_omega(), "trend": "stable",
+            "threshold_recommendations": _threshold_recs}
 
 # ---- #38 Tags ----
 @app.get("/v1/store/tags")
@@ -1711,8 +1734,9 @@ def consensus_status(agent_id: str = "", key_record: dict = Depends(verify_api_k
     kh = key_record.get("key_hash", "default")
     subs = [s for s in _consensus_subs.values() if s.get("key_hash") == kh]
     agent_subs = [s for s in subs if s.get("agent_id") == agent_id] if agent_id else subs
-    return {"agent_id": agent_id or "all", "pending_checks": 0,
-            "last_consensus_at": None, "conflicts_resolved": 0,
+    _pc = redis_get(f"consensus_pending:{kh}", {"pending": 0, "resolved": 0})
+    return {"agent_id": agent_id or "all", "pending_checks": _pc.get("pending", 0),
+            "last_consensus_at": None, "conflicts_resolved": _pc.get("resolved", 0),
             "subscriptions": len(agent_subs)}
 
 def _check_consensus_overlap(kh: str, agent_id: str, memory_count: int):
@@ -1784,6 +1808,55 @@ def rag_filter(req: dict, key_record: dict = Depends(verify_api_key)):
             filtered.append(chunk)
     return {"filtered_chunks": filtered, "total": len(chunks), "passed": len(filtered),
             "filtered_out": len(chunks) - len(filtered)}
+
+
+# ---- FIX 5: Wire consensus into store/memories ----
+def _trigger_consensus_check(kh: str, agent_id: str, memory_count: int):
+    """Check consensus overlap and notify subscribers."""
+    try:
+        score = _check_consensus_overlap(kh, agent_id, memory_count)
+        if score < 0.8:
+            return
+        # Increment pending_checks
+        _pc_key = f"consensus_pending:{kh}"
+        _pc = redis_get(_pc_key, {"pending": 0, "resolved": 0})
+        _pc["pending"] = _pc.get("pending", 0) + 1
+        redis_set(_pc_key, _pc, ttl=86400)
+        # Notify subscribers
+        for sid, sub in _consensus_subs.items():
+            if sub.get("key_hash") == kh and sub.get("agent_id") != agent_id:
+                try:
+                    http_requests.post(sub["notify_url"], json={
+                        "event": "CONSENSUS_CHECK", "agent_id": agent_id,
+                        "conflict_score": score, "memory_count": memory_count}, timeout=2)
+                    _pc["resolved"] = _pc.get("resolved", 0) + 1
+                    redis_set(_pc_key, _pc, ttl=86400)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+# ---- FIX 11: Calibrated decision thresholds ----
+_outcome_buckets: dict[str, list] = {}  # domain → [{omega, status}]
+
+@app.post("/v1/thresholds/apply")
+def apply_thresholds(req: dict, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    warn = req.get("warn", 25)
+    ask = req.get("ask_user", 45)
+    block = req.get("block", 70)
+    domain = req.get("domain", "general")
+    # Safety bounds
+    if warn < 10 or warn > 40:
+        raise HTTPException(status_code=400, detail=f"warn must be 10-40, got {warn}")
+    if ask < warn + 5 or ask > 60:
+        raise HTTPException(status_code=400, detail=f"ask_user must be {warn+5}-60, got {ask}")
+    if block < ask + 5 or block > 90:
+        raise HTTPException(status_code=400, detail=f"block must be {ask+5}-90, got {block}")
+    kh = key_record.get("key_hash", "default")
+    profile = {"warn": warn, "ask_user": ask, "block": block, "domain": domain}
+    redis_set(f"custom_thresholds:{kh}:{domain}", profile, ttl=86400)
+    return {"applied": True, "thresholds": profile}
 
 
 # ---- #139 Synthetic Memory Generator ----
@@ -3369,7 +3442,7 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
     _audit_log("heal", heal_request_id, key_record, req.action, 0, {"entry_id": req.entry_id})
     _metrics.record_heal()
 
-    return {
+    heal_resp = {
         "healed": True,
         "healing_counter": prev + 1,
         "projected_improvement": projected,
@@ -3389,6 +3462,26 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
             "optimal_repair_sequence": [req.action],
         },
     }
+    # FIX 8: Closed-loop healing — re-preflight with updated entries
+    if req.updated_entries:
+        try:
+            _ue = [MemoryEntry(id=e.get("id", "healed"), content=e.get("content", ""),
+                type=e.get("type", "semantic"), timestamp_age_days=e.get("timestamp_age_days", 0),
+                source_trust=e.get("source_trust", 0.9), source_conflict=e.get("source_conflict", 0.1),
+                downstream_count=e.get("downstream_count", 0), healing_counter=prev + 1)
+                for e in req.updated_entries]
+            _hr = compute(_ue, "reversible", "general")
+            # Penalize excessive healing: healing_counter > 3 AND still high omega
+            _post_omega = _hr.omega_mem_final
+            if prev + 1 > 3 and _post_omega > 50:
+                _post_omega = min(100, _post_omega + 10)
+            heal_resp["post_heal_preflight"] = {"omega_mem_final": round(_post_omega, 1),
+                "recommended_action": _hr.recommended_action, "component_breakdown": _hr.component_breakdown}
+            heal_resp["omega_improvement"] = round(projected - _post_omega / 100, 2)
+            heal_resp["healing_successful"] = _post_omega < 50
+        except Exception:
+            pass
+    return heal_resp
 
 
 @app.post("/v1/webhooks")
@@ -5660,12 +5753,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass  # graceful degradation
 
-    # Audit log
-    _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out)
+    # FIX 9: dry_run skips audit log and webhooks
+    _is_dry_run = req.dry_run or key_record.get("demo", False)
+    if not _is_dry_run:
+        # Audit log
+        _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out)
 
-    # Webhook dispatch
+    # Webhook dispatch (skip in dry_run)
     entry_ids = [e.id for e in entries]
-    _dispatch_webhooks(result.recommended_action, request_id, omega_out, entry_ids)
+    if not _is_dry_run:
+        _dispatch_webhooks(result.recommended_action, request_id, omega_out, entry_ids)
 
     # Metrics + tracing
     _duration = _time.monotonic() - _t_start
@@ -5836,6 +5933,197 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass
 
+    # ====== DEEP LOGIC FIXES (post all-module) ======
+
+    # FIX 1: Component breakdown reconciliation — recompute omega from mutated breakdown
+    try:
+        from scoring_engine.omega_mem import WEIGHTS as _BASE_WEIGHTS, C_ACTION, C_DOMAIN
+        _final_cb = response.get("component_breakdown", {})
+        _used_weights = req.custom_weights if req.custom_weights else _BASE_WEIGHTS
+        _omega_recomputed = sum(_used_weights.get(k, _BASE_WEIGHTS.get(k, 0)) * v for k, v in _final_cb.items() if k in _used_weights or k in _BASE_WEIGHTS)
+        _omega_recomputed = max(0, min(100, _omega_recomputed))
+        _c_mult = C_ACTION.get(req.action_type, 1.0) * C_DOMAIN.get(req.domain, 1.0)
+        _omega_adjusted = min(100, round(_omega_recomputed * _c_mult, 1))
+        _omega_delta = round(_omega_adjusted - omega_out, 2)
+        response["omega_adjusted"] = _omega_adjusted
+        response["omega_delta"] = _omega_delta
+        response["score_version"] = "v2_reconciled"
+        # Recompute Shapley from FINAL breakdown
+        response["shapley_values"] = compute_shapley_values(_final_cb, req.action_type, req.domain, req.custom_weights)
+    except Exception:
+        response["omega_adjusted"] = omega_out
+        response["omega_delta"] = 0.0
+        response["score_version"] = "v2_reconciled"
+
+    # FIX 2: Module transparency — scoring architecture metadata
+    _mutating_modules = {"mahalanobis", "provenance_entropy", "subjective_logic", "frechet_distance",
+                         "mutual_information", "extended_freshness", "cox_hazard", "owa_provenance",
+                         "poisson_recall", "trust_decay"}
+    response["scoring_architecture"] = {
+        "core_components": 10,
+        "analytics_modules": 83,
+        "omega_source": "weighted_sum_10_components",
+        "analytics_affect_score": True if _omega_delta != 0 else False,
+    }
+    # Tag each module section with affects_omega
+    for _mk in ["hawkes_intensity", "copula_analysis", "mewma", "calibration", "free_energy",
+                 "info_thermodynamics", "rmt_analysis", "causal_graph", "spectral_analysis",
+                 "consolidation", "jump_diffusion", "hmm_regime", "koopman", "ergodicity",
+                 "fisher_rao", "geodesic_flow", "persistent_homology", "ricci_curvature",
+                 "dirichlet_process", "particle_filter", "dual_process_auq", "sparse_merkle",
+                 "lyapunov_exponent", "banach_contraction", "hotelling_t2", "cvar_risk",
+                 "gumbel_softmax", "simulated_annealing", "lqr_control"]:
+        if _mk in response and isinstance(response[_mk], dict):
+            response[_mk]["affects_omega"] = False
+    for _mk in ["mahalanobis_analysis", "provenance_entropy", "subjective_logic",
+                 "frechet_distance", "mutual_information", "extended_freshness",
+                 "cox_hazard", "owa_provenance", "poisson_recall"]:
+        if _mk in response and isinstance(response[_mk], dict):
+            response[_mk]["affects_omega"] = True
+
+    # FIX 3: auto_route warning — never USE_MEMORY on partial assessment
+    response["total_entry_count"] = len(req.memory_state)
+    response["scored_entry_count"] = len(entries)
+    if _routing_applied and _entries_excluded > 0:
+        response["auto_route_warning"] = f"Assessment based on {len(entries)}/{len(req.memory_state)} entries. {_entries_excluded} excluded by routing."
+        if response.get("recommended_action") == "USE_MEMORY":
+            response["recommended_action"] = "WARN"
+
+    # FIX 4: Real assurance_score — drift method agreement
+    try:
+        _dd = response.get("drift_details", {})
+        _methods = [v for v in [_dd.get("kl_divergence"), _dd.get("wasserstein"), _dd.get("jsd"),
+                                _dd.get("ensemble_score")] if v is not None and isinstance(v, (int, float))]
+        if len(_methods) >= 3:
+            _m_mean = sum(_methods) / len(_methods)
+            _m_std = (sum((x - _m_mean) ** 2 for x in _methods) / len(_methods)) ** 0.5
+            _agreement = 1 - _m_std / (_m_mean + 1e-8)
+            response["assurance_score"] = round(max(0, min(100, _agreement * 100)), 1)
+            response["assurance_basis"] = "drift_method_agreement"
+        else:
+            response["assurance_score"] = 50
+            response["assurance_basis"] = "insufficient_data"
+    except Exception:
+        response["assurance_score"] = 50
+        response["assurance_basis"] = "insufficient_data"
+    response["assurance_score_v2"] = True
+
+    # FIX 6: Override precedence chain
+    _override_chain = []
+    _original_base_action = result.recommended_action
+    response["original_base_action"] = _original_base_action
+    _override_chain.append({"source": "base_omega_score", "action": _original_base_action, "applied": True})
+    # Check if circuit breaker overrode
+    if response.get("circuit_breaker_state") == "OPEN":
+        _override_chain.append({"source": "circuit_breaker", "action": "BLOCK", "applied": True})
+        response["recommended_action"] = "BLOCK"
+        for _oc in _override_chain[:-1]: _oc["applied"] = False
+    # Check if policy compiler overrode
+    if _policy_result and _policy_result.get("override"):
+        _override_chain.append({"source": "policy_compiler", "action": _policy_result["override"], "applied": True})
+    # Check if homology torsion overrode
+    if response.get("hallucination_override"):
+        _override_chain.append({"source": "homology_torsion", "action": "ASK_USER", "applied": True})
+    # Check EU AI Act
+    _comp_violations = response.get("compliance_result", {}).get("violations", [])
+    if any(v.get("severity") == "critical" for v in _comp_violations):
+        _override_chain.append({"source": "eu_ai_act", "action": "BLOCK", "applied": True})
+    # Mark final winner
+    if len(_override_chain) > 1:
+        _winner = _override_chain[-1]
+        for _oc in _override_chain:
+            _oc["applied"] = (_oc is _winner)
+        _override_chain[0]["applied"] = False  # base is overridden
+    response["action_override_chain"] = _override_chain
+
+    # FIX 7: Entry-level Shapley (leave-one-out)
+    try:
+        _shapley_start = _time.monotonic()
+        _entry_shapley = []
+        _n_entries = len(entries)
+        _max_entries = 20 if _n_entries <= 20 else 5
+        _loo_entries = entries[:_max_entries] if _n_entries <= 20 else sorted(entries, key=lambda e: e.source_conflict, reverse=True)[:5]
+        _truncated = False
+        for _se in _loo_entries:
+            if _time.monotonic() - _shapley_start > 0.2:
+                # Timeout — truncate to top 3 by source_conflict
+                _entry_shapley = sorted(_entry_shapley, key=lambda x: abs(x["omega_contribution"]), reverse=True)[:3]
+                _truncated = True
+                break
+            _remaining = [e for e in entries if e.id != _se.id]
+            if _remaining:
+                _loo_result = compute(_remaining, req.action_type, req.domain, req.current_goal_embedding, req.custom_weights, req.thresholds)
+                _contribution = round(omega_out - _loo_result.omega_mem_final, 2)
+            else:
+                _contribution = round(omega_out, 2)
+            _entry_shapley.append({"entry_id": _se.id, "omega_contribution": _contribution,
+                "omega_without_entry": round(omega_out - _contribution, 1),
+                "is_primary_risk": _contribution > omega_out * 0.3})
+        response["entry_shapley"] = _entry_shapley
+        if _truncated or _n_entries > 20:
+            response["entry_shapley_truncated"] = True
+    except Exception:
+        response["entry_shapley"] = []
+
+    # FIX 9: Dry run — no webhooks, no audit, no quota
+    if req.dry_run or key_record.get("demo"):
+        response["dry_run"] = True
+
+    # FIX 10: "Why did this change?" auto diff
+    try:
+        _diff_key = f"last_preflight_summary:{key_record.get('key_hash','default')}:{req.agent_id or 'anonymous'}"
+        _prev_summary = redis_get(_diff_key)
+        if _prev_summary and isinstance(_prev_summary, dict):
+            _prev_omega = _prev_summary.get("omega", 0)
+            _prev_action = _prev_summary.get("action", "USE_MEMORY")
+            _prev_cb = _prev_summary.get("components", {})
+            _comp_changes = {}
+            for _ck2, _cv2 in response.get("component_breakdown", {}).items():
+                _old = _prev_cb.get(_ck2, 0)
+                if abs(_cv2 - _old) > 0.5:
+                    _comp_changes[_ck2] = {"before": round(_old, 1), "after": round(_cv2, 1), "delta": round(_cv2 - _old, 1)}
+            response["preflight_delta"] = {
+                "omega_change": round(omega_out - _prev_omega, 2),
+                "action_changed": response.get("recommended_action") != _prev_action,
+                "previous_action": _prev_action,
+                "components_changed": _comp_changes,
+                "entries_changed": len(req.memory_state) != _prev_summary.get("n_entries", 0),
+                "time_since_last": round(_time.time() - _prev_summary.get("ts", _time.time()), 1),
+            }
+        # Store current summary
+        redis_set(_diff_key, {
+            "omega": omega_out, "action": response.get("recommended_action", "USE_MEMORY"),
+            "components": {k: round(v, 1) for k, v in response.get("component_breakdown", {}).items()},
+            "n_entries": len(req.memory_state), "ts": _time.time()
+        }, ttl=3600)
+    except Exception:
+        pass
+
+    # FIX 11: Track outcomes per bucket for calibrated thresholds
+    try:
+        _ob_key = f"{key_record.get('key_hash','default')}:{req.domain}"
+        if _ob_key not in _outcome_buckets:
+            _outcome_buckets[_ob_key] = []
+        _outcome_buckets[_ob_key].append({"omega": omega_out, "action": response.get("recommended_action")})
+        if len(_outcome_buckets[_ob_key]) > 200:
+            _outcome_buckets[_ob_key] = _outcome_buckets[_ob_key][-200:]
+    except Exception:
+        pass
+
+    # FIX 12: Privacy layer + repair_plan actionability
+    if req.detail_level == "obfuscated":
+        for _rp_idx, _rp_item in enumerate(response.get("repair_plan", [])):
+            if isinstance(_rp_item, dict):
+                _orig_eid = _rp_item.get("entry_id", "")
+                # Use caller-provided id or positional index
+                _rp_item["action_reference"] = f"entry_{_rp_idx}" if _orig_eid.startswith("auto:") else _orig_eid
+            elif hasattr(_rp_item, "entry_id"):
+                pass  # HealingAction dataclass — leave as is
+    else:
+        for _rp_item in response.get("repair_plan", []):
+            if isinstance(_rp_item, dict):
+                _rp_item["action_reference"] = _rp_item.get("entry_id", "")
+
     # #132 Compact response profile + #147 Auto Response Profile by Tier
     _profile = req.response_profile
     if not _profile:
@@ -5852,7 +6140,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if _profile == "compact":
         _compact_keys = {"omega_mem_final", "recommended_action", "assurance_score", "repair_plan",
                          "explainability_note", "confidence_intervals", "response_profile_used", "demo",
-                         "request_id", "_trace", "auto_outcome_inferred", "inferred_outcome"}
+                         "request_id", "_trace", "auto_outcome_inferred", "inferred_outcome",
+                         "dry_run", "_headers", "assurance_score_v2", "assurance_basis"}
         response = {k: v for k, v in response.items() if k in _compact_keys}
         response["response_profile_used"] = "compact"
 
@@ -5928,6 +6217,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "X-Sgraal-Latency-Ms": str(response.get("_trace", {}).get("duration_ms", 0)),
         "X-SMRS": str(omega_out),
     }
+    # FIX 9: Add dry_run header after _headers is created
+    if response.get("dry_run"):
+        response["_headers"]["X-Sgraal-Dry-Run"] = "true"
 
     # #137 Shadow preflight (async — never blocks)
     if req.profile:

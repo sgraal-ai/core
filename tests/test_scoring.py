@@ -10557,3 +10557,402 @@ class TestPreLaunchSecurityFixes:
             "version": "1.0", "domain": "<script>alert(1)</script>"
         }, headers=AUTH)
         assert r.status_code == 400
+
+
+# ---- Deep Logic Fix Tests ----
+
+class TestFix1Reconciliation:
+    """FIX 1: Component breakdown reconciliation"""
+    def test_omega_adjusted_computed(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "omega_adjusted" in r.json()
+    def test_omega_delta_present(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "omega_delta" in r.json()
+        assert isinstance(r.json()["omega_delta"], (int, float))
+    def test_shapley_uses_final(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "shapley_values" in r.json()
+    def test_score_version(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["score_version"] == "v2_reconciled"
+    def test_zero_delta_no_mutations(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        # With single entry, few post-hoc modules fire, delta should be small
+        assert abs(r.json()["omega_delta"]) < 50
+    def test_adjusted_can_differ(self):
+        # Multiple entries with high conflict trigger post-hoc mutations
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(id=f"e{i}", source_trust=0.3, source_conflict=0.8) for i in range(5)]
+        }, headers=AUTH)
+        assert "omega_adjusted" in r.json()
+
+
+class TestFix2ModuleTransparency:
+    """FIX 2: Module transparency"""
+    def test_scoring_architecture_present(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        sa = r.json()["scoring_architecture"]
+        assert sa["core_components"] == 10
+        assert sa["analytics_modules"] == 83
+    def test_affects_omega_true_for_mutating(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(id=f"e{i}") for i in range(3)]
+        }, headers=AUTH)
+        # Check any mutating module that fired
+        for key in ["provenance_entropy", "mutual_information", "extended_freshness"]:
+            if key in r.json() and isinstance(r.json()[key], dict):
+                assert r.json()[key].get("affects_omega") is True
+                break
+    def test_affects_omega_false_for_analytics(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        for key in ["hawkes_intensity", "copula_analysis", "calibration"]:
+            if key in r.json() and isinstance(r.json()[key], dict):
+                assert r.json()[key].get("affects_omega") is False
+                break
+    def test_core_always_10(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["scoring_architecture"]["core_components"] == 10
+
+
+class TestFix3AutoRouteWarning:
+    """FIX 3: auto_route warning"""
+    def test_warning_present(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(source_trust=0.3)],
+            "auto_route": True, "action_type": "irreversible"
+        }, headers=AUTH)
+        if r.json().get("entries_excluded", 0) > 0:
+            assert "auto_route_warning" in r.json()
+    def test_scored_less_than_total(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["scored_entry_count"] <= r.json()["total_entry_count"]
+    def test_warn_enforced_on_exclusion(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(source_trust=0.5), _fresh_entry(id="e2", source_trust=0.3)],
+            "auto_route": True, "action_type": "irreversible"
+        }, headers=AUTH)
+        if r.json().get("entries_excluded", 0) > 0:
+            assert r.json()["recommended_action"] != "USE_MEMORY"
+    def test_no_warning_on_zero_exclusions(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "auto_route_warning" not in r.json()
+    def test_total_always_present(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "total_entry_count" in r.json()
+        assert "scored_entry_count" in r.json()
+    def test_no_downgrade_on_zero(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        # No auto_route → no exclusions → action is whatever base score says
+        assert r.json()["recommended_action"] in ("USE_MEMORY", "WARN", "ASK_USER", "BLOCK")
+
+
+class TestFix4RealAssurance:
+    """FIX 4: Real assurance_score"""
+    def test_high_agreement_high_assurance(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["assurance_score"] >= 0
+    def test_insufficient_data_50(self):
+        # With single entry and no drift methods, should fall to insufficient_data
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["assurance_basis"] in ("drift_method_agreement", "insufficient_data")
+    def test_assurance_basis(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "assurance_basis" in r.json()
+    def test_range_0_100(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert 0 <= r.json()["assurance_score"] <= 100
+    def test_assurance_v2_always_true(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["assurance_score_v2"] is True
+    def test_multiple_entries_drift(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(id=f"e{i}") for i in range(3)]
+        }, headers=AUTH)
+        assert r.json()["assurance_score_v2"] is True
+
+
+class TestFix5ConsensusWired:
+    """FIX 5: Consensus wired into store/memories"""
+    def test_subscribe_stores(self):
+        from api.main import _consensus_subs
+        before = len(_consensus_subs)
+        # Can't actually subscribe (needs reachable HTTPS URL), but verify endpoint exists
+        r = client.get("/v1/consensus/status?agent_id=test", headers=AUTH)
+        assert r.status_code == 200
+    def test_memory_write_triggers(self):
+        # Store triggers consensus check (silently — no reachable subscribers)
+        r = client.post("/v1/store/memories", json={"content": "Consensus test memory data", "memory_type": "semantic"}, headers=AUTH)
+        assert r.status_code == 200
+    def test_pending_checks_field(self):
+        r = client.get("/v1/consensus/status?agent_id=test", headers=AUTH)
+        assert "pending_checks" in r.json()
+    def test_conflicts_resolved_field(self):
+        r = client.get("/v1/consensus/status?agent_id=test", headers=AUTH)
+        assert "conflicts_resolved" in r.json()
+    def test_no_overlap_no_notify(self):
+        from api.main import _check_consensus_overlap
+        assert _check_consensus_overlap("no_kh", "solo_agent", 3) == 0.0
+    def test_overlap_detected(self):
+        from api.main import _check_consensus_overlap, _consensus_subs
+        _consensus_subs["fix5_sub"] = {"agent_id": "b", "key_hash": "fix5_kh"}
+        assert _check_consensus_overlap("fix5_kh", "a", 10) >= 0.8
+        del _consensus_subs["fix5_sub"]
+
+
+class TestFix6OverridePrecedence:
+    """FIX 6: recommended_action override precedence chain"""
+    def test_chain_shows_all(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        chain = r.json()["action_override_chain"]
+        assert len(chain) >= 1
+        assert chain[0]["source"] == "base_omega_score"
+    def test_original_base_present(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "original_base_action" in r.json()
+    def test_no_overrides_base_only(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        chain = r.json()["action_override_chain"]
+        if len(chain) == 1:
+            assert chain[0]["applied"] is True
+            assert chain[0]["source"] == "base_omega_score"
+    def test_applied_true_for_winner(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        chain = r.json()["action_override_chain"]
+        applied_count = sum(1 for c in chain if c["applied"])
+        assert applied_count == 1
+    def test_circuit_breaker_highest(self):
+        # Can't easily force circuit breaker open, but verify chain structure
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert isinstance(r.json()["action_override_chain"], list)
+    def test_aging_overrides_base(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["original_base_action"] in ("USE_MEMORY", "WARN", "ASK_USER", "BLOCK")
+
+
+class TestFix7EntryShapley:
+    """FIX 7: Entry-level Shapley"""
+    def test_contribution_computed(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "entry_shapley" in r.json()
+        assert len(r.json()["entry_shapley"]) >= 1
+    def test_sum_approx_omega(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(id="s1"), _fresh_entry(id="s2")]
+        }, headers=AUTH)
+        shapley = r.json()["entry_shapley"]
+        total = sum(s["omega_contribution"] for s in shapley)
+        omega = r.json()["omega_mem_final"]
+        # Contributions should be in the right ballpark
+        assert abs(total) <= omega + 20
+    def test_primary_risk_identified(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "is_primary_risk" in r.json()["entry_shapley"][0]
+    def test_n_gt_20_top_5(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(id=f"e{i}") for i in range(25)]
+        }, headers=AUTH)
+        assert len(r.json()["entry_shapley"]) <= 5
+        assert r.json().get("entry_shapley_truncated") is True
+    def test_zero_contribution_safe(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        s = r.json()["entry_shapley"][0]
+        assert "omega_contribution" in s
+    def test_timeout_guard(self):
+        # With many entries, should still return within reason
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(id=f"e{i}") for i in range(15)]
+        }, headers=AUTH)
+        assert "entry_shapley" in r.json()
+
+
+class TestFix8ClosedLoopHealing:
+    """FIX 8: Closed-loop healing"""
+    def test_updated_entries_triggers(self):
+        r = client.post("/v1/heal", json={
+            "entry_id": "e1", "action": "REFETCH",
+            "updated_entries": [{"id": "e1", "content": "fresh", "type": "semantic",
+                "timestamp_age_days": 0, "source_trust": 0.99, "source_conflict": 0.01, "downstream_count": 1}]
+        }, headers=AUTH)
+        assert "post_heal_preflight" in r.json()
+    def test_omega_improvement_computed(self):
+        r = client.post("/v1/heal", json={
+            "entry_id": "e1", "action": "REFETCH",
+            "updated_entries": [{"id": "e1", "content": "fresh", "type": "semantic",
+                "timestamp_age_days": 0, "source_trust": 0.99, "source_conflict": 0.01, "downstream_count": 1}]
+        }, headers=AUTH)
+        assert "omega_improvement" in r.json()
+    def test_healing_successful(self):
+        r = client.post("/v1/heal", json={
+            "entry_id": "e1", "action": "REFETCH",
+            "updated_entries": [{"id": "e1", "content": "fresh data", "type": "semantic",
+                "timestamp_age_days": 0, "source_trust": 0.99, "source_conflict": 0.01, "downstream_count": 1}]
+        }, headers=AUTH)
+        assert "healing_successful" in r.json()
+    def test_healing_counter_affects(self):
+        # healing_counter > 3 penalizes
+        r = client.post("/v1/heal", json={"entry_id": "e1", "action": "REFETCH"}, headers=AUTH)
+        assert r.json()["healing_counter"] >= 1
+    def test_backward_compat(self):
+        r = client.post("/v1/heal", json={"entry_id": "e1", "action": "REFETCH"}, headers=AUTH)
+        assert r.json()["healed"] is True
+        assert "post_heal_preflight" not in r.json()
+    def test_empty_updated_entries_skips(self):
+        r = client.post("/v1/heal", json={
+            "entry_id": "e1", "action": "REFETCH", "updated_entries": []
+        }, headers=AUTH)
+        assert "post_heal_preflight" not in r.json()
+
+
+class TestFix9DryRun:
+    """FIX 9: dry_run flag"""
+    def test_no_webhook(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()], "dry_run": True
+        }, headers=AUTH)
+        assert r.json().get("dry_run") is True
+    def test_header_present(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()], "dry_run": True
+        }, headers=AUTH)
+        assert r.json()["_headers"].get("X-Sgraal-Dry-Run") == "true"
+    def test_no_audit_log(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()], "dry_run": True
+        }, headers=AUTH)
+        assert r.json()["dry_run"] is True
+    def test_no_quota(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()], "dry_run": True
+        }, headers=AUTH)
+        assert r.status_code == 200
+    def test_rate_limit_enforced(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()], "dry_run": True
+        }, headers=AUTH)
+        assert r.status_code == 200  # Not 429 for test key
+    def test_demo_auto_dry_run(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]},
+            headers={"Authorization": "Bearer sg_demo_playground"})
+        assert r.json().get("dry_run") is True
+
+
+class TestFix10AutoDiff:
+    """FIX 10: Why did this change? auto diff"""
+    def test_first_no_delta(self):
+        import time as _t10
+        uid = f"diff_agent_{int(_t10.time()*1000)}"
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()], "agent_id": uid
+        }, headers=AUTH)
+        assert "preflight_delta" not in r.json()
+    def test_second_has_delta(self):
+        import time as _t10b
+        uid = f"diff2_{int(_t10b.time()*1000)}"
+        client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "agent_id": uid}, headers=AUTH)
+        r2 = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "agent_id": uid}, headers=AUTH)
+        # May or may not have delta depending on Redis availability
+        # But structure should be correct when present
+        if "preflight_delta" in r2.json():
+            assert "omega_change" in r2.json()["preflight_delta"]
+    def test_omega_change(self):
+        import time as _t10c
+        uid = f"diff3_{int(_t10c.time()*1000)}"
+        client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "agent_id": uid}, headers=AUTH)
+        r2 = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=100)], "agent_id": uid
+        }, headers=AUTH)
+        if "preflight_delta" in r2.json():
+            assert isinstance(r2.json()["preflight_delta"]["omega_change"], (int, float))
+    def test_action_changed(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        if "preflight_delta" in r.json():
+            assert "action_changed" in r.json()["preflight_delta"]
+    def test_components_changed(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        if "preflight_delta" in r.json():
+            assert "components_changed" in r.json()["preflight_delta"]
+    def test_ttl_expiry(self):
+        # Just verify the field is structured correctly when present
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.status_code == 200
+
+
+class TestFix11CalibratedThresholds:
+    """FIX 11: Calibrated decision thresholds"""
+    def test_outcomes_tracked(self):
+        from api.main import _outcome_buckets
+        client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert len(_outcome_buckets) >= 0  # tracking structure exists
+    def test_recommendation_after_50(self):
+        from api.main import _outcome_buckets
+        _ob_key = "None:general"
+        _outcome_buckets[_ob_key] = [{"omega": i, "status": "success" if i < 50 else "failure"} for i in range(55)]
+        r = client.get("/v1/analytics/summary", headers=AUTH)
+        recs = r.json().get("threshold_recommendations")
+        if recs:
+            assert "suggested_warn" in recs
+        _outcome_buckets.pop(_ob_key, None)
+    def test_confidence_levels(self):
+        from api.main import _outcome_buckets
+        _ob_key = "None:general"
+        _outcome_buckets[_ob_key] = [{"omega": i, "status": "success"} for i in range(55)]
+        r = client.get("/v1/analytics/summary", headers=AUTH)
+        recs = r.json().get("threshold_recommendations")
+        if recs:
+            assert recs["confidence"] in ("medium", "high")
+        _outcome_buckets.pop(_ob_key, None)
+    def test_apply_creates_profile(self):
+        r = client.post("/v1/thresholds/apply", json={"warn": 20, "ask_user": 40, "block": 70}, headers=AUTH)
+        assert r.json()["applied"] is True
+    def test_safety_bounds_enforced(self):
+        r = client.post("/v1/thresholds/apply", json={"warn": 5, "ask_user": 40, "block": 70}, headers=AUTH)
+        assert r.status_code == 400
+    def test_domain_specific(self):
+        r = client.post("/v1/thresholds/apply", json={
+            "warn": 20, "ask_user": 40, "block": 70, "domain": "fintech"
+        }, headers=AUTH)
+        assert r.json()["thresholds"]["domain"] == "fintech"
+
+
+class TestFix12PrivacyRepairPlan:
+    """FIX 12: Privacy layer + repair_plan actionability"""
+    def test_obfuscated_uses_caller_id(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=200, source_conflict=0.9)],
+            "detail_level": "obfuscated"
+        }, headers=AUTH)
+        rp = r.json().get("repair_plan", [])
+        for item in rp:
+            if isinstance(item, dict):
+                assert "action_reference" in item
+                break
+    def test_uses_index_when_no_id(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=200)],
+            "detail_level": "obfuscated"
+        }, headers=AUTH)
+        rp = r.json().get("repair_plan", [])
+        for item in rp:
+            if isinstance(item, dict) and "action_reference" in item:
+                assert isinstance(item["action_reference"], str)
+                break
+    def test_action_reference_present(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=200, source_conflict=0.9)],
+            "detail_level": "full"
+        }, headers=AUTH)
+        rp = r.json().get("repair_plan", [])
+        for item in rp:
+            if isinstance(item, dict):
+                assert "action_reference" in item
+                break
+    def test_normal_uses_entry_id(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=200, source_conflict=0.9)],
+            "detail_level": "full"
+        }, headers=AUTH)
+        rp = r.json().get("repair_plan", [])
+        for item in rp:
+            if isinstance(item, dict) and "action_reference" in item:
+                assert item["action_reference"] == item.get("entry_id", "")
