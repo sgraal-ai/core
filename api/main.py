@@ -480,6 +480,8 @@ class StoreMemoryRequest(BaseModel):
     agent_id: Optional[str] = None
     memory_type: str = "semantic"
     metadata: Optional[dict] = None
+    write_firewall: bool = True  # #11/#24 Neural+Write Firewall
+    firewall_bypass_reason: Optional[str] = None  # required when write_firewall=false
 
 @app.post("/v1/store/memories")
 def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_key)):
@@ -488,12 +490,12 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
         raise HTTPException(status_code=400, detail="Synthetic memory cannot be stored directly.")
     kh = key_record.get("key_hash", "default")
     mem_id = str(uuid.uuid4())
+    _firewall_checks = 0
 
     # Auto-preflight
-    entry = {"id": mem_id, "content": req.content, "type": req.memory_type, "timestamp_age_days": 0,
-             "source_trust": 0.8, "source_conflict": 0.1, "downstream_count": 1}
     omega = 0.0
     blocked = False
+    _poisoning = False
     try:
         from scoring_engine import compute, MemoryEntry
         me = MemoryEntry(id=mem_id, content=req.content, type=req.memory_type, timestamp_age_days=0,
@@ -501,8 +503,51 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
         result = compute([me])
         omega = result.omega_mem_final
         blocked = omega > 80
+        _firewall_checks += 1
     except Exception:
         pass
+
+    # #11/#24 Write Firewall
+    _firewall_triggered = False
+    if req.write_firewall:
+        # Check 1: High omega or poisoning
+        if omega > 70:
+            _firewall_checks += 1
+            raise HTTPException(status_code=403, detail=_json.dumps({
+                "write_allowed": False, "reason": f"omega_too_high ({omega})",
+                "omega": omega, "entry_id": mem_id}))
+        # Check 2: Conflict with existing trusted entries
+        _firewall_checks += 1
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            try:
+                _ex_r = http_requests.get(
+                    f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&agent_id=eq.{req.agent_id or 'anonymous'}&select=id,content,memory_type&limit=20",
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+                if _ex_r.ok:
+                    for _ex_entry in _ex_r.json():
+                        # Simple content similarity check
+                        _ex_content = _ex_entry.get("content", "")
+                        _words_new = set(req.content.lower().split())
+                        _words_old = set(_ex_content.lower().split())
+                        _overlap = len(_words_new & _words_old) / max(len(_words_new | _words_old), 1)
+                        if _overlap > 0.7 and _overlap < 1.0:  # Similar but not identical = potential conflict
+                            raise HTTPException(status_code=403, detail=_json.dumps({
+                                "write_allowed": False, "reason": "conflicts_with_trusted_source",
+                                "conflicting_entry_id": _ex_entry["id"], "conflict_score": round(_overlap, 2)}))
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+    else:
+        # Enterprise bypass — requires enterprise tier
+        _tier = key_record.get("tier", "free")
+        if _tier not in ("enterprise", "growth", "test"):
+            raise HTTPException(status_code=403, detail="write_firewall: false requires enterprise tier")
+        # Log bypass to audit
+        _audit_log("firewall_bypass", str(uuid.uuid4()), key_record, "BYPASS", omega,
+                   {"entry_id": mem_id, "firewall_bypassed": True,
+                    "firewall_bypass_reason": req.firewall_bypass_reason or "not_provided"})
+        _firewall_triggered = True
 
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
@@ -516,11 +561,13 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
 
     # FIX 5: Trigger consensus check on memory write
     try:
-        _trigger_consensus_check(kh, req.agent_id or "anonymous", 10)  # approximate count
+        _trigger_consensus_check(kh, req.agent_id or "anonymous", 10)
     except Exception:
         pass
 
-    return {"id": mem_id, "content": req.content, "metadata": req.metadata or {}, "score": omega, "blocked": blocked}
+    return {"id": mem_id, "content": req.content, "metadata": req.metadata or {}, "score": omega, "blocked": blocked,
+            "write_firewall_triggered": _firewall_triggered, "firewall_checks": _firewall_checks,
+            "_headers": {"X-Sgraal-Write-Firewall": "passed"}}
 
 @app.get("/v1/store/memories/search")
 def search_memories(query: str = "", agent_id: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
@@ -1811,6 +1858,110 @@ def rag_filter(req: dict, key_record: dict = Depends(verify_api_key)):
             "filtered_out": len(chunks) - len(filtered)}
 
 
+# ---- #2 Sleeper Detector ----
+_sleeper_scans: dict[str, dict] = {}  # scan_id → result
+_sleeper_latest: dict[str, str] = {}  # key_hash:agent_id → scan_id
+
+class SleepScanRequest(BaseModel):
+    agent_id: str = "anonymous"
+    scan_depth: Literal["quick", "full"] = "quick"
+    trigger_patterns: list[str] = []
+
+@app.post("/v1/memory/scan")
+def scan_memories(req: SleepScanRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    scan_id = str(uuid.uuid4())
+    _scan_start = _time.monotonic()
+
+    # Fetch entries from Supabase
+    entries_raw = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            _limit = 100 if req.scan_depth == "quick" else 1000
+            r = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&agent_id=eq.{req.agent_id}&select=id,content,memory_type,omega_score&limit={_limit}",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=10)
+            if r.ok:
+                entries_raw = r.json()
+        except Exception:
+            pass
+
+    # Scan for sleepers
+    sleepers = []
+    for entry in entries_raw:
+        _eid = entry.get("id", "")
+        _omega = entry.get("omega_score", 0)
+        _mtype = entry.get("memory_type", "semantic")
+        _content = entry.get("content", "")
+
+        # Check 1: Would BLOCK on financial/irreversible
+        if _omega > 50:
+            sleepers.append({
+                "entry_id": _eid, "threat_type": "dormant_high_risk",
+                "trigger_condition": "financial or irreversible action_type",
+                "risk_if_triggered": round(_omega * 1.3, 1),
+                "recommendation": "REFETCH or VERIFY_WITH_SOURCE before financial use"})
+
+        # Check 2: Pattern matching
+        for pattern in req.trigger_patterns:
+            if pattern.lower() in _content.lower():
+                sleepers.append({
+                    "entry_id": _eid, "threat_type": "pattern_match",
+                    "trigger_condition": f"contains '{pattern}'",
+                    "risk_if_triggered": 75.0,
+                    "recommendation": "Review entry content for adversarial patterns"})
+
+    # Quota accounting
+    _scanned = len(entries_raw)
+    _quota_used = 10 if req.scan_depth == "quick" else _scanned
+
+    _scan_duration = round((_time.monotonic() - _scan_start) * 1000, 1)
+    result = {
+        "scan_id": scan_id, "scanned_entries": _scanned,
+        "sleepers_found": len(sleepers), "sleepers": sleepers[:50],
+        "scan_duration_ms": _scan_duration, "quota_used": _quota_used,
+        "scan_depth": req.scan_depth, "agent_id": req.agent_id,
+    }
+    _sleeper_scans[scan_id] = result
+    _sleeper_latest[f"{kh}:{req.agent_id}"] = scan_id
+
+    # Store scan status in Redis for scheduled scan tracking
+    redis_set(f"sleeper_scan:{kh}:{req.agent_id}", result, ttl=25 * 3600)
+
+    # Webhook: emit SLEEPER_DETECTED if found
+    if sleepers:
+        for wid, wh in _learning_webhooks.items():
+            if "SLEEPER_DETECTED" in wh.get("events", []):
+                try:
+                    http_requests.post(wh["url"], json={
+                        "event": "SLEEPER_DETECTED", "scan_id": scan_id,
+                        "sleepers_found": len(sleepers), "agent_id": req.agent_id}, timeout=2)
+                except Exception:
+                    pass
+
+    return result
+
+@app.get("/v1/memory/scan/latest")
+def get_latest_scan(agent_id: str = "anonymous", key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    scan_id = _sleeper_latest.get(f"{kh}:{agent_id}")
+    if scan_id and scan_id in _sleeper_scans:
+        return _sleeper_scans[scan_id]
+    # Check Redis
+    cached = redis_get(f"sleeper_scan:{kh}:{agent_id}")
+    if cached:
+        return cached
+    return {"scan_id": None, "sleepers_found": 0, "scanned_entries": 0, "message": "No scan available"}
+
+@app.get("/v1/memory/scan/{scan_id}")
+def get_scan(scan_id: str, key_record: dict = Depends(verify_api_key)):
+    result = _sleeper_scans.get(scan_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return result
+
+
 # ---- FIX 5: Wire consensus into store/memories ----
 def _trigger_consensus_check(kh: str, agent_id: str, memory_count: int):
     """Check consensus overlap and notify subscribers."""
@@ -2627,15 +2778,22 @@ def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, d
     return {"entries": entries, "count": len(entries)}
 
 @app.get("/v1/audit-log/export")
-def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_api_key), limit: int = 100):
+def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_api_key), limit: int = 100,
+                     firewall_bypassed: Optional[bool] = None):
     if key_record.get("demo"):
         raise HTTPException(status_code=403, detail="Demo key cannot export audit logs")
     entries = []
     if supabase_client:
         try:
-            entries = supabase_client.table("audit_log").select("*").order("created_at", desc=True).limit(limit).execute().data or []
+            q = supabase_client.table("audit_log").select("*").order("created_at", desc=True).limit(limit)
+            if firewall_bypassed is True:
+                q = q.eq("event_type", "firewall_bypass")
+            entries = q.execute().data or []
         except Exception:
             pass
+    # In-memory fallback filter for firewall_bypassed
+    if firewall_bypassed is True and not entries:
+        entries = [e for e in entries if e.get("event_type") == "firewall_bypass"]
 
     if format == "splunk":
         lines = [f'{e.get("created_at","")} decision={e.get("decision","")} omega={e.get("omega_score","")} key={e.get("api_key_id","")}' for e in entries]
@@ -6199,6 +6357,23 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _outcome_buckets[_ob_key].append({"omega": omega_out, "action": response.get("recommended_action")})
         if len(_outcome_buckets[_ob_key]) > 200:
             _outcome_buckets[_ob_key] = _outcome_buckets[_ob_key][-200:]
+    except Exception:
+        pass
+
+    # #2 Sleeper scan integration — check if scan found sleepers for this agent
+    try:
+        _sleeper_key = f"{key_record.get('key_hash','default')}:{req.agent_id or 'anonymous'}"
+        _sleeper_sid = _sleeper_latest.get(_sleeper_key)
+        if _sleeper_sid and _sleeper_sid in _sleeper_scans:
+            _sl_result = _sleeper_scans[_sleeper_sid]
+            if _sl_result.get("sleepers_found", 0) > 0:
+                response["sleeper_scan_available"] = True
+                # Check if any current entry matches a known sleeper
+                _sl_ids = {s["entry_id"] for s in _sl_result.get("sleepers", [])}
+                for _se in entries:
+                    if _se.id in _sl_ids:
+                        response["sleeper_warning"] = f"Entry {_se.id} matches known sleeper pattern from scan {_sleeper_sid}"
+                        break
     except Exception:
         pass
 

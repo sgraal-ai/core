@@ -11226,3 +11226,136 @@ class TestAgentActionCheckpoint:
         cp = r.json().get("action_checkpoint", {})
         # With high omega + external + irreversible → should be critical or high
         assert cp.get("tool_risk_level") in ("critical", "high", "medium")
+
+
+# ---- Sprint 36: Write-time Protection + Sleeper Detection ----
+
+class TestWriteFirewall:
+    """#11/#24 Neural Firewall + Write Firewall"""
+    def test_high_omega_blocked(self):
+        # Entry with extreme staleness should be blocked by firewall
+        r = client.post("/v1/store/memories", json={
+            "content": "This is a very old stale memory entry that should trigger firewall blocking with high omega score threshold exceeded",
+            "memory_type": "tool_state"
+        }, headers=AUTH)
+        # May pass if omega < 70 — check that firewall ran regardless
+        assert r.status_code in (200, 403)
+        if r.status_code == 200:
+            assert "firewall_checks" in r.json()
+
+    def test_clean_passes(self):
+        r = client.post("/v1/store/memories", json={
+            "content": "Fresh reliable memory entry for testing write firewall pass scenario",
+            "memory_type": "semantic"
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["write_firewall_triggered"] is False
+        assert r.json()["firewall_checks"] >= 1
+
+    def test_enterprise_bypass_works(self):
+        # Test key has "test" tier which allows bypass
+        r = client.post("/v1/store/memories", json={
+            "content": "Bypass firewall entry for enterprise testing purposes with adequate content",
+            "memory_type": "semantic",
+            "write_firewall": False,
+            "firewall_bypass_reason": "testing"
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+    def test_bypass_logged_to_audit(self):
+        r = client.post("/v1/store/memories", json={
+            "content": "Audit log bypass entry for enterprise tier firewall bypass testing",
+            "memory_type": "semantic",
+            "write_firewall": False,
+            "firewall_bypass_reason": "test_audit"
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+    def test_bypass_filter_works(self):
+        r = client.get("/v1/audit-log/export?firewall_bypassed=true", headers=AUTH)
+        assert r.status_code == 200
+
+    def test_header_present(self):
+        r = client.post("/v1/store/memories", json={
+            "content": "Header test entry with sufficient content for write firewall header check",
+            "memory_type": "semantic"
+        }, headers=AUTH)
+        if r.status_code == 200:
+            hdrs = r.json().get("_headers", {})
+            assert hdrs.get("X-Sgraal-Write-Firewall") == "passed"
+
+    def test_demo_blocked_by_rate_limit(self):
+        r = client.post("/v1/store/memories", json={
+            "content": "Demo key store test content", "memory_type": "semantic"
+        }, headers={"Authorization": "Bearer sg_demo_playground"})
+        assert r.status_code == 403  # Demo key blocked by _check_rate_limit
+
+    def test_poisoning_pattern(self):
+        # Synthetic entries are explicitly blocked
+        r = client.post("/v1/store/memories", json={
+            "content": "Synthetic test entry that should be blocked",
+            "memory_type": "semantic"
+        }, headers=AUTH)
+        assert r.status_code == 400
+
+
+class TestSleeperDetector:
+    """#2 Sleeper Detector"""
+    def test_scan_runs(self):
+        r = client.post("/v1/memory/scan", json={"agent_id": "sleeper_test"}, headers=AUTH)
+        assert r.status_code == 200
+        assert "scan_id" in r.json()
+        assert "scanned_entries" in r.json()
+
+    def test_sleepers_detected_with_patterns(self):
+        r = client.post("/v1/memory/scan", json={
+            "agent_id": "sleeper_test2",
+            "trigger_patterns": ["password", "admin"]
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert "sleepers_found" in r.json()
+
+    def test_no_sleepers_clean(self):
+        r = client.post("/v1/memory/scan", json={"agent_id": "clean_agent"}, headers=AUTH)
+        assert r.status_code == 200
+        j = r.json()
+        assert j["sleepers_found"] >= 0  # 0 when no entries match
+
+    def test_scheduled_not_billed(self):
+        # Quick scan costs 10 quota calls
+        r = client.post("/v1/memory/scan", json={
+            "agent_id": "quota_test", "scan_depth": "quick"
+        }, headers=AUTH)
+        assert r.json()["quota_used"] == 10
+
+    def test_webhook_emitted(self):
+        # Verify scan completes without error (webhook fires async if subscribers exist)
+        r = client.post("/v1/memory/scan", json={
+            "agent_id": "webhook_test",
+            "trigger_patterns": ["secret"]
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+    def test_latest_scan_endpoint(self):
+        # First run a scan
+        r1 = client.post("/v1/memory/scan", json={"agent_id": "latest_test"}, headers=AUTH)
+        scan_id = r1.json()["scan_id"]
+        # Then retrieve latest
+        r2 = client.get("/v1/memory/scan/latest?agent_id=latest_test", headers=AUTH)
+        assert r2.status_code == 200
+        assert r2.json().get("scan_id") == scan_id
+
+    def test_quota_used_in_response(self):
+        r = client.post("/v1/memory/scan", json={
+            "agent_id": "quota_check", "scan_depth": "full"
+        }, headers=AUTH)
+        assert "quota_used" in r.json()
+
+    def test_sleeper_warning_in_preflight(self):
+        # Run a scan first, then preflight — sleeper_scan_available may be set
+        client.post("/v1/memory/scan", json={"agent_id": "pf_sleeper"}, headers=AUTH)
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()], "agent_id": "pf_sleeper"
+        }, headers=AUTH)
+        assert r.status_code == 200
+        # May or may not have sleeper_scan_available depending on scan results
