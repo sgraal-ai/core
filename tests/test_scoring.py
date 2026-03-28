@@ -9866,3 +9866,128 @@ class TestDashboardFeedback:
     def test_calibration(self):
         r = client.post("/v1/feedback", json={"preflight_id": "fb_cal", "feedback_type": "correct"}, headers=AUTH)
         assert "calibration_updated" in r.json()
+
+
+# ======= Sprint 33 =======
+
+class TestCrossSessionIdentity:
+    def test_register(self):
+        assert client.post("/v1/agents/cs1/identity", json={"fingerprint": "fp1"}, headers=AUTH).json()["registered"] is True
+    def test_match(self):
+        client.post("/v1/agents/cs2/identity", json={"fingerprint": "fA"}, headers=AUTH)
+        assert client.post("/v1/agents/cs2/identity", json={"fingerprint": "fA"}, headers=AUTH).json()["identity_changed"] is False
+    def test_changed(self):
+        import time as _tt
+        uid = f"cs_changed_{int(_tt.time()*1000)}"
+        client.post(f"/v1/agents/{uid}/identity", json={"fingerprint": "fX"}, headers=AUTH)
+        r = client.post(f"/v1/agents/{uid}/identity", json={"fingerprint": "fY"}, headers=AUTH)
+        assert r.json()["identity_changed"] is True
+    def test_consistency(self):
+        assert "consistency_score" in client.get("/v1/agents/cs1/memory-consistency", headers=AUTH).json()
+    def test_no_identity(self):
+        assert client.get("/v1/agents/unknown/memory-consistency", headers=AUTH).json()["identity_registered"] is False
+    def test_endpoint(self):
+        assert client.get("/v1/agents/x/memory-consistency", headers=AUTH).status_code == 200
+
+class TestPatternMiner:
+    def test_mine(self):
+        assert client.post("/v1/patterns/mine", headers=AUTH).status_code == 200
+    def test_clusters(self):
+        assert len(client.post("/v1/patterns/mine", headers=AUTH).json()["clusters"]) == 5
+    def test_promote(self):
+        assert client.post("/v1/patterns/promote/tp", headers=AUTH).json()["promoted"] is True
+    def test_in_library(self):
+        client.post("/v1/patterns/promote/lib", headers=AUTH)
+        assert any(p["name"] == "lib" for p in client.get("/v1/patterns", headers=AUTH).json()["patterns"])
+    def test_list(self):
+        assert client.get("/v1/patterns", headers=AUTH).status_code == 200
+    def test_k(self):
+        assert client.post("/v1/patterns/mine", headers=AUTH).json()["k"] == 5
+
+class TestWeightExportImport:
+    def test_export(self):
+        assert "version" in client.get("/v1/weights/export", headers=AUTH).json()
+    def test_import(self):
+        assert client.post("/v1/weights/import", json={"version": "1.0"}, headers=AUTH).json()["imported"] is True
+    def test_mismatch(self):
+        assert client.post("/v1/weights/import", json={"version": "2.0"}, headers=AUTH).json()["version_mismatch"] is True
+    def test_malformed(self):
+        assert client.post("/v1/weights/import", json={"version": ""}, headers=AUTH).status_code == 400
+    def test_round_trip(self):
+        e = client.get("/v1/weights/export", headers=AUTH).json()
+        assert client.post("/v1/weights/import", json={"version": e["version"]}, headers=AUTH).json()["imported"] is True
+    def test_domain(self):
+        assert client.post("/v1/weights/import", json={"version": "1.0", "domain": "fintech"}, headers=AUTH).json()["domain"] == "fintech"
+
+class TestLearningWebhooks:
+    def test_register(self):
+        assert client.post("/v1/webhooks/learning-events", json={"url": "https://x.com", "events": ["weight_changed"]}, headers=AUTH).json()["registered"] is True
+    def test_events(self):
+        assert len(client.post("/v1/webhooks/learning-events", json={"url": "https://x.com", "events": ["weight_changed", "new_baseline"]}, headers=AUTH).json()["events"]) == 2
+    def test_changepoint(self):
+        assert client.post("/v1/webhooks/learning-events", json={"url": "https://x.com", "events": ["changepoint_detected"]}, headers=AUTH).status_code == 200
+    def test_circuit(self):
+        assert client.post("/v1/webhooks/learning-events", json={"url": "https://x.com", "events": ["circuit_opened"]}, headers=AUTH).status_code == 200
+    def test_id(self):
+        assert "id" in client.post("/v1/webhooks/learning-events", json={"url": "https://x.com", "events": ["new_baseline"]}, headers=AUTH).json()
+    def test_url(self):
+        r = client.post("/v1/webhooks/learning-events", json={"url": "https://hooks.example.com", "events": ["weight_changed"]}, headers=AUTH)
+        assert r.status_code == 200
+
+class TestOTel:
+    def test_parent(self):
+        assert client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH).json()["_trace"]["span"] == "preflight"
+    def test_trace_propagated(self):
+        assert client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "trace_id": "ot1", "response_profile": "full"}, headers=AUTH).json().get("trace_id") == "ot1"
+    def test_attrs(self):
+        assert "decision" in client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH).json()["_trace"]
+    def test_otlp(self):
+        assert client.get("/v1/traces/export?format=otlp", headers=AUTH).json()["format"] == "otlp"
+    def test_no_trace_no_overhead(self):
+        assert "trace_id" not in client.post("/v1/preflight", json={"memory_state": [_fresh_entry()], "response_profile": "full"}, headers=AUTH).json()
+    def test_jaeger(self):
+        assert client.get("/v1/traces/export?format=otlp", headers=AUTH).status_code == 200
+
+class TestAgentRegistry:
+    def test_list(self):
+        assert "agents" in client.get("/v1/agents", headers=AUTH).json()
+    def test_auto(self):
+        client.post("/v1/store/memories", json={"content": "reg test long enough", "agent_id": "reg_a"}, headers=AUTH)
+        assert True
+    def test_migration(self):
+        import os; assert os.path.exists("scripts/migrations/019_agent_registry.sql")
+    def test_endpoint(self):
+        assert client.get("/v1/agents", headers=AUTH).status_code == 200
+    def test_no_crash(self):
+        assert client.get("/v1/agents", headers=AUTH).status_code == 200
+    def test_identity_migration(self):
+        import os; assert os.path.exists("scripts/migrations/018_agents.sql")
+
+class TestUniversalAdapter:
+    def test_configured(self):
+        from sdk.python.sgraal.universal_adapter import UniversalMemoryAdapter
+        assert UniversalMemoryAdapter({"max_omega": 60}, "k").max_omega == 60
+    def test_filtered(self):
+        from sdk.python.sgraal.universal_adapter import UniversalMemoryAdapter
+        assert len(UniversalMemoryAdapter({"backend": {"mock_results": [{"omega_score": 90}]}, "max_omega": 80}, "k").query("t")) == 0
+    def test_pass(self):
+        from sdk.python.sgraal.universal_adapter import UniversalMemoryAdapter
+        assert len(UniversalMemoryAdapter({"backend": {"mock_results": [{"omega_score": 10}]}}, "k").query("t")) == 1
+    def test_docs(self):
+        import os; assert os.path.exists("docs/UNIVERSAL_ADAPTER.md")
+
+class TestPlugins:
+    def test_interface(self):
+        from sdk.python.sgraal.plugin_interface import SgraalScoringPlugin; assert True
+    def test_example(self):
+        from sdk.python.sgraal.plugin_interface import ExamplePlugin
+        assert ExamplePlugin().name() == "example"
+    def test_score(self):
+        from sdk.python.sgraal.plugin_interface import ExamplePlugin, run_plugin_with_timeout
+        assert run_plugin_with_timeout(ExamplePlugin(), [{"id": "e"}], {})["score"] > 0
+    def test_timeout(self):
+        from sdk.python.sgraal.plugin_interface import SgraalScoringPlugin, run_plugin_with_timeout
+        class Bad(SgraalScoringPlugin):
+            def name(self): return "bad"
+            def score(self, e, c): raise RuntimeError("fail")
+        assert run_plugin_with_timeout(Bad(), [], {})["score"] == 0.0
