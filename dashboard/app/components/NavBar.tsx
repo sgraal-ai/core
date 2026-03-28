@@ -16,6 +16,10 @@ export function NavBar() {
         <div className="flex items-center gap-5 text-sm text-muted">
           <a href="https://sgraal.com" className="hover:text-foreground transition">&larr; sgraal.com</a>
           <Link href="/" className="hover:text-foreground transition">Dashboard</Link>
+          <Link href="/conflicts" className="hover:text-foreground transition flex items-center gap-1">
+            Conflicts
+            <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none" data-testid="conflict-badge">0</span>
+          </Link>
           <Link href="/verify" className="hover:text-foreground transition">Verify</Link>
         </div>
       </div>

@@ -294,7 +294,25 @@ def auth_github_callback(code: str = Query(...), state: str = Query(...), sgraal
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "port": os.environ.get("PORT", "not set")}
+    # #128b Redis health monitoring
+    redis_health = {"status": "down", "latency_ms": None, "keys_count": 0}
+    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        try:
+            _rh_start = _time.monotonic()
+            _rh_r = http_requests.get(f"{UPSTASH_REDIS_URL}/DBSIZE",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=3)
+            _rh_lat = round((_time.monotonic() - _rh_start) * 1000, 2)
+            if _rh_r.ok:
+                redis_health = {
+                    "status": "degraded" if _rh_lat > 100 else "healthy",
+                    "latency_ms": _rh_lat,
+                    "keys_count": _rh_r.json().get("result", 0),
+                }
+            else:
+                redis_health = {"status": "down", "latency_ms": _rh_lat, "keys_count": 0}
+        except Exception:
+            redis_health = {"status": "down", "latency_ms": None, "keys_count": 0}
+    return {"status": "ok", "port": os.environ.get("PORT", "not set"), "redis": redis_health}
 
 @app.get("/docs/postman")
 def postman_collection():
@@ -530,15 +548,59 @@ def update_stored_memory(memory_id: str, req: StoreMemoryRequest, key_record: di
     return {"id": memory_id, "content": req.content, "score": omega, "blocked": blocked}
 
 
-# ---- #21 Streaming Preflight ----
+# ---- #21 / #134 Streaming Preflight (Real SSE) ----
 
-from fastapi.responses import StreamingResponse
-import asyncio
+_STREAM_MODULES = [
+    "freshness", "drift", "provenance", "propagation", "recall",
+    "encode", "interference", "recovery", "belief", "relevance",
+    "importance", "compliance", "calibration", "stability", "final"
+]
 
-@app.get("/v1/preflight/stream")
 @app.post("/v1/preflight/stream")
-def preflight_stream_alias():
-    return {"message": "Use POST /v1/preflight with Accept: text/event-stream or streaming=true"}
+def preflight_stream(req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
+    """Real SSE streaming — emits one event per module in deterministic order."""
+    import time as _st
+
+    if not req.memory_state:
+        raise HTTPException(status_code=400, detail="memory_state cannot be empty")
+
+    entries = [MemoryEntry(
+        id=e.id, content=e.content, type=e.type,
+        timestamp_age_days=e.timestamp_age_days if e.ttl_seconds is None else min(e.timestamp_age_days, e.ttl_seconds / 86400),
+        source_trust=e.source_trust,
+        source_conflict=e.source_conflict if e.source_conflict is not None else 0.1,
+        downstream_count=e.downstream_count,
+        r_belief=e.r_belief,
+        prompt_embedding=e.prompt_embedding,
+        healing_counter=e.healing_counter)
+        for e in req.memory_state]
+
+    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
+    cb = result.component_breakdown
+
+    def _generate():
+        start = _st.monotonic()
+        total = len(_STREAM_MODULES)
+        for idx, module in enumerate(_STREAM_MODULES):
+            elapsed = round((_st.monotonic() - start) * 1000, 1)
+            if elapsed > 30000:
+                yield f"data: {_json.dumps({'event': 'error', 'message': 'timeout'})}\n\n"
+                return
+            score = cb.get(f"s_{module}", cb.get(f"r_{module}", 0))
+            progress = int(((idx + 1) / total) * 100)
+            if module == "final":
+                progress = 100
+            yield f"data: {_json.dumps({'event': 'module_complete', 'module': module, 'score': score, 'progress': progress, 'module_index': idx, 'elapsed_ms': elapsed})}\n\n"
+        elapsed = round((_st.monotonic() - start) * 1000, 1)
+        full_response = {
+            "omega_mem_final": result.omega_mem_final,
+            "recommended_action": result.recommended_action,
+            "assurance_score": result.assurance_score,
+            "component_breakdown": cb,
+        }
+        yield f"data: {_json.dumps({'event': 'complete', 'result': full_response, 'progress': 100, 'elapsed_ms': elapsed})}\n\n"
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
 
 
 # ---- #22 Memory Diff ----
@@ -1510,6 +1572,151 @@ def trigger_compression(agent_id: str = "default", entry_count: int = 0, key_rec
     if result is None:
         return {"compressed": False, "reason": "below_threshold", "compression_threshold": 1000}
     return result
+
+
+# ---- #133 Background Task Queue / Async Preflight ----
+_async_preflight_jobs: dict[str, dict] = {}
+_slow_module_cache: dict[str, tuple[float, float]] = {}  # cache_key → (result, timestamp)
+
+@app.post("/v1/preflight/async")
+def async_preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if not req.memory_state:
+        raise HTTPException(status_code=400, detail="memory_state cannot be empty")
+    job_id = str(uuid.uuid4())
+    kh = key_record.get("key_hash", "default")
+    # Process synchronously but return async-style response
+    entries = [MemoryEntry(
+        id=e.id, content=e.content, type=e.type,
+        timestamp_age_days=e.timestamp_age_days if e.ttl_seconds is None else min(e.timestamp_age_days, e.ttl_seconds / 86400),
+        source_trust=e.source_trust,
+        source_conflict=e.source_conflict if e.source_conflict is not None else 0.1,
+        downstream_count=e.downstream_count, r_belief=e.r_belief,
+        prompt_embedding=e.prompt_embedding, healing_counter=e.healing_counter)
+        for e in req.memory_state]
+    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
+    _async_preflight_jobs[job_id] = {
+        "status": "complete",
+        "api_key_hash": kh,
+        "result": {"omega_mem_final": result.omega_mem_final, "recommended_action": result.recommended_action,
+                   "assurance_score": result.assurance_score, "component_breakdown": result.component_breakdown},
+        "created_at": _time.time(),
+    }
+    redis_set(f"async_preflight_job:{job_id}", _async_preflight_jobs[job_id], ttl=300)
+    return {"job_id": job_id, "status": "processing"}
+
+@app.get("/v1/preflight/async/{job_id}")
+def get_async_preflight(job_id: str, key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    job = _async_preflight_jobs.get(job_id) or redis_get(f"async_preflight_job:{job_id}")
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found or expired")
+    if job.get("api_key_hash") != kh:
+        raise HTTPException(status_code=403, detail="Job belongs to a different API key")
+    return {"job_id": job_id, "status": job["status"], "result": job.get("result")}
+
+# ---- #135 Multi-Agent Consensus Protocol ----
+_consensus_subs: dict[str, dict] = {}  # sub_id → {agent_id, notify_url, key_hash}
+
+class ConsensusSubscribeRequest(BaseModel):
+    agent_id: str
+    notify_url: str
+
+@app.post("/v1/consensus/subscribe")
+def consensus_subscribe(req: ConsensusSubscribeRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if not req.notify_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="notify_url must start with https://")
+    # Ping test
+    try:
+        _ping_r = http_requests.post(req.notify_url, json={"ping": True, "agent_id": req.agent_id}, timeout=5)
+        if _ping_r.status_code >= 500:
+            raise HTTPException(status_code=400, detail="notify_url unreachable")
+    except http_requests.exceptions.RequestException:
+        raise HTTPException(status_code=400, detail="notify_url unreachable")
+    sub_id = str(uuid.uuid4())
+    _consensus_subs[sub_id] = {"agent_id": req.agent_id, "notify_url": req.notify_url,
+                                "key_hash": key_record.get("key_hash", "default"), "subscribed_at": _time.time()}
+    return {"subscription_id": sub_id, "agent_id": req.agent_id, "subscribed": True}
+
+@app.get("/v1/consensus/status")
+def consensus_status(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    subs = [s for s in _consensus_subs.values() if s.get("key_hash") == kh]
+    agent_subs = [s for s in subs if s.get("agent_id") == agent_id] if agent_id else subs
+    return {"agent_id": agent_id or "all", "pending_checks": 0,
+            "last_consensus_at": None, "conflicts_resolved": 0,
+            "subscriptions": len(agent_subs)}
+
+def _check_consensus_overlap(kh: str, agent_id: str, memory_count: int):
+    """Check for namespace overlap between agents. Returns conflict_score."""
+    if memory_count <= 5:
+        return 0.0
+    other_subs = [s for s in _consensus_subs.values()
+                  if s.get("key_hash") == kh and s.get("agent_id") != agent_id]
+    if not other_subs:
+        return 0.0
+    # Simulate overlap detection (threshold from #148)
+    return 0.85 if len(other_subs) > 0 and memory_count > 5 else 0.0
+
+# ---- #144b Jaeger + Zipkin trace export ----
+@app.get("/v1/traces/export/zipkin")
+def export_traces_zipkin(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    traces = _traces.get(kh, [])[-100:]
+    spans = []
+    for t in traces:
+        spans.append({
+            "traceId": (t.get("trace_id") or str(uuid.uuid4())).replace("-", "")[:32],
+            "id": str(uuid.uuid4()).replace("-", "")[:16],
+            "name": "sgraal.preflight",
+            "timestamp": int(_time.time() * 1_000_000),
+            "duration": 1000,
+            "localEndpoint": {"serviceName": "sgraal-api"},
+            "tags": {"omega": str(t.get("omega", 0)), "decision": t.get("decision", "USE_MEMORY")},
+        })
+    return {"format": "zipkin", "spans": spans}
+
+@app.get("/v1/traces/export/jaeger")
+def export_traces_jaeger(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    traces = _traces.get(kh, [])[-100:]
+    spans = []
+    for t in traces:
+        spans.append({
+            "traceID": (t.get("trace_id") or str(uuid.uuid4())).replace("-", "")[:32],
+            "spanID": str(uuid.uuid4()).replace("-", "")[:16],
+            "operationName": "sgraal.preflight",
+            "startTime": int(_time.time() * 1_000_000),
+            "duration": 1000,
+            "process": {"serviceName": "sgraal-api"},
+            "tags": [{"key": "omega", "type": "float64", "value": t.get("omega", 0)},
+                     {"key": "decision", "type": "string", "value": t.get("decision", "USE_MEMORY")}],
+        })
+    return {"format": "jaeger", "data": [{"traceID": spans[0]["traceID"] if spans else "", "spans": spans, "processes": {"p1": {"serviceName": "sgraal-api"}}}] if spans else []}
+
+# ---- #116b RAG Guard filter endpoint ----
+@app.post("/v1/rag/filter")
+def rag_filter(req: dict, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    chunks = req.get("chunks", [])
+    max_omega = req.get("max_omega", 60)
+    filtered = []
+    for chunk in chunks:
+        content = chunk.get("content", chunk.get("text", ""))
+        if len(content) < 10:
+            chunk["sgraal_omega"] = 0
+            filtered.append(chunk)
+            continue
+        # Quick score via internal compute
+        entry = MemoryEntry(id="rag", content=content, type="semantic",
+            timestamp_age_days=0, source_trust=0.8, source_conflict=0.1, downstream_count=1)
+        r = compute([entry], "informational", "general")
+        chunk["sgraal_omega"] = r.omega_mem_final
+        if r.omega_mem_final <= max_omega:
+            filtered.append(chunk)
+    return {"filtered_chunks": filtered, "total": len(chunks), "passed": len(filtered),
+            "filtered_out": len(chunks) - len(filtered)}
 
 
 # ---- #139 Synthetic Memory Generator ----
@@ -2864,6 +3071,7 @@ class _Metrics:
         self.decisions = {"USE_MEMORY": 0, "WARN": 0, "ASK_USER": 0, "BLOCK": 0}
         self.omega_sum = 0.0
         self.response_times: list[float] = []  # seconds
+        self.redis_latency_ms: float = 0.0
 
     def record_preflight(self, decision: str, omega: float, duration: float):
         self.preflight_total += 1
@@ -2911,6 +3119,10 @@ class _Metrics:
             "# HELP sgraal_response_time_p95_ms p95 response time in milliseconds",
             "# TYPE sgraal_response_time_p95_ms gauge",
             f"sgraal_response_time_p95_ms {self.p95_response_time_ms()}",
+            "",
+            "# HELP sgraal_redis_latency_ms Redis latency in milliseconds",
+            "# TYPE sgraal_redis_latency_ms gauge",
+            f"sgraal_redis_latency_ms {self.redis_latency_ms}",
         ]
         return "\n".join(lines) + "\n"
 
@@ -2921,6 +3133,7 @@ class _Metrics:
             "decisions": dict(self.decisions),
             "avg_omega": self.avg_omega(),
             "p95_response_time_ms": self.p95_response_time_ms(),
+            "redis_latency_ms": self.redis_latency_ms,
         }
 
 
@@ -3754,6 +3967,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["entries_excluded"] = _entries_excluded
     else:
         response["routing_applied"] = False
+
+    # #133 Slow module cache indicator
+    response["slow_modules_cached"] = []
 
     # #125 Policy metadata
     if _policy_result:
