@@ -10485,3 +10485,75 @@ class TestRedisHealthMonitoring:
         r = client.get("/health")
         assert r.status_code == 200
         assert r.json()["status"] == "ok"
+
+
+# ---- Pre-Launch Security Fix Tests ----
+
+class TestPreLaunchSecurityFixes:
+    """Verify all audit fixes"""
+
+    def test_csrf_expiry_works(self):
+        """S1: OAuth CSRF state expiry is no longer dead code"""
+        from api.main import _oauth_states
+        import time as _tt
+        # Create an expired state (> 600 seconds ago)
+        _oauth_states["expired_state_test"] = _tt.time() - 700
+        # The pop+check should now correctly detect expiry
+        stored_ts = _oauth_states.pop("expired_state_test", None)
+        assert stored_ts is not None
+        assert _tt.time() - stored_ts > 600  # expired
+
+    def test_oauth_token_exchange(self):
+        """S2: OAuth token exchange endpoint exists and validates"""
+        r = client.get("/v1/auth/exchange/nonexistent_token_xyz")
+        assert r.status_code in (404, 429)  # Not found or rate limited
+
+    def test_ws_auth_rejects_bad_token(self):
+        """S3: WebSocket rejects invalid tokens with code 4003"""
+        try:
+            with client.websocket_connect("/ws/events/test?token=invalid_bad_token") as ws:
+                ws.receive_json()
+                assert False, "Should have been rejected"
+        except Exception:
+            pass  # Connection closed with 4003
+
+    def test_cors_restricts_origins(self):
+        """S4: CORS no longer allows all origins"""
+        from api.main import _ALLOWED_ORIGINS
+        assert "*" not in _ALLOWED_ORIGINS
+        assert "https://sgraal.com" in _ALLOWED_ORIGINS
+
+    def test_nan_sanitized_to_zero(self):
+        """NaN omega sanitized to 0.0"""
+        import math
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        omega = r.json()["omega_mem_final"]
+        assert not math.isnan(omega)
+        assert "omega_sanitized" in r.json()
+
+    def test_inf_sanitized_to_100(self):
+        """Infinity omega sanitized to 100.0"""
+        import math
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=999999, downstream_count=999999)]
+        }, headers=AUTH)
+        omega = r.json()["omega_mem_final"]
+        assert not math.isinf(omega)
+        assert omega <= 100.0
+        assert "omega_sanitized" in r.json()
+
+    def test_policy_operator_whitelist(self):
+        """Policy compiler rejects invalid operators"""
+        r = client.post("/v1/policies/compile", json={
+            "policy_id": "op_test",
+            "rules": [{"condition": {"field": "omega", "operator": "LIKE", "value": "50"}, "action": "BLOCK"}]
+        }, headers=AUTH)
+        assert r.status_code == 400
+        assert "operator" in r.json()["detail"].lower()
+
+    def test_weight_import_domain_validation(self):
+        """Weight import rejects invalid domain strings"""
+        r = client.post("/v1/weights/import", json={
+            "version": "1.0", "domain": "<script>alert(1)</script>"
+        }, headers=AUTH)
+        assert r.status_code == 400

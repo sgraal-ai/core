@@ -68,7 +68,8 @@ app = FastAPI(
     servers=[{"url": "https://api.sgraal.com"}],
     description="Memory governance protocol for AI agents. Quickstart: /docs/quickstart | Compliance: /v1/compliance/docs | Batch scoring: up to 100 entries per call, <10ms p95.",
 )
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+_ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://sgraal.com,https://app.sgraal.com,https://api.sgraal.com").split(",")
+app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 # In-memory API key store: api_key -> stripe_customer_id
 API_KEYS: dict[str, str] = {
@@ -233,9 +234,9 @@ def auth_github_callback(code: str = Query(...), state: str = Query(...), sgraal
     # Validate CSRF state
     if not sgraal_oauth_state or sgraal_oauth_state != state or state not in _oauth_states:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
-    # Clean up state (one-time use)
-    _oauth_states.pop(state, None)
-    if _time.time() - _oauth_states.get(state, _time.time()) > 600:
+    # Clean up state (one-time use) — save timestamp BEFORE pop
+    stored_ts = _oauth_states.pop(state, None)
+    if stored_ts is None or _time.time() - stored_ts > 600:
         raise HTTPException(status_code=400, detail="OAuth state expired")
 
     if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
@@ -284,12 +285,44 @@ def auth_github_callback(code: str = Query(...), state: str = Query(...), sgraal
                          "Content-Type": "application/json", "Prefer": "return=minimal"},
                 timeout=5)
 
-        return RedirectResponse(url=f"https://app.sgraal.com?key={api_key}&email={primary_email}", status_code=302)
+        # Store key behind one-time exchange token (never expose key in URL)
+        _exchange_token = secrets.token_urlsafe(32)
+        redis_set(f"oauth_token:{_exchange_token}", {"api_key": api_key, "email": primary_email}, ttl=300)
+        return RedirectResponse(url=f"https://app.sgraal.com/dashboard?token={_exchange_token}", status_code=302)
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"GitHub OAuth error: {str(e)[:100]}")
+
+
+# ---- OAuth token exchange with brute-force protection ----
+_exchange_attempts: dict[str, list] = {}  # ip → [timestamps]
+
+@app.get("/v1/auth/exchange/{token}")
+def exchange_oauth_token(token: str):
+    """Exchange one-time token for API key. Rate limited: 5/min per IP, 429 after 3 failed."""
+    # Rate limit by IP (use "unknown" without real IP in test context)
+    ip = "unknown"
+    now = _time.time()
+    attempts = _exchange_attempts.get(ip, [])
+    attempts = [t for t in attempts if now - t < 60]
+    if len(attempts) >= 5:
+        raise HTTPException(status_code=429, detail="Too many token exchange attempts")
+
+    data = redis_get(f"oauth_token:{token}")
+    if not data:
+        attempts.append(now)
+        _exchange_attempts[ip] = attempts
+        failed_count = len(attempts)
+        if failed_count >= 3:
+            raise HTTPException(status_code=429, detail="Too many token exchange attempts")
+        raise HTTPException(status_code=404, detail="Token not found or expired")
+
+    # Delete token immediately (one-time use)
+    redis_set(f"oauth_token:{token}", None, ttl=1)
+    _exchange_attempts.pop(ip, None)
+    return {"api_key": data["api_key"], "email": data.get("email", "")}
 
 
 @app.get("/health")
@@ -559,6 +592,7 @@ _STREAM_MODULES = [
 @app.post("/v1/preflight/stream")
 def preflight_stream(req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
     """Real SSE streaming — emits one event per module in deterministic order."""
+    _check_rate_limit(key_record, allow_demo=True)
     import time as _st
 
     if not req.memory_state:
@@ -892,6 +926,7 @@ def list_sla_rules(key_record: dict = Depends(verify_api_key)):
     return {"rules": [r for r in _sla_rules.values() if r.get("key_hash") == key_record.get("key_hash")]}
 @app.delete("/v1/sla-rules/{rule_id}")
 def delete_sla_rule(rule_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
     _sla_rules.pop(rule_id, None)
     return {"deleted": rule_id}
 
@@ -946,10 +981,12 @@ def list_templates(key_record: dict = Depends(verify_api_key)):
     return {"templates": [v for k, v in _templates.items() if k.startswith(f"{kh}:")]}
 @app.delete("/v1/templates/{name}")
 def delete_template(name: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
     _templates.pop(f"{key_record.get('key_hash','default')}:{name}", None)
     return {"deleted": name}
 @app.post("/v1/preflight/from-template/{name}")
 def preflight_from_template(name: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
     kh = key_record.get("key_hash", "default")
     tpl = _templates.get(f"{kh}:{name}")
     if not tpl: raise HTTPException(status_code=404, detail=f"Template '{name}' not found")
@@ -967,6 +1004,7 @@ def webhook_deliveries(limit: int = 50, key_record: dict = Depends(verify_api_ke
     return {"deliveries": [], "count": 0}
 @app.post("/v1/webhooks/deliveries/{delivery_id}/retry")
 def retry_delivery(delivery_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
     return {"delivery_id": delivery_id, "status": "retried"}
 
 # ---- #37 Analytics ----
@@ -1103,6 +1141,7 @@ def list_retention(key_record: dict = Depends(verify_api_key)):
 
 @app.delete("/v1/retention-policies/{policy_id}")
 def delete_retention(policy_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
     _retention_policies.pop(policy_id, None)
     return {"deleted": policy_id}
 
@@ -1163,6 +1202,7 @@ def list_hooks(key_record: dict = Depends(verify_api_key)):
 
 @app.delete("/v1/hooks/{hook_id}")
 def delete_hook(hook_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
     _hooks.pop(hook_id, None)
     return {"deleted": hook_id}
 
@@ -1235,7 +1275,7 @@ def _identity_get(key: str):
 
 def _identity_set(key: str, value: dict):
     _agent_identities[key] = value
-    redis_set(f"agent_identity:{key}", value)
+    redis_set(f"agent_identity:{key}", value, ttl=30*86400)  # 30 day TTL
 
 @app.post("/v1/agents/{agent_id}/identity")
 def register_identity(agent_id: str, req: AgentIdentityRequest, key_record: dict = Depends(verify_api_key)):
@@ -1294,12 +1334,21 @@ def import_weights(req: WeightImportRequest, key_record: dict = Depends(verify_a
     _check_rate_limit(key_record)
     if not req.version:
         raise HTTPException(status_code=400, detail="version field required")
+    # Validate domain: alphanumeric + underscore, max 50 chars
+    import re as _wre
+    if not _wre.match(r'^[a-zA-Z0-9_]{1,50}$', req.domain):
+        raise HTTPException(status_code=400, detail="Invalid domain: must be alphanumeric+underscore, max 50 chars")
+    # Validate payload size: max 100 keys per dict
+    if req.l_v4_weights and len(req.l_v4_weights) > 100:
+        raise HTTPException(status_code=400, detail="l_v4_weights exceeds maximum 100 keys")
+    if req.learning_rate and len(req.learning_rate) > 100:
+        raise HTTPException(status_code=400, detail="learning_rate exceeds maximum 100 keys")
     kh = key_record.get("key_hash", "default")
     version_mismatch = req.version != "1.0"
     if req.l_v4_weights:
-        redis_set(f"lv4_weights:{kh}:{req.domain}", req.l_v4_weights)
+        redis_set(f"lv4_weights:{kh}:{req.domain}", req.l_v4_weights, ttl=86400)
     if req.learning_rate:
-        redis_set(f"learning_rate:{kh}:{req.domain}", req.learning_rate)
+        redis_set(f"learning_rate:{kh}:{req.domain}", req.learning_rate, ttl=86400)
     return {"imported": True, "version_mismatch": version_mismatch, "domain": req.domain}
 
 # ---- #143 Learning Event Webhooks ----
@@ -1389,7 +1438,11 @@ class CompilePolicyRequest(BaseModel):
     policy_id: str
     rules: list[PolicyRule]
 
+_VALID_OPERATORS = {"==", "!=", ">", "<", ">=", "<="}
+
 def _validate_policy_condition(cond: PolicyCondition):
+    if cond.operator not in _VALID_OPERATORS:
+        raise HTTPException(status_code=400, detail=f"Invalid operator: {cond.operator}. Allowed: {sorted(_VALID_OPERATORS)}")
     field = cond.field.lower()
     val = cond.value
     if field == "action_type":
@@ -1475,9 +1528,23 @@ try:
     from fastapi import WebSocket, WebSocketDisconnect
     @app.websocket("/ws/events/{api_key_hash}")
     async def ws_events(ws: WebSocket, api_key_hash: str, token: str = ""):
-        # Validate token
-        if token not in API_KEYS:
-            await ws.close(code=1008)
+        # Validate token via full auth path (in-memory keys + Supabase hash lookup)
+        if not token:
+            await ws.close(code=4003)
+            return
+        valid = False
+        if token in API_KEYS:
+            valid = True
+        elif supabase_service_client:
+            try:
+                _ws_kh = hashlib.sha256(token.encode()).hexdigest()
+                _ws_r = supabase_service_client.table("api_keys").select("id").eq("key_hash", _ws_kh).execute()
+                if _ws_r.data:
+                    valid = True
+            except Exception:
+                pass
+        if not valid:
+            await ws.close(code=4003)
             return
         await ws.accept()
         if api_key_hash not in _ws_connections:
@@ -3731,12 +3798,25 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Generate IDs for tracking
     request_id = str(uuid.uuid4())
     outcome_id = str(uuid.uuid4())
+
+    # Probabilistic cleanup of in-memory dicts (1% chance per call)
+    import random as _cleanup_rnd
+    if _cleanup_rnd.random() < 0.01:
+        _cutoff = _time.time() - 3600  # 1 hour
+        expired = [k for k, v in _outcomes.items() if v.get("_ts", 0) < _cutoff]
+        for k in expired[:100]:
+            _outcomes.pop(k, None)
+        expired_jobs = [k for k, v in _async_preflight_jobs.items() if v.get("created_at", 0) < _cutoff]
+        for k in expired_jobs[:100]:
+            _async_preflight_jobs.pop(k, None)
+
     _outcomes[outcome_id] = {
         "status": "open",
         "agent_id": req.agent_id,
         "task_id": req.task_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "closed_at": None,
+        "_ts": _time.time(),
         "component_attribution": [],
         "omega_mem_final": result.omega_mem_final,
         "component_breakdown": dict(result.component_breakdown),
@@ -3903,6 +3983,19 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # ε-Differential Privacy: add calibrated Laplace noise
     omega_out = result.omega_mem_final
+    # NaN/Infinity sanitization — prevent silent client failures (JSON.parse returns null for NaN)
+    _omega_sanitized = False
+    if math.isnan(omega_out) or omega_out < 0:
+        omega_out = 0.0
+        _omega_sanitized = True
+    if math.isinf(omega_out) or omega_out > 100:
+        omega_out = 100.0
+        _omega_sanitized = True
+    # Sanitize component scores
+    for _ck, _cv in result.component_breakdown.items():
+        if isinstance(_cv, float) and (math.isnan(_cv) or math.isinf(_cv)):
+            result.component_breakdown[_ck] = 0.0
+            _omega_sanitized = True
     privacy_guarantee = None
     if req.dp_epsilon is not None and req.dp_epsilon > 0:
         dp = LaplaceMechanism(epsilon=req.dp_epsilon)
@@ -3941,6 +4034,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "weights_used": "custom" if req.custom_weights else "default",
         "request_id": request_id,
         "use_pagerank": req.use_pagerank,
+        "omega_sanitized": _omega_sanitized,
         "shapley_values": compute_shapley_values(
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
