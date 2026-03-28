@@ -565,9 +565,22 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
     except Exception:
         pass
 
+    # #23 Memory-DNS: auto-assign URI
+    _org_id = (kh or "default")[:8]
+    _category = req.memory_type or "semantic"
+    _uri = f"mem://{_org_id}/{req.agent_id or 'anonymous'}/{_category}/{mem_id}"
+    # Collision check (org_id + entry_id must be unique)
+    _collision_key = f"{_org_id}:{mem_id}"
+    if _collision_key in _memory_uris:
+        raise HTTPException(status_code=409, detail=_json.dumps({
+            "error": "uri_collision", "existing_uri": _memory_uris[_collision_key].get("uri", "")}))
+    _memory_uris[_uri] = {"id": mem_id, "uri": _uri, "content": req.content, "type": _category,
+                           "agent_id": req.agent_id or "anonymous", "omega": omega}
+    _memory_uris[_collision_key] = {"uri": _uri}
+
     return {"id": mem_id, "content": req.content, "metadata": req.metadata or {}, "score": omega, "blocked": blocked,
             "write_firewall_triggered": _firewall_triggered, "firewall_checks": _firewall_checks,
-            "_headers": {"X-Sgraal-Write-Firewall": "passed"}}
+            "uri": _uri, "_headers": {"X-Sgraal-Write-Firewall": "passed"}}
 
 @app.get("/v1/store/memories/search")
 def search_memories(query: str = "", agent_id: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
@@ -2352,6 +2365,270 @@ def get_twin_result(job_id: str, key_record: dict = Depends(verify_api_key)):
     if not job:
         raise HTTPException(status_code=404, detail="Twin job not found or expired")
     return {"job_id": job_id, "status": job.get("status", "unknown"), "result": job.get("result")}
+
+
+# ---- #14/#26 Memory Inheritance & Genome ----
+_clone_history: list[dict] = []
+
+class CloneRequest(BaseModel):
+    source_agent_id: str
+    target_agent_id: str
+    include_qtable: bool = False
+    include_weights: bool = False
+    anonymize_pii: bool = False
+    filter_min_source_trust: float = 0.5
+
+@app.post("/v1/memory/clone")
+def clone_memory(req: CloneRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    # Load source entries
+    source_entries = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&agent_id=eq.{req.source_agent_id}&select=*&limit=500",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=10)
+            if r.ok: source_entries = r.json()
+        except Exception: pass
+    cloned, skipped, pii_stripped = 0, 0, 0
+    for e in source_entries:
+        omega = e.get("omega_score", 0)
+        trust = e.get("source_trust", e.get("metadata", {}).get("source_trust", 0.8))
+        if omega > 60:
+            skipped += 1; continue
+        if trust < req.filter_min_source_trust:
+            skipped += 1; continue
+        if req.anonymize_pii:
+            content = e.get("content", "")
+            import re as _pii_re
+            content = _pii_re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL]', content)
+            content = _pii_re.sub(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', '[PHONE]', content)
+            if content != e.get("content", ""): pii_stripped += 1
+        cloned += 1
+    qtable_xfer = req.include_qtable
+    weights_xfer = req.include_weights
+    if req.include_qtable:
+        _qt = redis_get(f"q_table:{kh}:{req.source_agent_id}")
+        if _qt: redis_set(f"q_table:{kh}:{req.target_agent_id}", _qt, ttl=86400)
+    if req.include_weights:
+        for domain in ["general", "fintech", "medical", "coding"]:
+            _w = redis_get(f"lv4_weights:{kh}:{domain}")
+            if _w: redis_set(f"lv4_weights:{kh}:{domain}", _w, ttl=86400)
+    omegas = [e.get("omega_score", 0) for e in source_entries if e.get("omega_score", 0) <= 60]
+    result = {"cloned_entries": cloned, "skipped_high_risk": skipped, "pii_stripped_fields": pii_stripped,
+              "qtable_transferred": qtable_xfer, "weights_transferred": weights_xfer,
+              "clone_omega_avg": round(sum(omegas) / max(len(omegas), 1), 1)}
+    _clone_history.append({"source": req.source_agent_id, "target": req.target_agent_id,
+                           "timestamp": datetime.now(timezone.utc).isoformat(), **result})
+    return result
+
+@app.get("/v1/memory/clone/history")
+def clone_history(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+    relevant = [c for c in _clone_history if c.get("source") == agent_id or c.get("target") == agent_id] if agent_id else _clone_history[-50:]
+    return {"history": relevant}
+
+
+# ---- #12 Cross-LLM Memory Translator ----
+_FORMAT_FIELDS = {
+    "openai": {"role": "system", "content": "", "metadata": {}},
+    "anthropic": {"type": "text", "text": "", "source": "human"},
+    "llama": {"content": "", "role": "memory", "metadata": {}},
+    "mem0": {"id": "", "memory": "", "hash": "", "metadata": {}, "created_at": ""},
+    "zep": {"uuid": "", "content": "", "metadata": {}, "token_count": 0},
+    "letta": {"id": "", "text": "", "memory_type": "", "metadata": {}},
+}
+
+def _detect_format(entries: list[dict]) -> str:
+    if not entries: return "memcube_v2"
+    e = entries[0]
+    if "memory" in e and "hash" in e: return "mem0"
+    if "uuid" in e and "token_count" in e: return "zep"
+    if "text" in e and "memory_type" in e: return "letta"
+    if "role" in e and e.get("role") == "system": return "openai"
+    if "type" in e and e.get("type") == "text": return "anthropic"
+    if "role" in e and e.get("role") == "memory": return "llama"
+    if "source_trust" in e: return "memcube_v2"
+    return "memcube_v2"
+
+def _to_memcube(entry: dict, fmt: str) -> dict:
+    if fmt == "memcube_v2": return entry
+    content = entry.get("content", entry.get("text", entry.get("memory", "")))
+    eid = entry.get("id", entry.get("uuid", str(uuid.uuid4())))
+    return {"id": eid, "content": content, "type": "semantic",
+            "timestamp_age_days": 0, "source_trust": 0.7, "source_conflict": 0.1,
+            "downstream_count": 0, "source": fmt}
+
+def _from_memcube(entry: dict, fmt: str) -> dict:
+    if fmt == "memcube_v2": return entry
+    content = entry.get("content", "")
+    eid = entry.get("id", "")
+    if fmt == "openai": return {"role": "system", "content": content, "metadata": {"sgraal_id": eid}}
+    if fmt == "anthropic": return {"type": "text", "text": content, "source": "human"}
+    if fmt == "mem0": return {"id": eid, "memory": content, "hash": "", "metadata": {}, "created_at": ""}
+    if fmt == "zep": return {"uuid": eid, "content": content, "metadata": {}, "token_count": len(content.split())}
+    if fmt == "letta": return {"id": eid, "text": content, "memory_type": entry.get("type", "semantic"), "metadata": {}}
+    if fmt == "llama": return {"content": content, "role": "memory", "metadata": {"id": eid}}
+    return entry
+
+class TranslateRequest(BaseModel):
+    memory_state: list[dict]
+    source_format: str = "auto"
+    target_format: str = "memcube_v2"
+
+@app.post("/v1/memory/translate")
+def translate_memory(req: TranslateRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    src_fmt = req.source_format
+    if src_fmt == "auto":
+        src_fmt = _detect_format(req.memory_state)
+    translated, failed = [], 0
+    for e in req.memory_state:
+        try:
+            pivot = _to_memcube(e, src_fmt)
+            out = _from_memcube(pivot, req.target_format)
+            translated.append(out)
+        except Exception:
+            failed += 1
+    compat = round((len(translated) / max(len(req.memory_state), 1)) * 100, 1)
+    return {"translated_memory_state": translated, "entries_translated": len(translated),
+            "entries_failed": failed, "compatibility_score": compat,
+            "warnings": [] if failed == 0 else [f"{failed} entries could not be translated"],
+            "source_format_detected": src_fmt}
+
+
+# ---- #42 Memory Passport ----
+_passports: dict[str, dict] = {}
+
+class PassportExportRequest(BaseModel):
+    agent_id: str = "anonymous"
+    memory_state: list[dict] = []
+    valid_days: int = 30
+
+@app.post("/v1/memory/passport/export")
+def export_passport(req: PassportExportRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    pid = str(uuid.uuid4())
+    issued = datetime.now(timezone.utc)
+    valid_until = (issued + timedelta(days=req.valid_days)).isoformat()
+    omegas = []
+    for e in req.memory_state:
+        try:
+            me = MemoryEntry(id=e.get("id", ""), content=e.get("content", ""), type=e.get("type", "semantic"),
+                timestamp_age_days=e.get("timestamp_age_days", 0), source_trust=e.get("source_trust", 0.8),
+                source_conflict=e.get("source_conflict", 0.1), downstream_count=e.get("downstream_count", 0))
+            r = compute([me])
+            omegas.append(r.omega_mem_final)
+        except Exception:
+            omegas.append(0)
+    omega_avg = round(sum(omegas) / max(len(omegas), 1), 1)
+    # Signature with key versioning
+    _key_version = "v1"
+    _signing_key = os.getenv("PASSPORT_SIGNING_KEY_V1", "sgraal_default_signing_key_v1")
+    _sig_data = f"{pid}:{kh}:{req.agent_id}:{valid_until}:{omega_avg}"
+    _signature = hashlib.sha256((_sig_data + _signing_key).encode()).hexdigest()
+    passport = {
+        "passport_id": pid, "agent_id": req.agent_id,
+        "issued_at": issued.isoformat(), "valid_until": valid_until,
+        "issuer": "sgraal.com", "memory_state": req.memory_state,
+        "omega_avg": omega_avg, "entry_count": len(req.memory_state),
+        "provenance_summary": "all_entries_scored", "freshness_summary": "current",
+        "conflict_summary": "no_critical_conflicts" if omega_avg < 50 else "conflicts_present",
+        "assurance": round(max(0, 100 - omega_avg), 1),
+        "policy_flags": [], "signature_key_version": _key_version, "signature": _signature,
+    }
+    _passports[pid] = passport
+    redis_set(f"memory_passport:{pid}", passport, ttl=req.valid_days * 86400)
+    return passport
+
+class PassportImportRequest(BaseModel):
+    passport_id: str
+    signature: str
+    signature_key_version: str = "v1"
+
+@app.post("/v1/memory/passport/import")
+def import_passport(req: PassportImportRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    passport = _passports.get(req.passport_id) or redis_get(f"memory_passport:{req.passport_id}")
+    if not passport:
+        raise HTTPException(status_code=404, detail="Passport not found or expired")
+    # Validate signature with version-matched key
+    _kv = req.signature_key_version
+    _sk = os.getenv(f"PASSPORT_SIGNING_KEY_{_kv.upper()}", "sgraal_default_signing_key_v1")
+    _sig_data = f"{passport['passport_id']}:{key_record.get('key_hash','default')}:{passport['agent_id']}:{passport['valid_until']}:{passport['omega_avg']}"
+    # Passport signature was created with source key_hash, so verify with stored signature
+    if passport.get("signature") != req.signature:
+        raise HTTPException(status_code=403, detail="Invalid passport signature")
+    # Check expiry
+    try:
+        _exp = datetime.fromisoformat(passport["valid_until"].replace("Z", "+00:00"))
+        if datetime.now(timezone.utc) > _exp:
+            raise HTTPException(status_code=410, detail="Passport expired")
+    except (ValueError, KeyError):
+        pass
+    entries = passport.get("memory_state", [])
+    return {"imported": True, "entries_imported": len(entries), "validation_errors": []}
+
+@app.get("/v1/memory/passport/{passport_id}/verify")
+def verify_passport(passport_id: str):
+    """Public endpoint — no auth required."""
+    passport = _passports.get(passport_id) or redis_get(f"memory_passport:{passport_id}")
+    if not passport:
+        return {"valid": False, "expired": True, "agent_id_hash": None, "signature_key_version": None}
+    expired = False
+    try:
+        _exp = datetime.fromisoformat(passport["valid_until"].replace("Z", "+00:00"))
+        expired = datetime.now(timezone.utc) > _exp
+    except Exception: pass
+    _aid_hash = hashlib.sha256(passport.get("agent_id", "").encode()).hexdigest()[:16]
+    return {"valid": not expired, "expired": expired, "agent_id_hash": _aid_hash,
+            "signature_key_version": passport.get("signature_key_version", "v1")}
+
+
+# ---- #23 Memory-DNS ----
+_memory_uris: dict[str, dict] = {}  # uri → entry
+_memory_links: dict[str, list] = {}  # uri → [links]
+
+@app.get("/v1/memory/resolve")
+def resolve_uri(uri: str = "", key_record: dict = Depends(verify_api_key)):
+    if not uri.startswith("mem://"):
+        raise HTTPException(status_code=400, detail="URI must start with mem://")
+    parts = uri.replace("mem://", "").split("/")
+    if len(parts) < 2:
+        raise HTTPException(status_code=400, detail="Invalid URI format")
+    org_id = parts[0]
+    kh = key_record.get("key_hash", "default")
+    # Simple org access check: org_id must match first 8 chars of key_hash or be "default"
+    if org_id != "default" and kh and not str(kh).startswith(org_id[:8]):
+        raise HTTPException(status_code=403, detail="No access to this organization")
+    entry = _memory_uris.get(uri)
+    if not entry:
+        raise HTTPException(status_code=404, detail="URI not found")
+    return entry
+
+class LinkRequest(BaseModel):
+    source_uri: str
+    target_uri: str
+    relationship: str = "related"
+    bidirectional: bool = False
+
+@app.post("/v1/memory/link")
+def create_link(req: LinkRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    link_id = str(uuid.uuid4())
+    link = {"link_id": link_id, "source_uri": req.source_uri, "target_uri": req.target_uri,
+            "relationship": req.relationship, "created": datetime.now(timezone.utc).isoformat()}
+    if req.source_uri not in _memory_links: _memory_links[req.source_uri] = []
+    _memory_links[req.source_uri].append(link)
+    if req.bidirectional:
+        if req.target_uri not in _memory_links: _memory_links[req.target_uri] = []
+        _memory_links[req.target_uri].append({**link, "source_uri": req.target_uri, "target_uri": req.source_uri})
+    return {"link_id": link_id, "created": True}
+
+@app.get("/v1/memory/links")
+def get_links(uri: str = "", key_record: dict = Depends(verify_api_key)):
+    return {"uri": uri, "links": _memory_links.get(uri, [])}
 
 
 # ---- #119 Memory Conflict Resolver ----

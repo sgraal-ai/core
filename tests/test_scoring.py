@@ -11490,3 +11490,199 @@ class TestCounterfactualEngine:
     def test_counterfactual_available_in_preflight(self):
         r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
         assert r.json()["counterfactual_available"] is True
+
+
+# ---- Sprint 38: Memory Inheritance, Translator, Passport, DNS ----
+
+class TestMemoryInheritance:
+    """#14/#26 Memory Inheritance & Genome"""
+    def test_basic_clone(self):
+        r = client.post("/v1/memory/clone", json={
+            "source_agent_id": "src_agent", "target_agent_id": "tgt_agent"
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert "cloned_entries" in r.json()
+
+    def test_pii_stripped(self):
+        r = client.post("/v1/memory/clone", json={
+            "source_agent_id": "src_pii", "target_agent_id": "tgt_pii", "anonymize_pii": True
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert "pii_stripped_fields" in r.json()
+
+    def test_high_omega_skipped(self):
+        r = client.post("/v1/memory/clone", json={
+            "source_agent_id": "src_skip", "target_agent_id": "tgt_skip"
+        }, headers=AUTH)
+        assert "skipped_high_risk" in r.json()
+
+    def test_qtable_transferred(self):
+        r = client.post("/v1/memory/clone", json={
+            "source_agent_id": "src_qt", "target_agent_id": "tgt_qt", "include_qtable": True
+        }, headers=AUTH)
+        assert r.json()["qtable_transferred"] is True
+
+    def test_filter_min_trust(self):
+        r = client.post("/v1/memory/clone", json={
+            "source_agent_id": "src_trust", "target_agent_id": "tgt_trust",
+            "filter_min_source_trust": 0.9
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+    def test_clone_history(self):
+        client.post("/v1/memory/clone", json={
+            "source_agent_id": "hist_src", "target_agent_id": "hist_tgt"
+        }, headers=AUTH)
+        r = client.get("/v1/memory/clone/history?agent_id=hist_src", headers=AUTH)
+        assert r.status_code == 200
+        assert len(r.json()["history"]) >= 1
+
+
+class TestCrossLLMTranslator:
+    """#12 Cross-LLM Memory Translator"""
+    def test_mem0_to_memcube(self):
+        r = client.post("/v1/memory/translate", json={
+            "memory_state": [{"id": "m1", "memory": "user likes cats", "hash": "abc", "metadata": {}, "created_at": ""}],
+            "source_format": "mem0", "target_format": "memcube_v2"
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["entries_translated"] == 1
+        assert r.json()["translated_memory_state"][0]["content"] == "user likes cats"
+
+    def test_zep_to_memcube(self):
+        r = client.post("/v1/memory/translate", json={
+            "memory_state": [{"uuid": "z1", "content": "session data", "metadata": {}, "token_count": 5}],
+            "source_format": "zep", "target_format": "memcube_v2"
+        }, headers=AUTH)
+        assert r.json()["entries_translated"] == 1
+
+    def test_openai_to_memcube(self):
+        r = client.post("/v1/memory/translate", json={
+            "memory_state": [{"role": "system", "content": "remember this", "metadata": {}}],
+            "source_format": "openai", "target_format": "memcube_v2"
+        }, headers=AUTH)
+        assert r.json()["entries_translated"] == 1
+
+    def test_auto_detect(self):
+        r = client.post("/v1/memory/translate", json={
+            "memory_state": [{"id": "m1", "memory": "auto test", "hash": "h", "metadata": {}, "created_at": ""}],
+            "source_format": "auto"
+        }, headers=AUTH)
+        assert r.json()["source_format_detected"] == "mem0"
+
+    def test_compatibility_score(self):
+        r = client.post("/v1/memory/translate", json={
+            "memory_state": [{"content": "test", "type": "semantic"}],
+            "source_format": "memcube_v2", "target_format": "openai"
+        }, headers=AUTH)
+        assert "compatibility_score" in r.json()
+        assert r.json()["compatibility_score"] > 0
+
+    def test_failed_entries_counted(self):
+        r = client.post("/v1/memory/translate", json={
+            "memory_state": [{"content": "ok"}],
+            "source_format": "memcube_v2", "target_format": "zep"
+        }, headers=AUTH)
+        assert "entries_failed" in r.json()
+
+
+class TestMemoryPassport:
+    """#42 Memory Passport"""
+    def test_export_creates_passport(self):
+        r = client.post("/v1/memory/passport/export", json={
+            "agent_id": "pass_agent",
+            "memory_state": [_fresh_entry()],
+            "valid_days": 7
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert "passport_id" in r.json()
+        assert "signature" in r.json()
+        assert r.json()["signature_key_version"] == "v1"
+
+    def test_signature_valid(self):
+        r = client.post("/v1/memory/passport/export", json={
+            "agent_id": "sig_test", "memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        assert len(r.json()["signature"]) == 64  # SHA256 hex
+
+    def test_import_works(self):
+        r1 = client.post("/v1/memory/passport/export", json={
+            "agent_id": "imp_test", "memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        pid = r1.json()["passport_id"]
+        sig = r1.json()["signature"]
+        r2 = client.post("/v1/memory/passport/import", json={
+            "passport_id": pid, "signature": sig, "signature_key_version": "v1"
+        }, headers=AUTH)
+        assert r2.status_code == 200
+        assert r2.json()["imported"] is True
+
+    def test_invalid_signature_rejected(self):
+        r1 = client.post("/v1/memory/passport/export", json={
+            "agent_id": "bad_sig", "memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        pid = r1.json()["passport_id"]
+        r2 = client.post("/v1/memory/passport/import", json={
+            "passport_id": pid, "signature": "wrong_sig", "signature_key_version": "v1"
+        }, headers=AUTH)
+        assert r2.status_code == 403
+
+    def test_public_verify_no_auth(self):
+        r1 = client.post("/v1/memory/passport/export", json={
+            "agent_id": "pub_verify", "memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        pid = r1.json()["passport_id"]
+        # No auth header — public endpoint
+        r2 = client.get(f"/v1/memory/passport/{pid}/verify")
+        assert r2.status_code == 200
+        assert r2.json()["valid"] is True
+        assert r2.json()["signature_key_version"] == "v1"
+
+    def test_nonexistent_passport_invalid(self):
+        r = client.get("/v1/memory/passport/nonexistent_xyz/verify")
+        assert r.json()["valid"] is False
+
+
+class TestMemoryDNS:
+    """#23 Memory-DNS"""
+    def test_uri_auto_assigned(self):
+        import time as _td
+        r = client.post("/v1/store/memories", json={
+            "content": f"DNS test entry {_td.time()}", "memory_type": "semantic"
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert "uri" in r.json()
+        assert r.json()["uri"].startswith("mem://")
+
+    def test_resolve_works(self):
+        import time as _td2
+        r1 = client.post("/v1/store/memories", json={
+            "content": f"Resolve test {_td2.time()}", "memory_type": "semantic"
+        }, headers=AUTH)
+        uri = r1.json()["uri"]
+        r2 = client.get(f"/v1/memory/resolve?uri={uri}", headers=AUTH)
+        assert r2.status_code == 200
+
+    def test_resolve_403_wrong_org(self):
+        r = client.get("/v1/memory/resolve?uri=mem://wrongorg/agent/type/id", headers=AUTH)
+        assert r.status_code in (403, 404)
+
+    def test_link_created(self):
+        r = client.post("/v1/memory/link", json={
+            "source_uri": "mem://test/a/b/c", "target_uri": "mem://test/d/e/f",
+            "relationship": "depends_on"
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["created"] is True
+
+    def test_links_retrieved(self):
+        client.post("/v1/memory/link", json={
+            "source_uri": "mem://test/link/src/1", "target_uri": "mem://test/link/tgt/2"
+        }, headers=AUTH)
+        r = client.get("/v1/memory/links?uri=mem://test/link/src/1", headers=AUTH)
+        assert r.status_code == 200
+        assert len(r.json()["links"]) >= 1
+
+    def test_migration_exists(self):
+        import os
+        assert os.path.exists("scripts/migrations/021_memory_dns_unique.sql")
