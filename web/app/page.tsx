@@ -22,7 +22,7 @@ export default function Home() {
             <span style={{ width: "0.375rem", height: "0.375rem", borderRadius: "9999px", background: GOLD, display: "inline-block" }} />
             MEMORY GOVERNANCE PROTOCOL
           </div>
-          <h1 style={{ fontSize: "clamp(2rem, 5vw, 4rem)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, color: "#000000", marginBottom: "2rem", ...HEADLINE }}>
+          <h1 style={{ fontSize: "clamp(1.5rem, 3vw, 2.5rem)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, color: "#000000", marginBottom: "2rem", ...HEADLINE }}>
             AI agents act on memory. Sgraal decides if that memory is{" "}
             <span style={{ color: GOLD }}>safe to act on.</span>
           </h1>
@@ -162,11 +162,11 @@ export default function Home() {
       <section style={{ background: "#ffffff", padding: "6rem 2rem", textAlign: "center" }}>
         <div style={{ maxWidth: "48rem", margin: "0 auto" }}>
           <div style={{ fontSize: "5rem", fontWeight: 700, color: GOLD, opacity: 0.2, lineHeight: 1, marginBottom: "2rem", ...HEADLINE }}>&ldquo;</div>
-          <blockquote style={{ fontSize: "clamp(1.5rem, 3vw, 2.5rem)", fontWeight: 700, letterSpacing: "-0.02em", color: "#000000", marginBottom: "3rem", fontStyle: "italic", lineHeight: 1.2, ...HEADLINE }}>
+          <blockquote style={{ fontSize: "1.5rem", fontWeight: 700, letterSpacing: "-0.02em", color: "#000000", marginBottom: "3rem", lineHeight: 1.2, ...HEADLINE }}>
             &ldquo;Ran 300+ step regulated test with zero drift.&rdquo;
           </blockquote>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem", marginBottom: "4rem" }}>
-            <img alt="grok" style={{ width: "2.5rem", height: "2.5rem", borderRadius: "9999px", filter: "grayscale(1)" }} src="https://lh3.googleusercontent.com/aida-public/AB6AXuAX0QGm9IOMLHTxZ2M0UpYviPdNPLjgTgAM0c2-8mIf67CozEhdNTu2DVHYclre4e8nWfnl6x2Gnhag1sLVp5uaIFmgEUl3NSqHOapreIjJdYKEVq1jAaSr4Opss-286xvOoldCB2OERUZhGuvAb2ADQnnsmrLLGvTCFDx3UDJBJ892ue0RgqjrCCEOGrv33DWLdiExDuVVekeiiB--pBA3uA4_ln35aZlq9PNkGjMlfDN8y5pwGXLSufAr47w_tm6AN_5_FnpMmA" />
+            <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "9999px", background: "#000000", display: "flex", alignItems: "center", justifyContent: "center", color: "#ffffff", fontSize: "0.75rem", fontWeight: 700 }}>G</div>
             <span style={{ fontWeight: 700, color: "#000000" }}>@grok</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "2rem", padding: "3rem 0", borderTop: "1px solid #f3f4f6", borderBottom: "1px solid #f3f4f6", marginBottom: "3rem" }}>
@@ -202,8 +202,8 @@ export default function Home() {
             </h2>
             <p style={{ fontSize: "1.125rem", color: "#6b7280" }}>Start free. Scale when you need to.</p>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "2rem", alignItems: "start" }}>
-            <div style={{ background: "#ffffff", padding: "2.5rem", borderRadius: "0.75rem", border: "1px solid #e5e7eb", display: "flex", flexDirection: "column" as const }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "2rem", alignItems: "stretch" }}>
+            <div style={{ background: "#ffffff", padding: "2.5rem", borderRadius: "0.75rem", border: "1px solid #e5e7eb", display: "flex", flexDirection: "column" as const, height: "100%" }}>
               <h3 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#000000", marginBottom: "0.5rem", ...HEADLINE }}>FREE</h3>
               <div style={{ display: "flex", alignItems: "baseline", gap: "0.25rem", marginBottom: "2.5rem" }}>
                 <span style={{ fontSize: "2.5rem", fontWeight: 800, color: "#000000" }}>$0</span>
@@ -218,7 +218,7 @@ export default function Home() {
               </ul>
               <a href="https://app.sgraal.com" style={{ display: "block", textAlign: "center", padding: "1rem", fontWeight: 700, border: `2px solid ${GOLD}`, color: GOLD, borderRadius: "0.375rem", textDecoration: "none" }}>Start Free</a>
             </div>
-            <div style={{ background: "#fffdf7", padding: "2.5rem", borderRadius: "0.75rem", border: `2px solid ${GOLD}`, display: "flex", flexDirection: "column" as const, position: "relative" as const }}>
+            <div style={{ background: "#fffdf7", padding: "2.5rem", borderRadius: "0.75rem", border: `2px solid ${GOLD}`, display: "flex", flexDirection: "column" as const, position: "relative" as const, height: "100%" }}>
               <div style={{ position: "absolute" as const, top: "-1rem", left: "50%", transform: "translateX(-50%)", background: GOLD, padding: "0.25rem 1rem", borderRadius: "9999px", fontSize: "0.625rem", fontWeight: 700, letterSpacing: "0.1em", color: "#ffffff", whiteSpace: "nowrap" as const }}>MOST POPULAR</div>
               <h3 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#000000", marginBottom: "0.5rem", ...HEADLINE }}>PRO</h3>
               <div style={{ display: "flex", alignItems: "baseline", gap: "0.25rem", marginBottom: "2.5rem" }}>
@@ -234,7 +234,7 @@ export default function Home() {
               </ul>
               <a href="https://app.sgraal.com" style={{ display: "block", textAlign: "center", padding: "1rem", fontWeight: 700, background: GOLD_GRADIENT, color: "#ffffff", borderRadius: "0.375rem", textDecoration: "none" }}>Go Pro</a>
             </div>
-            <div style={{ background: "#ffffff", padding: "2.5rem", borderRadius: "0.75rem", border: "1px solid #e5e7eb", display: "flex", flexDirection: "column" as const }}>
+            <div style={{ background: "#ffffff", padding: "2.5rem", borderRadius: "0.75rem", border: "1px solid #e5e7eb", display: "flex", flexDirection: "column" as const, height: "100%" }}>
               <h3 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#000000", marginBottom: "0.5rem", ...HEADLINE }}>ENTERPRISE</h3>
               <div style={{ marginBottom: "2.5rem" }}>
                 <span style={{ fontSize: "2.5rem", fontWeight: 800, color: "#000000" }}>Custom</span>
