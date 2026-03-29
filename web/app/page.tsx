@@ -22,7 +22,7 @@ export default function Home() {
             <span style={{ width: "0.375rem", height: "0.375rem", borderRadius: "9999px", background: GOLD, display: "inline-block" }} />
             MEMORY GOVERNANCE PROTOCOL
           </div>
-          <h1 style={{ fontSize: "clamp(1.5rem, 3vw, 2.5rem)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, color: "#000000", marginBottom: "2rem", ...HEADLINE }}>
+          <h1 style={{ fontSize: "clamp(2.5rem, 5vw, 4.5rem)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, color: "#000000", marginBottom: "2rem", ...HEADLINE }}>
             AI agents act on memory. Sgraal decides if that memory is{" "}
             <span style={{ color: GOLD }}>safe to act on.</span>
           </h1>
@@ -151,7 +151,7 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-                <a href={p.href} style={{ fontSize: "0.875rem", fontWeight: 600, color: GOLD, textDecoration: "none" }}>Learn more →</a>
+                <a href={p.href} style={{ fontSize: "0.875rem", fontWeight: 700, color: "#745b1c", textDecoration: "none" }}>Learn more →</a>
               </div>
             ))}
           </div>
@@ -159,13 +159,13 @@ export default function Home() {
       </section>
 
       {/* SOCIAL PROOF */}
-      <section style={{ background: "#ffffff", padding: "6rem 2rem", textAlign: "center" }}>
+      <section style={{ background: "#ffffff", padding: "4rem 2rem", textAlign: "center" }}>
         <div style={{ maxWidth: "48rem", margin: "0 auto" }}>
-          <div style={{ fontSize: "5rem", fontWeight: 700, color: GOLD, opacity: 0.2, lineHeight: 1, marginBottom: "2rem", ...HEADLINE }}>&ldquo;</div>
-          <blockquote style={{ fontSize: "1.5rem", fontWeight: 700, letterSpacing: "-0.02em", color: "#000000", marginBottom: "3rem", lineHeight: 1.2, ...HEADLINE }}>
+          <div style={{ fontSize: "3rem", fontWeight: 700, color: GOLD, opacity: 0.2, lineHeight: 1, marginBottom: "1rem", ...HEADLINE }}>&ldquo;</div>
+          <blockquote style={{ fontSize: "1.5rem", fontWeight: 700, letterSpacing: "-0.02em", color: "#000000", marginBottom: "1.5rem", lineHeight: 1.3, ...HEADLINE }}>
             &ldquo;Ran 300+ step regulated test with zero drift.&rdquo;
           </blockquote>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem", marginBottom: "4rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem", marginBottom: "2rem" }}>
             <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "9999px", background: "#000000", display: "flex", alignItems: "center", justifyContent: "center", color: "#ffffff", fontSize: "0.75rem", fontWeight: 700 }}>G</div>
             <span style={{ fontWeight: 700, color: "#000000" }}>@grok</span>
           </div>
@@ -216,7 +216,7 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
-              <a href="https://app.sgraal.com" style={{ display: "block", textAlign: "center", padding: "1rem", fontWeight: 700, border: `2px solid ${GOLD}`, color: GOLD, borderRadius: "0.375rem", textDecoration: "none" }}>Start Free</a>
+              <a href="https://app.sgraal.com" style={{ display: "block", textAlign: "center", padding: "0.75rem", fontWeight: 700, border: `2px solid ${GOLD}`, color: "#745b1c", borderRadius: "0.375rem", textDecoration: "none" }}>Start Free</a>
             </div>
             <div style={{ background: "#fffdf7", padding: "2.5rem", borderRadius: "0.75rem", border: `2px solid ${GOLD}`, display: "flex", flexDirection: "column" as const, position: "relative" as const, height: "100%" }}>
               <div style={{ position: "absolute" as const, top: "-1rem", left: "50%", transform: "translateX(-50%)", background: GOLD, padding: "0.25rem 1rem", borderRadius: "9999px", fontSize: "0.625rem", fontWeight: 700, letterSpacing: "0.1em", color: "#ffffff", whiteSpace: "nowrap" as const }}>MOST POPULAR</div>
@@ -232,7 +232,7 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
-              <a href="https://app.sgraal.com" style={{ display: "block", textAlign: "center", padding: "1rem", fontWeight: 700, background: GOLD_GRADIENT, color: "#ffffff", borderRadius: "0.375rem", textDecoration: "none" }}>Go Pro</a>
+              <a href="https://app.sgraal.com" style={{ display: "block", textAlign: "center", padding: "0.75rem", fontWeight: 700, background: GOLD_GRADIENT, color: "#ffffff", borderRadius: "0.375rem", textDecoration: "none" }}>Go Pro</a>
             </div>
             <div style={{ background: "#ffffff", padding: "2.5rem", borderRadius: "0.75rem", border: "1px solid #e5e7eb", display: "flex", flexDirection: "column" as const, height: "100%" }}>
               <h3 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#000000", marginBottom: "0.5rem", ...HEADLINE }}>ENTERPRISE</h3>
@@ -246,7 +246,7 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
-              <a href="mailto:contact@sgraal.com" style={{ display: "block", textAlign: "center", padding: "1rem", fontWeight: 700, background: "#f3f4f6", color: "#000000", borderRadius: "0.375rem", textDecoration: "none" }}>Contact Sales</a>
+              <a href="mailto:contact@sgraal.com" style={{ display: "block", textAlign: "center", padding: "0.75rem", fontWeight: 700, background: "#e5e7eb", color: "#000000", borderRadius: "0.375rem", textDecoration: "none" }}>Contact Sales</a>
             </div>
           </div>
         </div>
