@@ -2,11 +2,10 @@ export function Footer() {
   return (
     <footer className="border-t border-surface-light mt-10">
       <div className="max-w-5xl mx-auto px-6 py-10">
-        <div className="grid sm:grid-cols-3 gap-8 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 mb-8">
           <div>
             <p className="font-mono text-gold text-lg font-bold mb-1">Sgraal</p>
-            <p className="text-muted text-sm mb-1">Memory Governance Protocol</p>
-            <p className="text-muted text-xs">by Zs-Consulting Kft.</p>
+            <p className="text-muted text-sm">Memory Governance Protocol</p>
           </div>
 
           <div className="flex flex-col gap-2 text-sm text-muted">
@@ -24,7 +23,7 @@ export function Footer() {
         </div>
 
         <div className="border-t border-surface-light pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted">
-          <p>&copy; 2026 Zs-Consulting Kft. &middot; Apache 2.0</p>
+          <p>&copy; 2026 Sgraal &middot; Apache 2.0</p>
           <div className="flex gap-4">
             <a href="/privacy" className="hover:text-foreground transition">Privacy</a>
             <a href="/terms" className="hover:text-foreground transition">Terms</a>

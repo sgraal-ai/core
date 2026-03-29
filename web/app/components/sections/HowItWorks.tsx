@@ -22,11 +22,14 @@ const steps = [
 export function HowItWorks() {
   return (
     <section id="how-it-works" className="px-6 py-16 max-w-5xl mx-auto">
-      <h2 className="text-3xl sm:text-4xl font-bold text-center mb-14">
+      <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
         How it <span className="text-gold">works</span>
       </h2>
+      <p className="text-xl text-center mb-12 max-w-3xl mx-auto">
+        Memory poisoning is invisible — <span className="text-gold">until Sgraal.</span>{" "}
+        <span className="text-muted">Every injection leaves a trace. Every decision is provable.</span>
+      </p>
       <div className="grid md:grid-cols-3 gap-8 relative">
-        {/* Connector line — desktop only */}
         <div className="hidden md:block absolute top-4 left-[16.67%] right-[16.67%] h-px bg-gold/20" />
         {steps.map((s) => (
           <div key={s.step} className="relative">

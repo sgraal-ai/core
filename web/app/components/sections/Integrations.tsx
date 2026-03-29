@@ -7,14 +7,23 @@ const badges = [
   "mem0", "MCP", "OpenAI", "Anthropic",
 ];
 
-const installs: Record<string, { label: string; cmd: string }> = {
-  python: { label: "Python", cmd: "pip install sgraal" },
-  langchain: { label: "LangChain", cmd: "pip install langchain-sgraal" },
-  mcp: { label: "MCP / Node", cmd: "npm install @sgraal/mcp" },
-};
+const tabs = [
+  { key: "python", label: "Python", cmd: "pip install sgraal" },
+  { key: "langchain", label: "LangChain", cmd: "pip install langchain-sgraal" },
+  { key: "mcp", label: "MCP / Node", cmd: "npm install @sgraal/mcp" },
+];
 
 export function Integrations() {
-  const [active, setActive] = useState<string>("python");
+  const [active, setActive] = useState("python");
+  const [copied, setCopied] = useState(false);
+
+  const currentCmd = tabs.find((t) => t.key === active)?.cmd ?? "";
+
+  function handleCopy() {
+    navigator.clipboard.writeText(currentCmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   return (
     <section className="px-6 py-16 max-w-5xl mx-auto">
@@ -35,23 +44,39 @@ export function Integrations() {
 
       <div className="max-w-lg mx-auto">
         <div className="flex justify-center gap-2 mb-4">
-          {Object.entries(installs).map(([key, val]) => (
+          {tabs.map((t) => (
             <button
-              key={key}
-              onClick={() => setActive(key)}
+              key={t.key}
+              onClick={() => setActive(t.key)}
               className={`font-mono text-sm px-5 py-2 rounded-lg transition ${
-                active === key
+                active === t.key
                   ? "bg-gold text-background"
                   : "bg-surface text-muted hover:text-foreground"
               }`}
             >
-              {val.label}
+              {t.label}
             </button>
           ))}
         </div>
-        <pre className="bg-surface border border-surface-light rounded-xl p-5 text-sm font-mono text-center text-foreground/80">
-          {installs[active].cmd}
-        </pre>
+        <div className="relative">
+          <pre className="bg-surface border border-surface-light rounded-xl p-5 text-sm font-mono text-center text-foreground/80 pr-12">
+            {currentCmd}
+          </pre>
+          <button
+            onClick={handleCopy}
+            className="absolute top-3 right-3 text-muted hover:text-foreground transition p-1.5 rounded-md hover:bg-surface-light"
+            title="Copy to clipboard"
+          >
+            {copied ? (
+              <span className="text-green-400 text-xs font-mono">Copied!</span>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
     </section>
   );

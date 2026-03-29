@@ -8,6 +8,7 @@ const tiers = [
     cta: "Start free",
     ctaHref: "/playground",
     border: "border-surface-light",
+    highlight: false,
   },
   {
     name: "Pro",
@@ -18,16 +19,26 @@ const tiers = [
     cta: "Get API Key",
     ctaHref: "#signup",
     border: "border-gold/30",
+    highlight: true,
   },
   {
     name: "Enterprise",
     price: "Custom",
     period: "",
     description: "Volume pricing",
-    features: ["SLA + dedicated support", "On-prem deployment option", "SIEM export + audit trail"],
+    features: [
+      "ZK mode \u2014 memory content never leaves your system",
+      "SIEM export (Splunk / Datadog / Elastic)",
+      "On-prem deployment option",
+      "EU AI Act conformity declaration",
+      "Memory Immunity Certificate",
+      "Dedicated SLA + support",
+      "Red Team as a Service",
+    ],
     cta: "Contact us",
     ctaHref: "mailto:hello@sgraal.com",
-    border: "border-surface-light",
+    border: "border-white/20",
+    highlight: false,
   },
 ];
 
@@ -57,7 +68,7 @@ export function Pricing() {
             </ul>
             <a href={t.ctaHref}
               className={`text-center text-sm font-semibold px-6 py-2.5 rounded-lg transition ${
-                t.name === "Pro"
+                t.highlight
                   ? "bg-gold text-background hover:bg-gold-dim"
                   : "border border-surface-light text-foreground hover:bg-surface-light"
               }`}

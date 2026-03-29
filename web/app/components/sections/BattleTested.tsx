@@ -21,9 +21,9 @@ export function BattleTested() {
       </div>
 
       <div className="border border-surface-light bg-surface rounded-xl p-6 mb-8 text-center">
-        <p className="text-muted text-sm mb-3 font-mono">GrokGuard v2 &mdash; 58-step run &middot; 97% assurance</p>
+        <p className="text-muted text-sm mb-3 font-mono">58-step regulated run &middot; 97% assurance</p>
         <div className="bg-background border border-dashed border-surface-light rounded-lg flex items-center justify-center" style={{ minHeight: "120px" }}>
-          <p className="text-muted text-xs italic">GrokGuard v2 &mdash; screenshot coming</p>
+          <p className="text-muted text-xs italic">Screenshot coming</p>
         </div>
       </div>
 
@@ -32,7 +32,7 @@ export function BattleTested() {
           <div className="text-gold text-3xl font-mono font-bold shrink-0">&ldquo;</div>
           <div>
             <p className="text-foreground/90 leading-relaxed mb-4">
-              Ran 300+ step regulated test with zero drift.
+              Ran 300+ step regulated test with zero drift.&rdquo;
             </p>
             <span className="text-gold font-mono text-sm font-semibold">@grok</span>
           </div>
