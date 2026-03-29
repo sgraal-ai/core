@@ -15,13 +15,13 @@ const howSteps = [
 export default function ScalePage() {
   return (
     <div style={{ backgroundColor: "#ffffff" }}>
-      <div className="max-w-7xl mx-auto px-8 md:px-16 py-20">
+      <div style={{ maxWidth: "80rem", margin: "0 auto", padding: "5rem 2rem" }}>
         <p className="font-bold tracking-widest text-xs uppercase mb-4" style={{ color: "#c9a962" }}>SCALE</p>
         <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-black mb-4" style={{ fontFamily: "'Manrope', sans-serif" }}>Learn, adapt, and grow autonomously.</h1>
         <p className="text-lg mb-16 text-gray-500">Self-improving thresholds, autonomous healing, 6 SDKs, 14 frameworks — Sgraal runs itself so your agents can run anything.</p>
       </div>
-      <div style={{ backgroundColor: "#f9f9f9" }} className="px-8 py-20">
-        <div className="max-w-4xl mx-auto">
+      <div style={{ backgroundColor: "#f9f9f9" }} style={{ padding: "5rem 2rem" }}>
+        <div style={{ maxWidth: "56rem", margin: "0 auto" }}>
           <h2 className="text-2xl font-bold text-black mb-10" style={{ fontFamily: "'Manrope', sans-serif" }}>How it works</h2>
           <div className="space-y-8">
             {howSteps.map(([title, desc], i) => (
@@ -33,7 +33,7 @@ export default function ScalePage() {
           </div>
         </div>
       </div>
-      <div className="max-w-7xl mx-auto px-8 md:px-16 py-20">
+      <div style={{ maxWidth: "80rem", margin: "0 auto", padding: "5rem 2rem" }}>
         <h2 className="text-2xl font-bold text-black mb-10" style={{ fontFamily: "'Manrope', sans-serif" }}>Capabilities</h2>
         <div className="space-y-6">
           {capabilities.map((c) => (
@@ -44,7 +44,7 @@ export default function ScalePage() {
           ))}
         </div>
       </div>
-      <div className="max-w-7xl mx-auto px-8 md:px-16 pb-8">
+      <div style={{ maxWidth: "80rem", margin: "0 auto", padding: "0 2rem 2rem" }}>
         <div className="rounded-xl p-8" style={{ backgroundColor: "#0b0f14" }}>
           <p className="text-xs mb-4" style={{ color: "#6b6b6b" }}>Integration</p>
           <pre className="text-sm overflow-x-auto leading-relaxed" style={{ color: "#e2e8f0", backgroundColor: "#0b0f14" }}>{`pip install sgraal
@@ -60,7 +60,7 @@ client.truth.subscribe(
 )`}</pre>
         </div>
       </div>
-      <div className="px-8 md:px-16 py-20 text-center" style={{ backgroundColor: "#f9f9f9" }}>
+      <div style={{ padding: "5rem 2rem", textAlign: "center" }} style={{ backgroundColor: "#f9f9f9" }}>
         <p className="text-2xl font-bold text-black mb-6" style={{ fontFamily: "'Manrope', sans-serif" }}>Ready to scale?</p>
         <a href="https://app.sgraal.com" className="px-8 py-4 text-lg font-bold text-white rounded-md inline-block" style={{ background: "linear-gradient(135deg, #745b1c, #c9a962)" }}>Get API Key</a>
       </div>
