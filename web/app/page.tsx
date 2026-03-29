@@ -103,7 +103,7 @@ export default function Home() {
       </section>
 
       {/* HOW IT WORKS */}
-      <section className="bg-background px-8 md:px-16 py-32 lg:py-48">
+      <section className="bg-background px-8 md:px-16 py-16 lg:py-24">
         <div className="max-w-7xl mx-auto">
           <div className="mb-24">
             <p className="text-primary font-semibold text-lg mb-4">Memory poisoning is invisible — <span className="text-primary-container">until Sgraal.</span></p>
@@ -127,7 +127,7 @@ export default function Home() {
       </section>
 
       {/* FOUR PILLARS */}
-      <section className="bg-surface-container-low px-8 md:px-16 py-32 lg:py-48">
+      <section className="bg-surface-container-low px-8 md:px-16 py-16 lg:py-24">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-24 space-y-4">
             <h2 className="font-headline text-4xl md:text-5xl font-bold tracking-tight">One API. 15 capabilities. <span className="text-primary-container">Four pillars</span> of memory governance.</h2>
@@ -151,7 +151,7 @@ export default function Home() {
       </section>
 
       {/* SOCIAL PROOF */}
-      <section className="bg-background px-8 md:px-16 py-32 lg:py-48 text-center relative overflow-hidden">
+      <section className="bg-background px-8 md:px-16 py-16 lg:py-24 text-center relative overflow-hidden">
         <div className="max-w-4xl mx-auto relative z-10">
           <div className="text-7xl text-primary-container/20 mb-8 select-none">&ldquo;</div>
           <blockquote className="font-headline text-3xl md:text-5xl font-bold tracking-tight mb-12 italic leading-tight">
@@ -187,7 +187,7 @@ export default function Home() {
       </section>
 
       {/* PRICING */}
-      <section id="pricing" className="bg-background px-8 md:px-16 py-32 lg:py-48">
+      <section id="pricing" className="bg-background px-8 md:px-16 py-16 lg:py-24">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-24">
             <h2 className="font-headline text-5xl md:text-6xl font-extrabold tracking-tight mb-6">Simple <span className="text-primary-container">pricing</span></h2>
