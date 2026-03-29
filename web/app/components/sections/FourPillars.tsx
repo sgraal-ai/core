@@ -23,9 +23,9 @@ const pillars = [
 
 export function FourPillars() {
   return (
-    <section className="bg-surface-container-low px-8 md:px-16 py-32 lg:py-48">
+    <section className="bg-surface-container-low px-8 md:px-16 py-24 lg:py-32">
       <div className="max-w-7xl mx-auto">
-        <h2 className="font-headline text-4xl md:text-5xl font-bold tracking-tight text-center text-on-background mb-4">
+        <h2 className="font-headline text-3xl md:text-4xl font-bold tracking-tight text-center text-on-background mb-4">
           One API. 15 capabilities. <span className="text-primary-container">Four pillars</span> of memory governance.
         </h2>
         <p className="text-center text-secondary max-w-2xl mx-auto mb-24">

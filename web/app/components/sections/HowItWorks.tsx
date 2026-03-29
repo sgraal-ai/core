@@ -6,7 +6,7 @@ const steps = [
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="bg-background px-8 md:px-16 py-32 lg:py-48">
+    <section id="how-it-works" className="bg-background px-8 md:px-16 py-20 lg:py-28">
       <div className="max-w-7xl mx-auto">
         <p className="text-primary font-semibold text-lg mb-4 pt-4">
           Memory poisoning is invisible — <span className="text-primary-container">until Sgraal.</span>
