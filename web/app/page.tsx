@@ -35,7 +35,7 @@ export default function Home() {
       
 
         {/* HERO */}
-        <section style={{ background: "#ffffff" }} className="px-8 md:px-16 py-32 flex flex-col items-center text-center">
+        <section style={{ background: "#ffffff" }} className="px-8 md:px-16 pt-32 pb-24 flex flex-col items-center text-center">
           <div className="max-w-4xl mx-auto">
             <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full border border-gray-200 text-[10px] uppercase tracking-[0.2em] font-bold text-gray-400 mb-12">
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#c9a962" }} />
