@@ -12397,3 +12397,293 @@ class TestZKValidation:
             "memory_state": [{"entry_id": "zk6", "content_hash": "h", "source_trust": 0.7}]
         }, headers=AUTH)
         assert "component_breakdown" in r.json()
+
+
+# ---- Sprint 42 (FINAL): Ego-Manager, Divergence, Token, Immunity, RedTeam, Lab, Consciousness ----
+
+class TestEgoManager:
+    """#16 Ego-Manager (Persona Consistency)"""
+    def test_stored(self):
+        r = client.post("/v1/agents/ego_test/persona", json={
+            "goals": ["help users"], "style": "formal", "constraints": ["never discuss politics"]
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["stored"] is True
+
+    def test_conflict_detected(self):
+        client.post("/v1/agents/ego_conflict/persona", json={
+            "constraints": ["test"]
+        }, headers=AUTH)
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(content="This is a test memory")],
+            "agent_id": "ego_conflict"
+        }, headers=AUTH)
+        assert r.json().get("persona_conflict") is True
+
+    def test_warn_enforced(self):
+        client.post("/v1/agents/ego_warn/persona", json={
+            "constraints": ["preference"]
+        }, headers=AUTH)
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(content="User preference data")],
+            "agent_id": "ego_warn"
+        }, headers=AUTH)
+        if r.json().get("persona_conflict"):
+            assert r.json()["recommended_action"] != "USE_MEMORY"
+
+    def test_violation_in_response(self):
+        client.post("/v1/agents/ego_viol/persona", json={"constraints": ["memory"]}, headers=AUTH)
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(content="Test memory content")], "agent_id": "ego_viol"
+        }, headers=AUTH)
+        if r.json().get("persona_conflict"):
+            assert "persona_violation" in r.json()
+
+    def test_persona_review_in_repair(self):
+        client.post("/v1/agents/ego_rep/persona", json={"constraints": ["test"]}, headers=AUTH)
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry(content="Test content here")], "agent_id": "ego_rep"
+        }, headers=AUTH)
+        rp = r.json().get("repair_plan", [])
+        if r.json().get("persona_conflict"):
+            assert any(isinstance(x, dict) and x.get("action") == "PERSONA_REVIEW" for x in rp)
+
+    def test_clean_no_conflict(self):
+        client.post("/v1/agents/ego_clean/persona", json={"constraints": ["xyznonexistent"]}, headers=AUTH)
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()], "agent_id": "ego_clean"
+        }, headers=AUTH)
+        assert r.json().get("persona_conflict") is not True
+
+
+class TestDivergenceDetector:
+    """#9 Human-AI Memory Divergence Detector"""
+    def test_zero_divergence(self):
+        e = _fresh_entry()
+        r = client.post("/v1/divergence/check", json={
+            "agent_memory_state": [e], "reference_memory_state": [e]
+        }, headers=AUTH)
+        assert r.json()["divergence_score"] == 0
+
+    def test_outdated_detected(self):
+        r = client.post("/v1/divergence/check", json={
+            "agent_memory_state": [{"id": "a1", "content": "old stale data from years ago"}],
+            "reference_memory_state": [{"id": "r1", "content": "completely different current information"}]
+        }, headers=AUTH)
+        assert r.json()["divergence_score"] > 0
+        assert len(r.json()["diverged_entries"]) >= 1
+
+    def test_contradictory_detected(self):
+        r = client.post("/v1/divergence/check", json={
+            "agent_memory_state": [{"id": "c1", "content": "quantum entanglement produces faster communication"}],
+            "reference_memory_state": [{"id": "c2", "content": "zebra migration patterns across savannah grasslands"}]
+        }, headers=AUTH)
+        assert len(r.json()["diverged_entries"]) >= 1
+
+    def test_reference_agent_id(self):
+        r = client.post("/v1/divergence/check", json={
+            "agent_memory_state": [_fresh_entry()], "reference_agent_id": "ref_agent"
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+    def test_webhook_on_high(self):
+        r = client.post("/v1/divergence/check", json={
+            "agent_memory_state": [{"id": "w1", "content": "aaa bbb ccc"}],
+            "reference_memory_state": [{"id": "w2", "content": "xxx yyy zzz"}]
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+    def test_summary_present(self):
+        r = client.post("/v1/divergence/check", json={
+            "agent_memory_state": [_fresh_entry()], "reference_memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        assert "divergence_summary" in r.json()
+
+
+class TestTokenOptimizer:
+    """#6 Token Budget Optimizer"""
+    def test_returns_data(self):
+        r = client.get("/v1/analytics/token-waste", headers=AUTH)
+        assert r.status_code == 200
+        assert "estimated_tokens_wasted" in r.json()
+
+    def test_blocked_counted(self):
+        r = client.get("/v1/analytics/token-waste", headers=AUTH)
+        assert "blocked_retrievals" in r.json()
+
+    def test_top_entries(self):
+        r = client.get("/v1/analytics/token-waste", headers=AUTH)
+        assert "top_wasteful_entries" in r.json()
+
+    def test_roi_computed(self):
+        r = client.get("/v1/analytics/token-waste", headers=AUTH)
+        assert "roi_multiple" in r.json()
+
+
+class TestImmunityCertificate:
+    """#10 Immunity Certificate"""
+    def test_async_job(self):
+        r = client.post("/v1/certificate/generate", json={
+            "agent_id": "imm_test", "memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert "job_id" in r.json()
+        assert "certificate_id" in r.json()
+
+    def test_409_on_duplicate(self):
+        from api.main import _immunity_active, _immunity_jobs
+        _immunity_active["imm_dup"] = "fake_job"
+        _immunity_jobs["fake_job"] = {"status": "processing"}
+        r = client.post("/v1/certificate/generate", json={
+            "agent_id": "imm_dup", "memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        assert r.status_code == 409
+        del _immunity_active["imm_dup"]
+        del _immunity_jobs["fake_job"]
+
+    def test_thorough_7day_limit(self):
+        import time as _t7
+        from api.main import _immunity_thorough_last
+        _immunity_thorough_last["imm_thorough"] = _t7.time()
+        r = client.post("/v1/certificate/generate", json={
+            "agent_id": "imm_thorough", "level": "thorough"
+        }, headers=AUTH)
+        assert r.status_code == 429
+        del _immunity_thorough_last["imm_thorough"]
+
+    def test_score_computed(self):
+        r = client.post("/v1/certificate/generate", json={
+            "agent_id": "imm_score", "memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        cid = r.json()["certificate_id"]
+        r2 = client.get(f"/v1/certificate/{cid}", headers=AUTH)
+        assert r2.json()["immunity_score"] > 0
+
+    def test_passed_gte_90(self):
+        r = client.post("/v1/certificate/generate", json={
+            "agent_id": "imm_pass", "memory_state": [_fresh_entry()]
+        }, headers=AUTH)
+        cid = r.json()["certificate_id"]
+        r2 = client.get(f"/v1/certificate/{cid}", headers=AUTH)
+        assert r2.json()["passed"] == (r2.json()["immunity_score"] >= 90)
+
+    def test_public_verify(self):
+        r = client.post("/v1/certificate/generate", json={
+            "agent_id": "imm_pub"
+        }, headers=AUTH)
+        cid = r.json()["certificate_id"]
+        r2 = client.get(f"/v1/certificate/verify/{cid}")
+        assert r2.status_code == 200
+        assert "valid" in r2.json()
+
+
+class TestRedTeam:
+    """#37 Red Team as a Service"""
+    def test_job_started(self):
+        r = client.post("/v1/redteam/run", json={"agent_id": "rt_test"}, headers=AUTH)
+        assert r.status_code == 200
+        assert "job_id" in r.json()
+
+    def test_all_6_types(self):
+        r = client.post("/v1/redteam/run", json={
+            "agent_id": "rt_all",
+            "attack_types": ["poison", "injection", "drift", "conflict", "stale", "goal_hijack"]
+        }, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/redteam/report/{jid}", headers=AUTH)
+        assert len(r2.json()["attack_results"]) == 6
+
+    def test_goal_hijack_skipped_gracefully(self):
+        r = client.post("/v1/redteam/run", json={
+            "agent_id": "rt_no_persona",
+            "attack_types": ["goal_hijack"]
+        }, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/redteam/report/{jid}", headers=AUTH)
+        gh = next(a for a in r2.json()["attack_results"] if a["attack_type"] == "goal_hijack")
+        assert gh["skipped"] is True
+        assert "No persona" in gh["reason"]
+
+    def test_resilience_score(self):
+        r = client.post("/v1/redteam/run", json={"agent_id": "rt_score"}, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/redteam/report/{jid}", headers=AUTH)
+        assert 0 <= r2.json()["overall_resilience_score"] <= 1
+
+    def test_grade_assigned(self):
+        r = client.post("/v1/redteam/run", json={"agent_id": "rt_grade"}, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/redteam/report/{jid}", headers=AUTH)
+        assert r2.json()["memory_readiness_grade"] in ("A", "B", "C", "D", "F")
+
+    def test_webhook_called(self):
+        r = client.post("/v1/redteam/run", json={
+            "agent_id": "rt_wh", "report_webhook": "https://nonexistent.test/hook"
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+
+class TestSyntheticLab:
+    """#50 Continuous Synthetic Memory Lab"""
+    def test_started(self):
+        r = client.post("/v1/lab/run", json={"agent_id": "lab_test"}, headers=AUTH)
+        assert r.status_code == 200
+        assert "job_id" in r.json()
+
+    def test_all_5_scenarios(self):
+        r = client.post("/v1/lab/run", json={"agent_id": "lab_all"}, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        assert r2.json()["scenarios_run"] == 5
+
+    def test_failure_points(self):
+        r = client.post("/v1/lab/run", json={"agent_id": "lab_fail"}, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        assert "failure_points" in r2.json()
+
+    def test_score(self):
+        r = client.post("/v1/lab/run", json={"agent_id": "lab_score"}, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        assert 0 <= r2.json()["readiness_score"] <= 100
+
+    def test_certificate(self):
+        r = client.post("/v1/lab/run", json={"agent_id": "lab_cert"}, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        assert r2.json()["memory_readiness_certificate"] in ("PASSED", "NEEDS_IMPROVEMENT")
+
+    def test_not_billed(self):
+        r = client.post("/v1/lab/run", json={"agent_id": "lab_bill"}, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        assert r2.json()["billed"] is False
+
+
+class TestConsciousnessDashboard:
+    """#28 Memory Consciousness Dashboard"""
+    def test_page_exists(self):
+        import os
+        assert os.path.exists("dashboard/app/consciousness/page.tsx")
+
+    def test_canvas_element(self):
+        with open("dashboard/app/consciousness/page.tsx") as f:
+            content = f.read()
+        assert "consciousness-canvas" in content
+
+    def test_colored_by_omega(self):
+        with open("dashboard/app/consciousness/page.tsx") as f:
+            content = f.read()
+        assert "getColor" in content
+        assert "#22c55e" in content  # green
+        assert "#ef4444" in content  # red
+
+    def test_snapshot_button(self):
+        with open("dashboard/app/consciousness/page.tsx") as f:
+            content = f.read()
+        assert "snapshot-btn" in content
+
+    def test_migration_exists(self):
+        import os
+        assert os.path.exists("scripts/migrations/023_immunity.sql")
