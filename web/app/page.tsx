@@ -40,7 +40,7 @@ export default function Home() {
   return (
     <>
       {/* HERO */}
-      <main className="pt-20">
+
         <section className="relative overflow-hidden px-8 md:px-16 py-32 lg:py-48 flex flex-col items-center text-center max-w-[1440px] mx-auto">
           <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-surface-container-high border border-outline-variant/20 text-[10px] uppercase tracking-[0.2em] font-bold text-secondary mb-12">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
@@ -393,7 +393,7 @@ export default function Home() {
             </div>
           </div>
         </section>
-      </main>
+
 
       {/* FOOTER */}
       <footer className="bg-[#1a1c1a] w-full border-t border-[#d0c5b4]/10">
