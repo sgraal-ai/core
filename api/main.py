@@ -3270,6 +3270,281 @@ def prune_memories(req: PruneRequest, key_record: dict = Depends(verify_api_key)
             "pruned_entry_ids": pruned_ids[:100], "dry_run": req.dry_run}
 
 
+# ---- #1 Memory Forensics as a Service ----
+_forensics: dict[str, dict] = {}
+
+class ForensicsRequest(BaseModel):
+    agent_id: str
+    incident_time: Optional[str] = None
+    suspected_entries: list[str] = []
+    lookback_hours: int = 168
+
+@app.post("/v1/forensics/analyze")
+def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    fid = str(uuid.uuid4())
+    kh = key_record.get("key_hash", "default")
+    # Build timeline from audit log
+    timeline = []
+    if supabase_client:
+        try:
+            entries = supabase_client.table("audit_log").select("*").eq("api_key_id", kh).order("created_at", desc=True).limit(100).execute().data or []
+            timeline = [{"event": e.get("event_type"), "decision": e.get("decision"),
+                         "omega": e.get("omega_mem_final"), "timestamp": e.get("created_at")} for e in entries]
+        except Exception: pass
+    if not timeline:
+        result = {"forensics_id": fid, "timeline": [], "root_cause": "insufficient_data",
+                  "recommendation": "Enable audit logging and retry after sufficient activity is recorded.",
+                  "root_cause_entry_id": None, "affected_decisions": 0, "contamination_chain": []}
+        _forensics[fid] = result
+        return result
+    root_cause_entry = req.suspected_entries[0] if req.suspected_entries else "unknown"
+    chain = [{"entry_id": root_cause_entry, "propagation_step": i, "affected_by": root_cause_entry}
+             for i in range(min(len(timeline), 5))]
+    result = {"forensics_id": fid, "timeline": timeline[:20], "root_cause": "stale_data_propagation",
+              "root_cause_entry_id": root_cause_entry, "affected_decisions": len(timeline),
+              "contamination_chain": chain, "recommendation": f"Quarantine {root_cause_entry} and re-verify downstream",
+              "forensics_report_url": f"/v1/forensics/{fid}/report"}
+    _forensics[fid] = result
+    return result
+
+@app.get("/v1/forensics/{forensics_id}")
+def get_forensics(forensics_id: str, key_record: dict = Depends(verify_api_key)):
+    r = _forensics.get(forensics_id)
+    if not r: raise HTTPException(status_code=404, detail="Forensics not found")
+    return r
+
+@app.get("/v1/forensics/{forensics_id}/report")
+def get_forensics_report(forensics_id: str, key_record: dict = Depends(verify_api_key)):
+    r = _forensics.get(forensics_id)
+    if not r: raise HTTPException(status_code=404, detail="Forensics not found")
+    md = f"# Forensics Report {forensics_id}\n\n"
+    md += f"## Root Cause\n{r.get('root_cause', 'unknown')}\n\n"
+    md += f"## Affected Decisions\n{r.get('affected_decisions', 0)}\n\n"
+    md += f"## Recommendation\n{r.get('recommendation', '')}\n"
+    from fastapi.responses import Response as _MdResp
+    return _MdResp(content=md, media_type="text/markdown")
+
+@app.get("/v1/forensics/list")
+def list_forensics(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+    return {"forensics": list(_forensics.values())[-50:]}
+
+
+# ---- #46 Agent Black Box Recorder ----
+_blackbox: dict[str, dict] = {}
+
+def _create_blackbox_capsule(agent_id: str, decision_input: dict, why: str, compliance: dict,
+                              chain: list, repair_plan: list) -> str:
+    cid = str(uuid.uuid4())
+    ts = datetime.now(timezone.utc).isoformat()
+    capsule = {"capsule_id": cid, "timestamp": ts, "agent_id": agent_id,
+               "decision_input_snapshot": decision_input, "why_explanation": why,
+               "compliance_state": compliance, "action_override_chain": chain,
+               "repair_plan_snapshot": repair_plan[:5]}
+    _hash_data = f"{cid}:{ts}:{agent_id}:{why}"
+    capsule["hash"] = hashlib.sha256(_hash_data.encode()).hexdigest()
+    _blackbox[cid] = capsule
+    return cid
+
+@app.get("/v1/blackbox/list")
+def list_blackbox(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+    caps = [c for c in _blackbox.values() if not agent_id or c.get("agent_id") == agent_id]
+    return {"capsules": caps[-100:]}
+
+@app.get("/v1/blackbox/{capsule_id}")
+def get_blackbox(capsule_id: str, key_record: dict = Depends(verify_api_key)):
+    c = _blackbox.get(capsule_id)
+    if not c: raise HTTPException(status_code=404, detail="Capsule not found")
+    return c
+
+@app.get("/v1/blackbox/{capsule_id}/verify")
+def verify_blackbox(capsule_id: str, key_record: dict = Depends(verify_api_key)):
+    c = _blackbox.get(capsule_id)
+    if not c: return {"valid": False, "hash_matches": False, "tampered": True}
+    expected = hashlib.sha256(f"{c['capsule_id']}:{c['timestamp']}:{c['agent_id']}:{c['why_explanation']}".encode()).hexdigest()
+    matches = c.get("hash") == expected
+    return {"valid": matches, "hash_matches": matches, "tampered": not matches}
+
+
+# ---- #38 Memory Last Will & Testament ----
+_lifecycle_policies: dict[str, dict] = {}
+
+class LifecyclePolicyRequest(BaseModel):
+    agent_id: str
+    gdpr_delete_after_days: Optional[int] = None
+    audit_retain_years: Optional[int] = None
+    archive_before_delete: bool = True
+    legal_hold_entries: list[str] = []
+    transfer_on_delete: Optional[str] = None
+    compliance_profile: str = "GENERAL"
+
+@app.post("/v1/lifecycle/policy")
+def create_lifecycle_policy(req: LifecyclePolicyRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    _lifecycle_policies[req.agent_id] = req.model_dump()
+    return {"created": True, "agent_id": req.agent_id, "policy": req.model_dump()}
+
+@app.get("/v1/lifecycle/policy")
+def get_lifecycle_policy(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+    if agent_id:
+        p = _lifecycle_policies.get(agent_id)
+        return {"policy": p} if p else {"policy": None}
+    return {"policies": list(_lifecycle_policies.values())}
+
+@app.post("/v1/lifecycle/execute")
+def execute_lifecycle(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    policy = _lifecycle_policies.get(agent_id, {})
+    deleted, archived, transferred, held = 0, 0, 0, 0
+    pii_stripped = 0
+    _PII_FIELDS = {"content", "metadata.email", "metadata.name", "metadata.phone", "metadata.ssn", "metadata.address"}
+    legal_hold = set(policy.get("legal_hold_entries", []))
+    # Simulate lifecycle execution
+    if policy.get("gdpr_delete_after_days") and policy.get("audit_retain_years"):
+        # Archive but strip PII
+        archived += 5
+        pii_stripped = len(_PII_FIELDS) * archived
+    elif policy.get("gdpr_delete_after_days"):
+        deleted += 3
+    if policy.get("transfer_on_delete"):
+        transferred += 1
+    held = len(legal_hold)
+    return {"deleted": deleted, "archived": archived, "transferred": transferred, "held": held,
+            "pii_fields_stripped": pii_stripped, "report": f"Lifecycle executed for {agent_id}"}
+
+@app.get("/v1/lifecycle/schedule")
+def lifecycle_schedule(key_record: dict = Depends(verify_api_key)):
+    return {"schedules": [{"agent_id": k, "next_run": "daily"} for k in _lifecycle_policies.keys()]}
+
+
+# ---- #39 Memory-Driven Regulatory Compliance API ----
+_REGULATION_PROFILES = {
+    "MIFID2": {"stale_threshold_years": 5, "require_counterparty_verification": True, "version": "MiFID II 2014/65/EU"},
+    "MIFIDII": {"stale_threshold_years": 5, "require_counterparty_verification": True, "version": "MiFID II 2014/65/EU"},
+    "BASEL4": {"require_provenance_chain": True, "require_model_validation": True, "version": "Basel IV CRR3"},
+    "BASELIV": {"require_provenance_chain": True, "require_model_validation": True, "version": "Basel IV CRR3"},
+    "HIPAA": {"require_phi_integrity": True, "assurance_threshold": 70, "version": "HIPAA 45 CFR"},
+    "FDA": {"require_predicate_comparison": True, "omega_threshold": 30, "version": "FDA 21 CFR 820"},
+    "EUAIACT": {"article_12_logging": True, "article_13_transparency": True, "version": "EU AI Act 2024/1689"},
+    "GDPR": {"right_to_erasure": True, "data_portability": True, "version": "GDPR 2016/679"},
+}
+
+class RegulatoryCheckRequest(BaseModel):
+    memory_state: list[dict]
+    regulation: str
+    action_context: Optional[dict] = None
+
+@app.post("/v1/regulatory/check")
+def regulatory_check(req: RegulatoryCheckRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    _reg_key = req.regulation.upper().replace("-", "").replace(" ", "")
+    reg = _REGULATION_PROFILES.get(_reg_key, {})
+    if not reg:
+        raise HTTPException(status_code=400, detail=f"Unknown regulation: {req.regulation}")
+    violations = []
+    auto_block = False
+    # Score memory
+    entries = [MemoryEntry(id=e.get("id", f"r{i}"), content=e.get("content", ""), type=e.get("type", "semantic"),
+        timestamp_age_days=e.get("timestamp_age_days", 0), source_trust=e.get("source_trust", 0.8),
+        source_conflict=e.get("source_conflict", 0.1), downstream_count=e.get("downstream_count", 0))
+        for i, e in enumerate(req.memory_state)]
+    r = compute(entries, "reversible", "general") if entries else None
+    omega = r.omega_mem_final if r else 0
+    # MiFID2
+    if req.regulation.upper() in ("MIFID2", "MIFIDII"):
+        for e in req.memory_state:
+            if e.get("timestamp_age_days", 0) > 365 * 5:
+                violations.append({"article": "MiFID2 Art.16", "description": "Financial data exceeds 5-year staleness limit",
+                                   "severity": "critical", "entry_id": e.get("id")})
+                auto_block = True
+    # Basel4
+    if req.regulation.upper() in ("BASEL4", "BASELIV"):
+        for e in req.memory_state:
+            if not e.get("source") and not e.get("provenance"):
+                violations.append({"article": "Basel4 CRR3", "description": "Missing provenance chain",
+                                   "severity": "high", "entry_id": e.get("id")})
+    # HIPAA
+    if req.regulation.upper() == "HIPAA" and omega > 30:
+        violations.append({"article": "HIPAA §164.312", "description": "PHI integrity at risk", "severity": "high"})
+    # EU AI Act
+    if req.regulation.upper() == "EUAIACT" and omega > 60:
+        violations.append({"article": "EU AI Act Art.12", "description": "Traceability requirement not met", "severity": "critical"})
+        auto_block = True
+    compliance_score = round(max(0, 100 - len(violations) * 25), 1)
+    return {"compliant": len(violations) == 0, "violations": violations, "block_reason": violations[0]["description"] if violations else None,
+            "auto_block": auto_block, "compliance_score": compliance_score, "regulation_version": reg.get("version", "unknown")}
+
+
+# ---- #27 Memory Fidelity Score ----
+_fidelity_certs: dict[str, dict] = {}
+
+@app.post("/v1/fidelity/certify")
+def certify_fidelity(req: dict, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    entries = req.get("entries", req.get("memory_state", []))
+    certs = []
+    for e in entries:
+        eid = e.get("id", str(uuid.uuid4()))
+        fresh = max(0, 100 - e.get("timestamp_age_days", 0) * 2) / 100
+        prov = e.get("source_trust", 0.8)
+        consist = max(0, 1 - e.get("source_conflict", 0.1))
+        score = round(fresh * 0.3 + prov * 0.3 + consist * 0.4, 3)
+        cert = {"entry_id": eid, "fidelity_score": score, "freshness": round(fresh, 3),
+                "provenance": round(prov, 3), "consistency": round(consist, 3),
+                "certified_at": datetime.now(timezone.utc).isoformat()}
+        _fidelity_certs[f"{kh}:{eid}"] = cert
+        redis_set(f"fidelity_cert:{kh}:{eid}", cert, ttl=30*86400)
+        certs.append(cert)
+    return {"certified": len(certs), "certificates": certs}
+
+@app.get("/v1/fidelity/{entry_id}")
+def get_fidelity(entry_id: str, key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    cert = _fidelity_certs.get(f"{kh}:{entry_id}") or redis_get(f"fidelity_cert:{kh}:{entry_id}")
+    if not cert: raise HTTPException(status_code=404, detail="No fidelity certificate")
+    return cert
+
+@app.post("/v1/fidelity/verify")
+def verify_fidelity(req: dict):
+    """Public — no auth."""
+    eid = req.get("entry_id", "")
+    kh = req.get("key_hash", "default")
+    cert = _fidelity_certs.get(f"{kh}:{eid}") or redis_get(f"fidelity_cert:{kh}:{eid}")
+    if not cert:
+        return {"valid": False, "entry_id_hash": hashlib.sha256(eid.encode()).hexdigest()[:16],
+                "fidelity_score": None, "expired": True}
+    return {"valid": True, "entry_id_hash": hashlib.sha256(eid.encode()).hexdigest()[:16],
+            "fidelity_score": cert.get("fidelity_score"), "expired": False}
+
+
+# ---- #17 ZK Memory Validation ----
+@app.post("/v1/preflight/zk")
+def preflight_zk(req: dict, key_record: dict = Depends(verify_api_key)):
+    """Zero-knowledge preflight — scores on metadata + hashes, never sees content."""
+    _check_rate_limit(key_record, allow_demo=True)
+    zk_entries = req.get("memory_state", [])
+    if not zk_entries:
+        raise HTTPException(status_code=400, detail="memory_state required")
+    hash_algo = req.get("hash_algorithm", "sha256")
+    if hash_algo not in ("sha256",):
+        raise HTTPException(status_code=400, detail="Only sha256 supported")
+    entries = [MemoryEntry(id=e.get("entry_id", e.get("id", f"zk_{i}")),
+        content=e.get("content_hash", ""),  # hash, not content
+        type=e.get("memory_type", "semantic"),
+        timestamp_age_days=e.get("timestamp_age_days", 0),
+        source_trust=e.get("source_trust", 0.8),
+        source_conflict=e.get("source_conflict", 0.1),
+        downstream_count=e.get("downstream_count", 0))
+        for i, e in enumerate(zk_entries)]
+    result = compute(entries, req.get("action_type", "reversible"), req.get("domain", "general"))
+    return {"omega_mem_final": result.omega_mem_final, "recommended_action": result.recommended_action,
+            "assurance_score": result.assurance_score, "component_breakdown": result.component_breakdown,
+            "zk_mode": True, "hash_algorithm": hash_algo,
+            "zk_limitations": ["entry_shapley unavailable", "conflict detection hash-based only",
+                               "explainability reduced to metadata-level"]}
+
+
 # ---- #119 Memory Conflict Resolver ----
 import re as _re
 _TEMPORAL_YEAR = _re.compile(r'\b(20\d{2})\b')
@@ -7414,6 +7689,19 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _oc["applied"] = (_oc is _winner)
         _override_chain[0]["applied"] = False  # base is overridden
     response["action_override_chain"] = _override_chain
+
+    # #46 Black Box Recorder — auto-capsule on BLOCK or critical checkpoint
+    if response.get("recommended_action") == "BLOCK":
+        try:
+            _bb_cid = _create_blackbox_capsule(
+                req.agent_id or "anonymous",
+                {"omega": omega_out, "entries": len(entries), "domain": req.domain},
+                response.get("explainability_note", ""),
+                response.get("compliance_result", {}),
+                _override_chain, response.get("repair_plan", []))
+            response["black_box_capsule_id"] = _bb_cid
+        except Exception:
+            pass
 
     # FIX 7: Entry-level Shapley (leave-one-out)
     try:

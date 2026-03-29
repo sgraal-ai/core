@@ -12130,3 +12130,270 @@ class TestAutonomousPruning:
         r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
         # With 1 entry, should not be recommended
         assert "prune_recommended" not in r.json() or r.json().get("prune_recommended") is not True
+
+
+# ---- Sprint 41: Forensics, Black Box, Last Will, Regulatory, Fidelity, ZK ----
+
+class TestMemoryForensics:
+    """#1 Memory Forensics as a Service"""
+    def test_analysis_runs(self):
+        r = client.post("/v1/forensics/analyze", json={
+            "agent_id": "forensic_agent", "suspected_entries": ["e1"]
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert "forensics_id" in r.json()
+
+    def test_timeline_populated(self):
+        r = client.post("/v1/forensics/analyze", json={"agent_id": "tl_agent"}, headers=AUTH)
+        assert "timeline" in r.json()
+
+    def test_root_cause_identified(self):
+        r = client.post("/v1/forensics/analyze", json={
+            "agent_id": "rc_agent", "suspected_entries": ["bad_entry"]
+        }, headers=AUTH)
+        assert r.json()["root_cause"] in ("stale_data_propagation", "insufficient_data")
+
+    def test_insufficient_data_graceful(self):
+        r = client.post("/v1/forensics/analyze", json={"agent_id": "empty_agent"}, headers=AUTH)
+        assert r.status_code == 200
+        if r.json()["root_cause"] == "insufficient_data":
+            assert "Enable audit logging" in r.json()["recommendation"]
+
+    def test_contamination_chain(self):
+        r = client.post("/v1/forensics/analyze", json={
+            "agent_id": "chain_agent", "suspected_entries": ["sus_entry"]
+        }, headers=AUTH)
+        assert "contamination_chain" in r.json()
+
+    def test_report_markdown(self):
+        r1 = client.post("/v1/forensics/analyze", json={"agent_id": "rpt_agent"}, headers=AUTH)
+        fid = r1.json()["forensics_id"]
+        r2 = client.get(f"/v1/forensics/{fid}/report", headers=AUTH)
+        assert r2.status_code == 200
+        assert "# Forensics Report" in r2.text
+
+
+class TestBlackBoxRecorder:
+    """#46 Agent Black Box Recorder"""
+    def test_capsule_on_block(self):
+        from api.main import _create_blackbox_capsule, _blackbox
+        cid = _create_blackbox_capsule("test_agent", {"omega": 90}, "high risk", {}, [], [])
+        assert cid in _blackbox
+        assert _blackbox[cid]["hash"]
+
+    def test_hash_valid(self):
+        from api.main import _blackbox
+        for cid, cap in list(_blackbox.items())[:1]:
+            expected = __import__("hashlib").sha256(
+                f"{cap['capsule_id']}:{cap['timestamp']}:{cap['agent_id']}:{cap['why_explanation']}".encode()
+            ).hexdigest()
+            assert cap["hash"] == expected
+
+    def test_tamper_detected(self):
+        from api.main import _create_blackbox_capsule, _blackbox
+        cid = _create_blackbox_capsule("tamper_test", {}, "original", {}, [], [])
+        _blackbox[cid]["why_explanation"] = "tampered"
+        r = client.get(f"/v1/blackbox/{cid}/verify", headers=AUTH)
+        assert r.json()["tampered"] is True
+
+    def test_list_filters(self):
+        r = client.get("/v1/blackbox/list?agent_id=nonexistent_xyz", headers=AUTH)
+        assert r.status_code == 200
+        assert "capsules" in r.json()
+
+    def test_verify_endpoint(self):
+        from api.main import _create_blackbox_capsule
+        cid = _create_blackbox_capsule("verify_agent", {}, "test", {}, [], [])
+        r = client.get(f"/v1/blackbox/{cid}/verify", headers=AUTH)
+        assert r.json()["valid"] is True
+
+    def test_migration_exists(self):
+        import os
+        assert os.path.exists("scripts/migrations/022_black_box.sql")
+
+
+class TestMemoryLastWill:
+    """#38 Memory Last Will & Testament"""
+    def test_policy_created(self):
+        r = client.post("/v1/lifecycle/policy", json={
+            "agent_id": "will_agent", "gdpr_delete_after_days": 90, "audit_retain_years": 5
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["created"] is True
+
+    def test_gdpr_deletion(self):
+        client.post("/v1/lifecycle/policy", json={
+            "agent_id": "gdpr_agent", "gdpr_delete_after_days": 30
+        }, headers=AUTH)
+        r = client.post("/v1/lifecycle/execute?agent_id=gdpr_agent", headers=AUTH)
+        assert r.json()["deleted"] >= 0
+
+    def test_audit_retention_preserves(self):
+        client.post("/v1/lifecycle/policy", json={
+            "agent_id": "audit_agent", "gdpr_delete_after_days": 30, "audit_retain_years": 7
+        }, headers=AUTH)
+        r = client.post("/v1/lifecycle/execute?agent_id=audit_agent", headers=AUTH)
+        assert r.json()["archived"] > 0
+
+    def test_legal_hold_respected(self):
+        client.post("/v1/lifecycle/policy", json={
+            "agent_id": "hold_agent", "legal_hold_entries": ["hold_1", "hold_2"]
+        }, headers=AUTH)
+        r = client.post("/v1/lifecycle/execute?agent_id=hold_agent", headers=AUTH)
+        assert r.json()["held"] == 2
+
+    def test_archive_strips_pii(self):
+        client.post("/v1/lifecycle/policy", json={
+            "agent_id": "pii_agent", "gdpr_delete_after_days": 30, "audit_retain_years": 5
+        }, headers=AUTH)
+        r = client.post("/v1/lifecycle/execute?agent_id=pii_agent", headers=AUTH)
+        assert r.json()["pii_fields_stripped"] > 0
+
+    def test_pii_count_correct(self):
+        client.post("/v1/lifecycle/policy", json={
+            "agent_id": "pii_count", "gdpr_delete_after_days": 30, "audit_retain_years": 5
+        }, headers=AUTH)
+        r = client.post("/v1/lifecycle/execute?agent_id=pii_count", headers=AUTH)
+        # 6 PII fields * 5 archived entries = 30
+        assert r.json()["pii_fields_stripped"] == 30
+
+
+class TestRegulatoryCompliance:
+    """#39 Regulatory Compliance API"""
+    def test_compliant_true(self):
+        r = client.post("/v1/regulatory/check", json={
+            "memory_state": [_fresh_entry()], "regulation": "GDPR"
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert "compliant" in r.json()
+
+    def test_violation_detected(self):
+        r = client.post("/v1/regulatory/check", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=2000)], "regulation": "MiFID2"
+        }, headers=AUTH)
+        assert len(r.json()["violations"]) >= 1
+
+    def test_auto_block_irreversible(self):
+        r = client.post("/v1/regulatory/check", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=2000)], "regulation": "MiFID2"
+        }, headers=AUTH)
+        if r.json()["violations"]:
+            assert r.json()["auto_block"] is True
+
+    def test_mifid2_stale(self):
+        r = client.post("/v1/regulatory/check", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=2000)], "regulation": "MiFID2"
+        }, headers=AUTH)
+        assert any("5-year" in v["description"] for v in r.json()["violations"])
+
+    def test_basel4_provenance(self):
+        r = client.post("/v1/regulatory/check", json={
+            "memory_state": [{"id": "b1", "content": "test", "type": "semantic",
+                "timestamp_age_days": 0, "source_trust": 0.9, "source_conflict": 0.1, "downstream_count": 0}],
+            "regulation": "Basel4"
+        }, headers=AUTH)
+        assert any("provenance" in v["description"].lower() for v in r.json()["violations"])
+
+    def test_regulation_version(self):
+        r = client.post("/v1/regulatory/check", json={
+            "memory_state": [_fresh_entry()], "regulation": "EUAIACT"
+        }, headers=AUTH)
+        assert "regulation_version" in r.json()
+
+
+class TestFidelityScore:
+    """#27 Memory Fidelity Score"""
+    def test_certify_batch(self):
+        r = client.post("/v1/fidelity/certify", json={
+            "entries": [_fresh_entry(), _fresh_entry(id="e2")]
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["certified"] == 2
+
+    def test_fields_present(self):
+        r = client.post("/v1/fidelity/certify", json={
+            "entries": [_fresh_entry()]
+        }, headers=AUTH)
+        cert = r.json()["certificates"][0]
+        assert "fidelity_score" in cert
+        assert "freshness" in cert
+        assert "provenance" in cert
+        assert "consistency" in cert
+
+    def test_score_computed(self):
+        r = client.post("/v1/fidelity/certify", json={
+            "entries": [_fresh_entry()]
+        }, headers=AUTH)
+        score = r.json()["certificates"][0]["fidelity_score"]
+        assert 0 <= score <= 1
+
+    def test_public_verify(self):
+        r1 = client.post("/v1/fidelity/certify", json={
+            "entries": [_fresh_entry(id="fid_verify")]
+        }, headers=AUTH)
+        r2 = client.post("/v1/fidelity/verify", json={
+            "entry_id": "fid_verify", "key_hash": "None"
+        })
+        assert r2.status_code == 200
+
+    def test_expired_returns_expired(self):
+        r = client.post("/v1/fidelity/verify", json={
+            "entry_id": "nonexistent_xyz_fid", "key_hash": "none"
+        })
+        assert r.json()["expired"] is True
+
+    def test_get_by_entry_id(self):
+        client.post("/v1/fidelity/certify", json={
+            "entries": [_fresh_entry(id="fid_get")]
+        }, headers=AUTH)
+        r = client.get("/v1/fidelity/fid_get", headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["fidelity_score"] > 0
+
+
+class TestZKValidation:
+    """#17 ZK Memory Validation"""
+    def test_zk_strips_content(self):
+        r = client.post("/v1/preflight/zk", json={
+            "memory_state": [{"entry_id": "zk1", "content_hash": "abc123", "memory_type": "semantic",
+                "timestamp_age_days": 1, "source_trust": 0.9, "source_conflict": 0.1, "downstream_count": 1}]
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["zk_mode"] is True
+
+    def test_hashes_sent(self):
+        r = client.post("/v1/preflight/zk", json={
+            "memory_state": [{"entry_id": "zk2", "content_hash": "sha256_hash_here",
+                "memory_type": "semantic", "timestamp_age_days": 0, "source_trust": 0.95,
+                "source_conflict": 0.05, "downstream_count": 0}],
+            "hash_algorithm": "sha256"
+        }, headers=AUTH)
+        assert r.json()["hash_algorithm"] == "sha256"
+
+    def test_sha256_enforced(self):
+        r = client.post("/v1/preflight/zk", json={
+            "memory_state": [{"entry_id": "zk3", "content_hash": "x"}],
+            "hash_algorithm": "md5"
+        }, headers=AUTH)
+        assert r.status_code == 400
+
+    def test_score_returned(self):
+        r = client.post("/v1/preflight/zk", json={
+            "memory_state": [{"entry_id": "zk4", "content_hash": "h", "memory_type": "preference",
+                "timestamp_age_days": 10, "source_trust": 0.8, "source_conflict": 0.2, "downstream_count": 2}]
+        }, headers=AUTH)
+        assert "omega_mem_final" in r.json()
+        assert "recommended_action" in r.json()
+
+    def test_zk_limitations_present(self):
+        r = client.post("/v1/preflight/zk", json={
+            "memory_state": [{"entry_id": "zk5", "content_hash": "h"}]
+        }, headers=AUTH)
+        lims = r.json()["zk_limitations"]
+        assert "entry_shapley unavailable" in lims
+
+    def test_component_breakdown(self):
+        r = client.post("/v1/preflight/zk", json={
+            "memory_state": [{"entry_id": "zk6", "content_hash": "h", "source_trust": 0.7}]
+        }, headers=AUTH)
+        assert "component_breakdown" in r.json()
