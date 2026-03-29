@@ -23,7 +23,7 @@ export default function DecidePage() {
         <p className="text-lg mb-16 text-gray-500">Before every memory-based action, get a risk score, a decision, and a full explanation. Under 10ms.</p>
       </div>
 
-      <div style={{ backgroundColor: "#f9f9f9" }} style={{ padding: "5rem 2rem" }}>
+      <div style={{ backgroundColor: "#f9f9f9", padding: "5rem 2rem" }}>
         <div style={{ maxWidth: "56rem", margin: "0 auto" }}>
           <h2 className="text-2xl font-bold text-black mb-10" style={{ fontFamily: "'Manrope', sans-serif" }}>How it works</h2>
           <div className="space-y-8">
@@ -64,7 +64,7 @@ print(result.omega_mem_final)      # 78.4`}</pre>
         </div>
       </div>
 
-      <div style={{ padding: "5rem 2rem", textAlign: "center" }} style={{ backgroundColor: "#f9f9f9" }}>
+      <div style={{ padding: "5rem 2rem", textAlign: "center", backgroundColor: "#f9f9f9" }}>
         <p className="text-2xl font-bold text-black mb-6" style={{ fontFamily: "'Manrope', sans-serif" }}>Ready to make safer decisions?</p>
         <a href="https://app.sgraal.com" className="px-8 py-4 text-lg font-bold text-white rounded-md inline-block" style={{ background: "linear-gradient(135deg, #745b1c, #c9a962)" }}>Get API Key</a>
       </div>

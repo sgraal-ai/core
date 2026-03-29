@@ -20,7 +20,7 @@ export default function ScalePage() {
         <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-black mb-4" style={{ fontFamily: "'Manrope', sans-serif" }}>Learn, adapt, and grow autonomously.</h1>
         <p className="text-lg mb-16 text-gray-500">Self-improving thresholds, autonomous healing, 6 SDKs, 14 frameworks — Sgraal runs itself so your agents can run anything.</p>
       </div>
-      <div style={{ backgroundColor: "#f9f9f9" }} style={{ padding: "5rem 2rem" }}>
+      <div style={{ backgroundColor: "#f9f9f9", padding: "5rem 2rem" }}>
         <div style={{ maxWidth: "56rem", margin: "0 auto" }}>
           <h2 className="text-2xl font-bold text-black mb-10" style={{ fontFamily: "'Manrope', sans-serif" }}>How it works</h2>
           <div className="space-y-8">
@@ -60,7 +60,7 @@ client.truth.subscribe(
 )`}</pre>
         </div>
       </div>
-      <div style={{ padding: "5rem 2rem", textAlign: "center" }} style={{ backgroundColor: "#f9f9f9" }}>
+      <div style={{ padding: "5rem 2rem", textAlign: "center", backgroundColor: "#f9f9f9" }}>
         <p className="text-2xl font-bold text-black mb-6" style={{ fontFamily: "'Manrope', sans-serif" }}>Ready to scale?</p>
         <a href="https://app.sgraal.com" className="px-8 py-4 text-lg font-bold text-white rounded-md inline-block" style={{ background: "linear-gradient(135deg, #745b1c, #c9a962)" }}>Get API Key</a>
       </div>
