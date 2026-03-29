@@ -8,14 +8,13 @@ export function Footer() {
             <p className="text-muted text-sm">Memory Governance Protocol</p>
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted">
-            <a href="https://api.sgraal.com/docs" className="hover:text-foreground transition">Docs</a>
-            <a href="https://api.sgraal.com/docs" className="hover:text-foreground transition">API Reference</a>
-            <a href="https://github.com/sgraal-ai/core" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition">GitHub</a>
+            <a href="https://docs.sgraal.com" className="hover:text-foreground transition">Docs</a>
+            <a href="https://docs.sgraal.com/api" className="hover:text-foreground transition">API Reference</a>
+            <a href="https://github.com/sgraal-ai" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition">GitHub</a>
             <a href="https://x.com/sgraal_ai" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition">X</a>
-            <a href="https://api.sgraal.com/health" className="hover:text-foreground transition">Status</a>
+            <a href="https://app.sgraal.com" className="hover:text-foreground transition">Dashboard</a>
           </div>
         </div>
-
         <div className="border-t border-surface-light pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted">
           <p>&copy; 2026 Sgraal &middot; Apache 2.0</p>
           <div className="flex gap-4">

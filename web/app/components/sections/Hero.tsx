@@ -12,10 +12,10 @@ export function Hero() {
         The memory governance protocol between AI agent memory and AI agent action.
       </p>
       <div className="flex flex-wrap justify-center gap-4">
-        <a href="/playground" className="bg-gold text-background font-semibold px-8 py-3 rounded-lg hover:bg-gold-dim transition text-base">
+        <a href="https://app.sgraal.com/playground" className="bg-gold text-background font-semibold px-8 py-3 rounded-lg hover:bg-gold-dim transition text-base">
           Try it now — no signup
         </a>
-        <a href="https://api.sgraal.com/docs" className="border border-foreground/30 text-foreground font-semibold px-8 py-3 rounded-lg hover:bg-foreground/5 transition text-base">
+        <a href="https://docs.sgraal.com" className="border border-foreground/30 text-foreground font-semibold px-8 py-3 rounded-lg hover:bg-foreground/5 transition text-base">
           Read the docs
         </a>
       </div>

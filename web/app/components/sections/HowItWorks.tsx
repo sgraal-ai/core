@@ -1,21 +1,18 @@
 const steps = [
   {
     step: "1",
-    title: "Send your memory state",
-    description: "Agent calls /v1/preflight before acting.",
-    detail: "POST with memory entries, action type, and domain.",
+    title: "An agent is about to act on memory.",
+    description: "Before execution, it calls Sgraal with its memory state and intended action.",
   },
   {
     step: "2",
-    title: "108 models evaluate",
-    description: "Freshness decay \u00b7 drift detection \u00b7 provenance \u00b7 conflict \u00b7 causal graph.",
-    detail: "Weibull decay per memory type. Sheaf cohomology for conflicts. Under 10ms.",
+    title: "Sgraal validates.",
+    description: "108 models evaluate freshness, drift, provenance, conflict, compliance, and intent. Under 10ms.",
   },
   {
     step: "3",
-    title: "Get a decision",
-    description: "USE_MEMORY / WARN / ASK_USER / BLOCK",
-    detail: "Omega score + repair plan + entry-level Shapley attribution.",
+    title: "The agent acts safely \u2014 or stops.",
+    description: "USE_MEMORY \u00b7 WARN \u00b7 ASK_USER \u00b7 BLOCK. Every decision logged, traced, and explainable.",
   },
 ];
 
@@ -23,11 +20,10 @@ export function HowItWorks() {
   return (
     <section id="how-it-works" className="px-6 py-16 max-w-5xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
-        How it <span className="text-gold">works</span>
+        How Sgraal <span className="text-gold">works</span>
       </h2>
       <p className="text-xl text-center mb-12 max-w-3xl mx-auto">
-        Memory poisoning is invisible — <span className="text-gold">until Sgraal.</span>{" "}
-        <span className="text-muted">Every injection leaves a trace. Every decision is provable.</span>
+        Memory poisoning is invisible — <span className="text-gold">until Sgraal.</span>
       </p>
       <div className="grid md:grid-cols-3 gap-8 relative">
         <div className="hidden md:block absolute top-4 left-[16.67%] right-[16.67%] h-px bg-gold/20" />
@@ -39,8 +35,7 @@ export function HowItWorks() {
               </span>
               <h3 className="font-semibold text-foreground text-lg">{s.title}</h3>
             </div>
-            <p className="text-foreground/90 text-sm mb-2">{s.description}</p>
-            <p className="text-muted text-xs">{s.detail}</p>
+            <p className="text-muted text-sm">{s.description}</p>
           </div>
         ))}
       </div>

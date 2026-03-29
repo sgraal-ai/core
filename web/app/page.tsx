@@ -1,10 +1,9 @@
 import { Hero } from "./components/sections/Hero";
 import { Problem } from "./components/sections/Problem";
 import { HowItWorks } from "./components/sections/HowItWorks";
-import { AhaMoments } from "./components/sections/AhaMoments";
-import { BattleTested } from "./components/sections/BattleTested";
-import { UseCases } from "./components/sections/UseCases";
-import { Integrations } from "./components/sections/Integrations";
+import { FourPillars } from "./components/sections/FourPillars";
+import { SocialProof } from "./components/sections/SocialProof";
+import { IntegrationsBadges } from "./components/sections/IntegrationsBadges";
 import { Pricing } from "./components/sections/Pricing";
 import { Footer } from "./components/sections/Footer";
 
@@ -18,42 +17,23 @@ const jsonLd = {
   applicationCategory: "DeveloperApplication",
   operatingSystem: "Any",
   offers: [
-    {
-      "@type": "Offer",
-      price: "0",
-      priceCurrency: "USD",
-      description: "Free tier: 10,000 API calls per month",
-    },
-    {
-      "@type": "Offer",
-      price: "0.001",
-      priceCurrency: "USD",
-      description: "Usage-based: $0.001 per call after free tier",
-    },
+    { "@type": "Offer", price: "0", priceCurrency: "USD", description: "Free tier: 10,000 API calls per month" },
+    { "@type": "Offer", price: "0.001", priceCurrency: "USD", description: "Usage-based: $0.001 per call after free tier" },
   ],
-  author: {
-    "@type": "Organization",
-    name: "Zs-Consulting Kft.",
-    url: "https://sgraal.com",
-    email: "hello@sgraal.com",
-  },
+  author: { "@type": "Organization", name: "Sgraal", url: "https://sgraal.com", email: "hello@sgraal.com" },
   license: "https://www.apache.org/licenses/LICENSE-2.0",
 };
 
 export default function Home() {
   return (
     <main className="flex-1">
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <Hero />
       <Problem />
       <HowItWorks />
-      <AhaMoments />
-      <BattleTested />
-      <UseCases />
-      <Integrations />
+      <FourPillars />
+      <SocialProof />
+      <IntegrationsBadges />
       <Pricing />
       <Footer />
     </main>
