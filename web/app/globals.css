@@ -1,13 +1,31 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap');
 
 :root {
-  --background: #0B0F14;
-  --foreground: #E8E8E8;
-  --gold: #C9A962;
-  --gold-dim: #A08840;
-  --surface: #141A22;
-  --surface-light: #1C2430;
-  --muted: #6B7280;
+  --background: #faf9f6;
+  --surface-container-low: #f4f3f0;
+  --surface-container: #efeeeb;
+  --surface-container-high: #e9e8e5;
+  --surface-container-highest: #e3e2df;
+  --surface-container-lowest: #ffffff;
+
+  --on-surface: #1a1c1a;
+  --on-surface-variant: #6b6b6b;
+  --primary: #745b1c;
+  --primary-container: #c9a962;
+  --on-primary-container: #533d00;
+
+  --outline-variant: #d0c5b4;
+
+  --obsidian: #0b0f14;
+  --obsidian-surface: #141920;
+
+  --foreground: var(--on-surface);
+  --gold: var(--primary-container);
+  --gold-dim: var(--primary);
+  --muted: var(--on-surface-variant);
+  --surface: var(--surface-container);
+  --surface-light: var(--outline-variant);
 }
 
 @theme inline {
@@ -17,13 +35,44 @@
   --color-gold-dim: var(--gold-dim);
   --color-surface: var(--surface);
   --color-surface-light: var(--surface-light);
+  --color-surface-low: var(--surface-container-low);
+  --color-surface-lowest: var(--surface-container-lowest);
   --color-muted: var(--muted);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-on-surface: var(--on-surface);
+  --color-primary: var(--primary);
+  --color-obsidian: var(--obsidian);
+  --color-outline: var(--outline-variant);
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-display: 'Manrope', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  background-color: var(--background);
+  color: var(--on-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background-color: var(--background);
+  color: var(--on-surface);
+  font-family: 'Inter', sans-serif;
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Manrope', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--on-surface);
+}
+
+pre, code {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  background-color: var(--obsidian);
+  color: #e2e8f0;
 }

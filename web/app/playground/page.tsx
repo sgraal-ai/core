@@ -4,21 +4,17 @@ import { useState } from "react";
 
 const DEFAULT_MEMORY = JSON.stringify(
   [{ id: "mem_payment_history", type: "tool_state", timestamp_age_days: 54, source_trust: 0.6, source_conflict: 0.4 }],
-  null,
-  2
+  null, 2
 );
 
 const ACTION_COLORS: Record<string, string> = {
-  USE_MEMORY: "bg-green-500",
-  WARN: "bg-yellow-500",
-  ASK_USER: "bg-orange-500",
-  BLOCK: "bg-red-500",
+  USE_MEMORY: "#16a34a", WARN: "#ca8a04", ASK_USER: "#ea580c", BLOCK: "#dc2626",
 };
 
 function omegaColor(v: number) {
-  if (v <= 30) return "#22c55e";
-  if (v <= 60) return "#eab308";
-  return "#ef4444";
+  if (v <= 30) return "#16a34a";
+  if (v <= 60) return "#ca8a04";
+  return "#dc2626";
 }
 
 export default function PlaygroundPage() {
@@ -31,9 +27,7 @@ export default function PlaygroundPage() {
   const [showJson, setShowJson] = useState(false);
 
   async function run() {
-    setError("");
-    setResult(null);
-    setLoading(true);
+    setError(""); setResult(null); setLoading(true);
     try {
       const parsed = JSON.parse(memory);
       const res = await fetch("https://api.sgraal.com/v1/preflight", {
@@ -44,10 +38,8 @@ export default function PlaygroundPage() {
       if (!res.ok) throw new Error(`API error: ${res.status}`);
       setResult(await res.json());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong. Check your JSON and try again.");
-    } finally {
-      setLoading(false);
-    }
+      setError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally { setLoading(false); }
   }
 
   const omega = typeof result?.omega_mem_final === "number" ? (result.omega_mem_final as number) : null;
@@ -55,75 +47,67 @@ export default function PlaygroundPage() {
 
   return (
     <div className="max-w-3xl mx-auto py-16 px-6">
-      <h1 className="text-3xl sm:text-4xl font-bold mb-2">Try Sgraal <span className="text-gold">live.</span></h1>
-      <p className="text-muted text-lg mb-10">No signup. No API key needed. Real scoring.</p>
+      <h1 className="text-3xl sm:text-4xl mb-2" style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, color: "var(--on-surface)" }}>
+        Try Sgraal <span style={{ color: "var(--primary-container)" }}>live.</span>
+      </h1>
+      <p className="text-lg mb-10" style={{ color: "var(--on-surface-variant)" }}>No signup. No API key needed. Real scoring.</p>
 
       <div className="space-y-4 mb-6">
         <div>
-          <label className="text-sm text-muted block mb-1">Memory state (JSON)</label>
-          <textarea
-            value={memory}
-            onChange={(e) => setMemory(e.target.value)}
-            rows={6}
-            className="w-full bg-surface border border-surface-light rounded-lg px-4 py-3 font-mono text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-gold transition resize-y"
-          />
+          <label className="text-sm block mb-1" style={{ color: "var(--on-surface-variant)" }}>Memory state (JSON)</label>
+          <textarea value={memory} onChange={(e) => setMemory(e.target.value)} rows={6}
+            className="w-full rounded-md px-4 py-3 text-sm resize-y focus:outline-none transition"
+            style={{ backgroundColor: "var(--surface-container-lowest)", borderBottom: "1px solid var(--outline-variant)", fontFamily: "'JetBrains Mono', monospace", color: "var(--on-surface)" }} />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="text-sm text-muted block mb-1">Action type</label>
+            <label className="text-sm block mb-1" style={{ color: "var(--on-surface-variant)" }}>Action type</label>
             <select value={actionType} onChange={(e) => setActionType(e.target.value)}
-              className="w-full bg-surface border border-surface-light rounded-lg px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-gold">
-              <option value="read">read</option>
-              <option value="write">write</option>
-              <option value="financial">financial</option>
-              <option value="irreversible">irreversible</option>
+              className="w-full rounded-md px-4 py-2.5 text-sm focus:outline-none"
+              style={{ backgroundColor: "var(--surface-container-lowest)", borderBottom: "1px solid var(--outline-variant)", color: "var(--on-surface)" }}>
+              <option value="read">read</option><option value="write">write</option>
+              <option value="financial">financial</option><option value="irreversible">irreversible</option>
             </select>
           </div>
           <div>
-            <label className="text-sm text-muted block mb-1">Domain</label>
+            <label className="text-sm block mb-1" style={{ color: "var(--on-surface-variant)" }}>Domain</label>
             <select value={domain} onChange={(e) => setDomain(e.target.value)}
-              className="w-full bg-surface border border-surface-light rounded-lg px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-gold">
-              <option value="general">general</option>
-              <option value="fintech">fintech</option>
-              <option value="medical">healthcare</option>
-              <option value="legal">legal</option>
+              className="w-full rounded-md px-4 py-2.5 text-sm focus:outline-none"
+              style={{ backgroundColor: "var(--surface-container-lowest)", borderBottom: "1px solid var(--outline-variant)", color: "var(--on-surface)" }}>
+              <option value="general">general</option><option value="fintech">fintech</option>
+              <option value="medical">healthcare</option><option value="legal">legal</option>
             </select>
           </div>
         </div>
-        <button onClick={run} disabled={loading}
-          className="w-full bg-gold text-background font-semibold py-3 rounded-lg hover:bg-gold-dim transition disabled:opacity-50 text-base">
+        <button onClick={run} disabled={loading} className="w-full py-3 rounded-md transition disabled:opacity-50 text-base"
+          style={{ background: "linear-gradient(135deg, #745b1c, #c9a962)", color: "#533d00", fontWeight: 600 }}>
           {loading ? "Running..." : "Run Preflight"}
         </button>
       </div>
 
-      {error && <p className="text-red-400 text-sm text-center mb-6">{error}</p>}
+      {error && <p className="text-sm text-center mb-6" style={{ color: "#dc2626" }}>{error}</p>}
 
       {result && omega !== null && action && (
         <div className="space-y-6">
           <div className="flex items-center justify-center gap-8">
-            <div className="text-center">
-              <svg width="120" height="120" viewBox="0 0 120 120">
-                <circle cx="60" cy="60" r="52" fill="none" stroke="#1C2430" strokeWidth="8" />
-                <circle cx="60" cy="60" r="52" fill="none" stroke={omegaColor(omega)} strokeWidth="8"
-                  strokeDasharray={`${omega * 3.27} 327`} strokeLinecap="round" transform="rotate(-90 60 60)" />
-                <text x="60" y="56" textAnchor="middle" fill="white" fontSize="28" fontWeight="bold" fontFamily="monospace">{omega}</text>
-                <text x="60" y="74" textAnchor="middle" fill="#6B7280" fontSize="10">omega</text>
-              </svg>
-            </div>
-            <div>
-              <span className={`inline-block px-4 py-2 rounded-lg text-background font-mono font-bold text-sm ${ACTION_COLORS[action] || "bg-gray-500"}`}>
-                {action}
-              </span>
-            </div>
+            <svg width="120" height="120" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="52" fill="none" stroke="var(--surface-container-high)" strokeWidth="8" />
+              <circle cx="60" cy="60" r="52" fill="none" stroke={omegaColor(omega)} strokeWidth="8"
+                strokeDasharray={`${omega * 3.27} 327`} strokeLinecap="round" transform="rotate(-90 60 60)" />
+              <text x="60" y="56" textAnchor="middle" fill="var(--on-surface)" fontSize="28" fontWeight="bold" fontFamily="Manrope">{omega}</text>
+              <text x="60" y="74" textAnchor="middle" fill="var(--on-surface-variant)" fontSize="10">omega</text>
+            </svg>
+            <span className="inline-block px-4 py-2 rounded-md text-white text-sm" style={{ backgroundColor: ACTION_COLORS[action] || "#6b6b6b", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+              {action}
+            </span>
           </div>
-
           <div>
-            <button onClick={() => setShowJson(!showJson)}
-              className="text-sm text-muted hover:text-foreground transition">
+            <button onClick={() => setShowJson(!showJson)} className="text-sm transition" style={{ color: "var(--on-surface-variant)" }}>
               {showJson ? "Hide" : "Show"} full response JSON
             </button>
             {showJson && (
-              <pre className="mt-2 bg-surface border border-surface-light rounded-lg p-4 text-xs font-mono text-foreground/80 overflow-x-auto max-h-96 overflow-y-auto">
+              <pre className="mt-2 rounded-lg p-4 text-xs overflow-x-auto max-h-96 overflow-y-auto"
+                style={{ backgroundColor: "var(--obsidian)", color: "#e2e8f0", fontFamily: "'JetBrains Mono', monospace" }}>
                 {JSON.stringify(result, null, 2)}
               </pre>
             )}

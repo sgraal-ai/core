@@ -1,26 +1,29 @@
 export function Hero() {
   return (
     <section className="px-6 pt-16 pb-12 max-w-5xl mx-auto text-center">
-      <p className="text-gold font-mono text-sm tracking-widest uppercase mb-3">
+      <span className="inline-block mb-4 px-3 py-1 text-xs uppercase tracking-widest rounded-full"
+        style={{ backgroundColor: "var(--surface-container-low)", color: "var(--on-surface-variant)", fontFamily: "'Inter', sans-serif", letterSpacing: "0.1em" }}>
         Memory Governance Protocol
-      </p>
-      <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight mb-6 max-w-4xl mx-auto">
+      </span>
+      <h1 className="mb-6 max-w-4xl mx-auto" style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: "clamp(2.5rem, 5vw, 3.5rem)", letterSpacing: "-0.02em", color: "var(--on-surface)" }}>
         AI agents act on memory. Sgraal decides if that memory is{" "}
-        <span className="text-gold">safe to act on.</span>
+        <span style={{ color: "var(--primary-container)" }}>safe to act on.</span>
       </h1>
-      <p className="text-muted text-lg sm:text-xl mb-8 max-w-2xl mx-auto">
+      <p className="mb-8 max-w-xl mx-auto" style={{ fontFamily: "'Inter', sans-serif", color: "var(--on-surface-variant)", fontSize: "1.125rem" }}>
         The memory governance protocol between AI agent memory and AI agent action.
       </p>
       <div className="flex flex-wrap justify-center gap-4">
-        <a href="/playground" className="bg-gold text-background font-semibold px-8 py-3 rounded-lg hover:bg-gold-dim transition text-base">
+        <a href="/playground" className="px-8 py-3 rounded-md transition text-base"
+          style={{ background: "linear-gradient(135deg, #745b1c, #c9a962)", color: "#533d00", fontWeight: 600 }}>
           Try it now — no signup
         </a>
-        <a href="https://docs.sgraal.com" className="border border-foreground/30 text-foreground font-semibold px-8 py-3 rounded-lg hover:bg-foreground/5 transition text-base">
+        <a href="https://docs.sgraal.com" className="px-8 py-3 rounded-md transition text-base"
+          style={{ color: "var(--on-surface)" }}>
           Read the docs
         </a>
       </div>
-      <p className="text-sm text-muted mt-6">
-        1,834 tests &middot; 0 failures &middot; production ready
+      <p className="mt-6 text-sm" style={{ color: "var(--on-surface-variant)" }}>
+        1,834 tests · 0 failures · production ready
       </p>
     </section>
   );
