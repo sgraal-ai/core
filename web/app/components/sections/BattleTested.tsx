@@ -1,0 +1,43 @@
+const stats = [
+  { value: "1,834 tests", label: "0 failures" },
+  { value: "0 blockers", label: "at launch" },
+  { value: "300+ steps", label: "regulated runs \u00b7 zero drift" },
+];
+
+export function BattleTested() {
+  return (
+    <section className="px-6 py-20 max-w-5xl mx-auto">
+      <h2 className="text-3xl sm:text-4xl font-bold text-center mb-14">
+        Tested in the <span className="text-gold">wild</span>
+      </h2>
+
+      <div className="grid sm:grid-cols-3 gap-6 mb-10">
+        {stats.map((s) => (
+          <div key={s.value} className="border border-surface-light bg-surface rounded-xl p-6 text-center">
+            <p className="text-2xl font-bold text-gold mb-1">{s.value}</p>
+            <p className="text-muted text-sm">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="border border-surface-light bg-surface rounded-xl p-6 mb-8 text-center">
+        <p className="text-muted text-sm mb-2 font-mono">GrokGuard v2 — 58-step run &middot; 97% assurance</p>
+        <div className="bg-background border border-surface-light rounded-lg h-32 flex items-center justify-center">
+          <p className="text-muted text-xs italic">Screenshot placeholder — real capture to be added</p>
+        </div>
+      </div>
+
+      <div className="border border-gold/30 bg-surface rounded-xl p-8">
+        <div className="flex items-start gap-4">
+          <div className="text-gold text-3xl font-mono font-bold shrink-0">&ldquo;</div>
+          <div>
+            <p className="text-foreground/90 leading-relaxed mb-4">
+              Ran 300+ step regulated test with zero drift.
+            </p>
+            <span className="text-gold font-mono text-sm font-semibold">@grok</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
