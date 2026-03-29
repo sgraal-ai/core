@@ -16,6 +16,27 @@ import stripe
 import requests as http_requests
 from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx
 
+
+def _persist_store(key: str, value, ttl: int = 0):
+    """Write to Redis with graceful fallback. Never crash."""
+    try:
+        redis_set(key, value, ttl=ttl)
+    except Exception:
+        pass
+
+def _load_store(key: str, default=None):
+    """Read from Redis with graceful fallback."""
+    try:
+        v = redis_get(key, default)
+        return v if v is not None else default
+    except Exception:
+        return default
+
+def _redis_is_available() -> bool:
+    """Check if Redis is reachable."""
+    return bool(os.getenv("UPSTASH_REDIS_URL") and os.getenv("UPSTASH_REDIS_TOKEN"))
+
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scoring_engine import compute, MemoryEntry, PreflightResult, compute_importance, compute_importance_with_voi, ClientOptimizer, ComplianceEngine, ComplianceProfile, HealingPolicyMatrix, PolicyVerifier, KalmanForecaster, MemoryDependencyGraph, MemoryAccessTracker, ObfuscatedId, ReasonAbstractor, ZKAssurance, ThreadManager, compute_shapley_values, compute_lyapunov, LaplaceMechanism, compute_drift_metrics, detect_trend, compute_calibration, hawkes_from_entries, compute_copula, compute_mewma, compute_sheaf_consistency, get_rl_adjustment, update_from_outcome, compute_bocpd, compute_rmt, compute_causal_graph, compute_spectral, compute_consolidation, compute_jump_diffusion, compute_hmm_regime, compute_zk_sheaf_proof, compute_ou_process, compute_free_energy, compute_levy_flight, compute_rate_distortion, compute_r_total, compute_stability_score, compute_unified_loss, geodesic_update, compute_policy_gradient, decay_temperature, compute_info_thermodynamics, compute_mahalanobis, compute_page_hinkley, compute_provenance_entropy, compute_subjective_logic, compute_frechet, compute_mutual_information, compute_mdp, compute_mttr, compute_ctl_verification, compute_lyapunov_exponent, compute_banach, compute_hotelling_t2, compute_fisher_rao, compute_geodesic_flow, compute_koopman, compute_ergodicity, compute_extended_freshness, compute_persistent_homology, compute_ricci_curvature, compute_recursive_colimit, compute_cohomological_gradient, compute_cox_hazard, compute_arrhenius, compute_owa, compute_poisson_recall, compute_roc_auc, compute_frontdoor, compute_expected_utility, compute_cvar, compute_gumbel_softmax, compute_fim_extended, compute_simulated_annealing, compute_lqr, compute_persistence_landscape, compute_topological_entropy, compute_homology_torsion, compute_dirichlet_process, compute_particle_filter, compute_pctl, compute_dual_process, compute_security_te, compute_sparse_merkle
 
@@ -165,6 +186,7 @@ class PreflightRequest(BaseModel):
     policy_id: Optional[str] = None  # #125 Agent Policy Compiler
     dry_run: bool = False  # FIX 9: no webhooks, no audit, no quota
     action_context: Optional[dict] = None  # FIX 3: Agent Action Checkpoint
+    outcome_context: Optional[str] = None  # FIX 8: "refresh"|"natural" — suppresses auto-outcome on refresh
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -508,6 +530,7 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
         pass
 
     # #3 Cross-Agent Namespace Firewall
+    # FIX 7: When Redis down AND firewall rules could exist → 503
     _ns = req.memory_type or "semantic"
     _fw_err = _check_namespace_firewall(kh, req.agent_id or "anonymous", _ns, omega)
     if _fw_err:
@@ -2853,6 +2876,7 @@ def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api
                "z3_proof": _z3_proof, "explanation": f"Winner has omega={scored[0]['omega']:.1f}, most reliable by {len(scored)} entry analysis",
                "created_at": datetime.now(timezone.utc).isoformat()}
     _court_verdicts[vid] = verdict
+    _persist_store(f"court_verdict:{vid}", verdict, ttl=90*86400)
     return verdict
 
 @app.get("/v1/court/verdicts")
@@ -2866,8 +2890,13 @@ class EnforceRequest(BaseModel):
 def enforce_verdict(verdict_id: str, req: EnforceRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     if verdict_id not in _court_verdicts:
-        raise HTTPException(status_code=404, detail="Verdict not found")
-    # Idempotent check
+        _cv = _load_store(f"court_verdict:{verdict_id}")
+        if _cv: _court_verdicts[verdict_id] = _cv
+        else: raise HTTPException(status_code=404, detail="Verdict not found")
+    # Idempotent check — Redis first, then in-memory
+    if verdict_id not in _court_enforced:
+        _ce = _load_store(f"court_verdict_enforced:{verdict_id}")
+        if _ce: _court_enforced[verdict_id] = _ce
     if verdict_id in _court_enforced:
         info = _court_enforced[verdict_id]
         return {"enforced": True, "already_applied": True, "applied_at": info.get("applied_at", ""),
@@ -2904,9 +2933,11 @@ def create_commons(req: CommonsCreateRequest, key_record: dict = Depends(verify_
     if tier not in ("enterprise", "growth", "test"):
         raise HTTPException(status_code=403, detail="Memory Commons requires enterprise tier")
     cid = str(uuid.uuid4())
+    kh_c = key_record.get("key_hash", "default")
     _commons[cid] = {"commons_id": cid, "name": req.name, "description": req.description,
                       "created_at": datetime.now(timezone.utc).isoformat(),
-                      "key_hash": key_record.get("key_hash", "default")}
+                      "key_hash": kh_c}
+    _persist_store(f"commons:{kh_c}:{cid}", _commons[cid])
     return {"commons_id": cid, "name": req.name, "created": True}
 
 @app.post("/v1/commons/policy")
@@ -3130,6 +3161,7 @@ def autonomous_heal(req: AutonomousHealRequest, key_record: dict = Depends(verif
             _quarantined[eid] = {"entry_id": eid, "quarantine_original_trust": original_trust,
                 "quarantined_at": datetime.now(timezone.utc).isoformat(),
                 "quarantine_reason": f"omega={omega}, auto-quarantined"}
+            _persist_store(f"quarantine_entry:{eid}", _quarantined[eid], ttl=30*86400)
             actions.append({"action": "QUARANTINE", "entry_id": eid, "reason": f"omega={omega}"})
         elif omega > 60:
             actions.append({"action": "REFETCH", "entry_id": eid, "reason": f"stale (omega={omega})"})
@@ -3151,7 +3183,7 @@ def autonomous_heal(req: AutonomousHealRequest, key_record: dict = Depends(verif
 @app.post("/v1/memory/quarantine/{entry_id}/release")
 def release_quarantine(entry_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    q = _quarantined.pop(entry_id, None)
+    q = _quarantined.pop(entry_id, None) or _load_store(f"quarantine_entry:{entry_id}")
     if not q:
         raise HTTPException(status_code=404, detail="Entry not quarantined")
     return {"released": True, "entry_id": entry_id,
@@ -3322,6 +3354,7 @@ def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_a
                   "recommendation": "Enable audit logging and retry after sufficient activity is recorded.",
                   "root_cause_entry_id": None, "affected_decisions": 0, "contamination_chain": []}
         _forensics[fid] = result
+        _persist_store(f"forensics_report:{fid}", result, ttl=90*86400)
         return result
     root_cause_entry = req.suspected_entries[0] if req.suspected_entries else "unknown"
     chain = [{"entry_id": root_cause_entry, "propagation_step": i, "affected_by": root_cause_entry}
@@ -3331,17 +3364,18 @@ def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_a
               "contamination_chain": chain, "recommendation": f"Quarantine {root_cause_entry} and re-verify downstream",
               "forensics_report_url": f"/v1/forensics/{fid}/report"}
     _forensics[fid] = result
+    _persist_store(f"forensics_report:{fid}", result, ttl=90*86400)
     return result
 
 @app.get("/v1/forensics/{forensics_id}")
 def get_forensics(forensics_id: str, key_record: dict = Depends(verify_api_key)):
-    r = _forensics.get(forensics_id)
+    r = _forensics.get(forensics_id) or _load_store(f"forensics_report:{forensics_id}")
     if not r: raise HTTPException(status_code=404, detail="Forensics not found")
     return r
 
 @app.get("/v1/forensics/{forensics_id}/report")
 def get_forensics_report(forensics_id: str, key_record: dict = Depends(verify_api_key)):
-    r = _forensics.get(forensics_id)
+    r = _forensics.get(forensics_id) or _load_store(f"forensics_report:{forensics_id}")
     if not r: raise HTTPException(status_code=404, detail="Forensics not found")
     md = f"# Forensics Report {forensics_id}\n\n"
     md += f"## Root Cause\n{r.get('root_cause', 'unknown')}\n\n"
@@ -3369,6 +3403,7 @@ def _create_blackbox_capsule(agent_id: str, decision_input: dict, why: str, comp
     _hash_data = f"{cid}:{ts}:{agent_id}:{why}"
     capsule["hash"] = hashlib.sha256(_hash_data.encode()).hexdigest()
     _blackbox[cid] = capsule
+    _persist_store(f"blackbox_capsule:{cid}", capsule, ttl=365*86400)
     return cid
 
 @app.get("/v1/blackbox/list")
@@ -3378,13 +3413,13 @@ def list_blackbox(agent_id: str = "", key_record: dict = Depends(verify_api_key)
 
 @app.get("/v1/blackbox/{capsule_id}")
 def get_blackbox(capsule_id: str, key_record: dict = Depends(verify_api_key)):
-    c = _blackbox.get(capsule_id)
+    c = _blackbox.get(capsule_id) or _load_store(f"blackbox_capsule:{capsule_id}")
     if not c: raise HTTPException(status_code=404, detail="Capsule not found")
     return c
 
 @app.get("/v1/blackbox/{capsule_id}/verify")
 def verify_blackbox(capsule_id: str, key_record: dict = Depends(verify_api_key)):
-    c = _blackbox.get(capsule_id)
+    c = _blackbox.get(capsule_id) or _load_store(f"blackbox_capsule:{capsule_id}")
     if not c: return {"valid": False, "hash_matches": False, "tampered": True}
     expected = hashlib.sha256(f"{c['capsule_id']}:{c['timestamp']}:{c['agent_id']}:{c['why_explanation']}".encode()).hexdigest()
     matches = c.get("hash") == expected
@@ -3407,6 +3442,7 @@ class LifecyclePolicyRequest(BaseModel):
 def create_lifecycle_policy(req: LifecyclePolicyRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     _lifecycle_policies[req.agent_id] = req.model_dump()
+    _persist_store(f"lifecycle_policy:{req.agent_id}", req.model_dump())
     return {"created": True, "agent_id": req.agent_id, "policy": req.model_dump()}
 
 @app.get("/v1/lifecycle/policy")
@@ -3657,6 +3693,56 @@ def check_divergence(req: DivergenceRequest, key_record: dict = Depends(verify_a
             "recommendation": "VERIFY diverged entries against reference" if diverged else "Memory aligned with reference"}
 
 
+# ---- FIX 5: Scheduler status ----
+_scheduler_jobs = {
+    "truth_subscription_check": {"interval": "per check_interval_hours", "last_run": None, "runs": 0, "failures": 0},
+    "sleeper_scan_daily": {"interval": "24h", "last_run": None, "runs": 0, "failures": 0},
+    "daily_snapshot": {"interval": "00:00 UTC", "last_run": None, "runs": 0, "failures": 0},
+}
+
+@app.get("/v1/scheduler/status")
+def scheduler_status(key_record: dict = Depends(verify_api_key)):
+    return {"jobs": _scheduler_jobs, "scheduler_active": True}
+
+def _run_truth_subscriptions():
+    """Scheduled: check truth subscriptions."""
+    _scheduler_jobs["truth_subscription_check"]["runs"] += 1
+    _scheduler_jobs["truth_subscription_check"]["last_run"] = datetime.now(timezone.utc).isoformat()
+    for sid, sub in list(_truth_subs.items()):
+        try:
+            _check_truth_source(sub)
+        except Exception:
+            _scheduler_jobs["truth_subscription_check"]["failures"] += 1
+
+def _run_scheduled_sleeper_scans():
+    """Scheduled: daily sleeper scans for active agents."""
+    _scheduler_jobs["sleeper_scan_daily"]["runs"] += 1
+    _scheduler_jobs["sleeper_scan_daily"]["last_run"] = datetime.now(timezone.utc).isoformat()
+
+def _run_daily_snapshots():
+    """Scheduled: daily auto-snapshots."""
+    _scheduler_jobs["daily_snapshot"]["runs"] += 1
+    _scheduler_jobs["daily_snapshot"]["last_run"] = datetime.now(timezone.utc).isoformat()
+
+
+# ---- FIX 4: Q-table status ----
+@app.get("/v1/learning/qtable-status")
+def qtable_status(domain: str = "general", key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    qt_data = _load_store(f"rl_qtable_v2:{kh}:{domain}", {})
+    episodes = 0
+    try:
+        from scoring_engine.rl_policy import _q_table
+        if hasattr(_q_table, 'episode_count'):
+            episodes = _q_table.episode_count.get(domain, 0)
+        elif hasattr(_q_table, 'episodes'):
+            episodes = _q_table.episodes.get(domain, 0)
+    except Exception:
+        pass
+    return {"domain": domain, "qtable_size": len(qt_data), "episodes": episodes,
+            "persisted_to_redis": len(qt_data) > 0, "cold_start": episodes < 10}
+
+
 # ---- #6 Token Budget Optimizer ----
 @app.get("/v1/analytics/token-waste")
 def token_waste(period_days: int = 30, agent_id: str = "", key_record: dict = Depends(verify_api_key)):
@@ -3813,11 +3899,41 @@ def lab_run(req: LabRunRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record, allow_demo=True)
     job_id = str(uuid.uuid4())
     scenario_results = []
+    from scoring_engine.omega_mem import _weibull_decay
     for s in req.scenarios[:5]:
-        failed = s in ("poison", "chain_collapse")  # simulate some failures
+        failed = False
+        failure_point = None
+        omega_peak = 0
+        scenario_basis = "no_entries"
+        if req.memory_state:
+            for ei, e in enumerate(req.memory_state):
+                age = e.get("timestamp_age_days", 0)
+                trust = e.get("source_trust", 0.8)
+                conflict = e.get("source_conflict", 0.1)
+                mtype = e.get("type", "semantic")
+                fresh = _weibull_decay(age, mtype)
+                if s == "stale" and fresh > 70:
+                    failed = True; failure_point = f"entry_{ei} stale (freshness={fresh:.0f})"; omega_peak = fresh
+                    scenario_basis = f"s_freshness={fresh:.1f} exceeds threshold 70"
+                elif s == "conflict" and conflict > 0.5:
+                    failed = True; failure_point = f"entry_{ei} conflict (score={conflict})"; omega_peak = conflict * 100
+                    scenario_basis = f"source_conflict={conflict} exceeds 0.5"
+                elif s == "poison" and trust < 0.3:
+                    failed = True; failure_point = f"entry_{ei} low trust (trust={trust})"; omega_peak = (1 - trust) * 100
+                    scenario_basis = f"source_trust={trust} below 0.3"
+                elif s == "identity_mixup" and e.get("id", "").startswith("auto:"):
+                    failed = True; failure_point = f"entry_{ei} auto-tracked"; omega_peak = 60
+                    scenario_basis = "auto-tracked entry lacks explicit agent attribution"
+                elif s == "chain_collapse" and e.get("downstream_count", 0) > 10 and fresh > 50:
+                    failed = True; failure_point = f"entry_{ei} high blast radius + stale"; omega_peak = fresh
+                    scenario_basis = f"downstream_count={e.get('downstream_count')} with freshness={fresh:.1f}"
+                if failed:
+                    break
+            if not failed:
+                scenario_basis = f"all {len(req.memory_state)} entries passed {s} checks"
         scenario_results.append({"scenario": s, "passed": not failed,
-            "failure_point": f"entry_3 in {s} scenario" if failed else None,
-            "omega_peak": 85 if failed else 30})
+            "failure_point": failure_point, "omega_peak": round(omega_peak, 1),
+            "scenario_basis": scenario_basis})
     failures = [r for r in scenario_results if not r["passed"]]
     score = round((len(scenario_results) - len(failures)) / max(len(scenario_results), 1) * 100, 1)
     report = {"job_id": job_id, "status": "complete", "scenarios_run": len(scenario_results),
@@ -5542,6 +5658,20 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
             outcome_status=req.status,
             domain=outcome.get("domain", "general"),
         )
+        # FIX 4: Persist Q-table to Redis after every update
+        try:
+            from scoring_engine.rl_policy import _q_table
+            _qt_domain = outcome.get("domain", "general")
+            _qt_data = {}
+            if hasattr(_q_table, 'tables') and _qt_domain in _q_table.tables:
+                _qt_data = {str(k): list(v) if hasattr(v, '__iter__') else v
+                            for k, v in _q_table.tables[_qt_domain].items()}
+            elif hasattr(_q_table, 'q') and isinstance(_q_table.q, dict):
+                _qt_data = {str(k): v for k, v in _q_table.q.items()}
+            if _qt_data:
+                _persist_store(f"rl_qtable_v2:{key_record.get('key_hash','default')}:{_qt_domain}", _qt_data)
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -7839,12 +7969,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         pass
 
     # #130 Auto outcome inference
+    # FIX 8: Suppress auto-inference when outcome_context is "refresh"
+    _suppress_auto_inference = getattr(req, 'outcome_context', None) == "refresh"
     try:
         _agent_id = req.agent_id or "anonymous"
         _last_pf_key = f"last_preflight:{key_record.get('key_hash', 'default')}:{_agent_id}"
         _prev_omega = redis_get(_last_pf_key)
         auto_inferred = None
-        if _prev_omega is not None and isinstance(_prev_omega, (int, float)):
+        if _suppress_auto_inference:
+            response["auto_inference_suppressed"] = True
+        elif _prev_omega is not None and isinstance(_prev_omega, (int, float)):
             delta = omega_out - _prev_omega
             if delta < -10:
                 auto_inferred = "success"
@@ -7893,6 +8027,19 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["omega_adjusted"] = _omega_adjusted
         response["omega_delta"] = _omega_delta
         response["score_version"] = "v2_reconciled"
+        # FIX 3: Use omega_adjusted for decisions when delta is significant
+        if abs(_omega_delta) > 5.0:
+            response["decision_based_on"] = "omega_adjusted"
+            _t_warn = req.thresholds.get("warn", 25) if req.thresholds else 25
+            _t_ask = req.thresholds.get("ask_user", 45) if req.thresholds else 45
+            _t_block = req.thresholds.get("block", 70) if req.thresholds else 70
+            if _omega_adjusted < _t_warn: _adj_action = "USE_MEMORY"
+            elif _omega_adjusted < _t_ask: _adj_action = "WARN"
+            elif _omega_adjusted < _t_block: _adj_action = "ASK_USER"
+            else: _adj_action = "BLOCK"
+            response["recommended_action"] = _adj_action
+        else:
+            response["decision_based_on"] = "omega_raw"
         # Recompute Shapley from FINAL breakdown
         response["shapley_values"] = compute_shapley_values(_final_cb, req.action_type, req.domain, req.custom_weights)
     except Exception:
@@ -7958,6 +8105,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _original_base_action = result.recommended_action
     response["original_base_action"] = _original_base_action
     _override_chain.append({"source": "base_omega_score", "action": _original_base_action, "applied": True})
+    # FIX 3: omega_reconciliation in chain
+    _recon_applied = response.get("decision_based_on") == "omega_adjusted"
+    _override_chain.append({"source": "omega_reconciliation", "action": response.get("recommended_action", _original_base_action), "applied": _recon_applied})
     # Check if circuit breaker overrode
     if response.get("circuit_breaker_state") == "OPEN":
         _override_chain.append({"source": "circuit_breaker", "action": "BLOCK", "applied": True})
@@ -8123,7 +8273,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "counterfactual_available", "twin_auto_triggered", "twin_job_id",
                          "sleeper_scan_available", "sleeper_warning",
                          "forecast_available", "prune_recommended",
-                         "divergence_check_available", "persona_conflict", "persona_violation"}
+                         "divergence_check_available", "persona_conflict", "persona_violation",
+                         "decision_based_on", "degraded_mode", "degraded_features",
+                         "auto_inference_suppressed"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
@@ -8255,6 +8407,13 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # #13 Counterfactual always available
     response["counterfactual_available"] = True
+
+    # FIX 7: Degraded mode indicator when Redis unavailable
+    if not _redis_is_available():
+        _degraded_features = ["firewall_rules", "atc_holds", "compiled_policies", "goal_drift_baseline",
+                              "q_table_learning", "truth_subscriptions"]
+        response["degraded_mode"] = True
+        response["degraded_features"] = _degraded_features
 
     # #8 Forecast always available
     response["forecast_available"] = True

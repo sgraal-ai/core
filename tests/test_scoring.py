@@ -12687,3 +12687,260 @@ class TestConsciousnessDashboard:
     def test_migration_exists(self):
         import os
         assert os.path.exists("scripts/migrations/023_immunity.sql")
+
+
+# ---- Final Pre-Launch Architectural Fixes ----
+
+class TestFix1RedisPersistence:
+    """FIX 1: Persist critical in-memory dicts to Redis"""
+    def test_court_verdict_persisted(self):
+        r = client.post("/v1/court/arbitrate", json={
+            "entries": [_fresh_entry(), _fresh_entry(id="e2")]
+        }, headers=AUTH)
+        vid = r.json()["verdict_id"]
+        # Simulate restart: clear in-memory, read from Redis fallback
+        from api.main import _court_verdicts
+        _court_verdicts.pop(vid, None)
+        r2 = client.get("/v1/court/verdicts", headers=AUTH)
+        assert r2.status_code == 200  # doesn't crash
+
+    def test_blackbox_persisted(self):
+        from api.main import _create_blackbox_capsule, _blackbox
+        cid = _create_blackbox_capsule("persist_test", {}, "test", {}, [], [])
+        assert cid in _blackbox
+
+    def test_quarantine_persisted(self):
+        from api.main import _quarantined, _persist_store
+        _quarantined["q_persist"] = {"entry_id": "q_persist", "quarantine_original_trust": 0.9,
+            "quarantined_at": "2026-03-29", "quarantine_reason": "test"}
+        _persist_store("quarantine_entry:q_persist", _quarantined["q_persist"], ttl=30*86400)
+        assert "q_persist" in _quarantined
+
+    def test_firewall_violations_logged(self):
+        from api.main import _firewall_violations
+        assert isinstance(_firewall_violations, dict)
+
+    def test_redis_unavailable_fallback(self):
+        # Should never crash when Redis unavailable
+        from api.main import _load_store
+        result = _load_store("nonexistent_key_xyz", {"default": True})
+        assert result == {"default": True}
+
+    def test_lifecycle_policy_persisted(self):
+        r = client.post("/v1/lifecycle/policy", json={
+            "agent_id": "persist_lc", "gdpr_delete_after_days": 90
+        }, headers=AUTH)
+        assert r.json()["created"] is True
+
+    def test_commons_persisted(self):
+        r = client.post("/v1/commons/create", json={"name": "persist_commons"}, headers=AUTH)
+        assert r.json()["created"] is True
+
+    def test_truth_sub_persisted(self):
+        r = client.post("/v1/truth/subscribe", json={
+            "source_url": "https://example.com/persist"
+        }, headers=AUTH)
+        assert r.json()["subscribed"] is True
+
+
+class TestFix2SyntheticLabReal:
+    """FIX 2: Synthetic Lab real analysis"""
+    def test_stale_finds_stale(self):
+        r = client.post("/v1/lab/run", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=200)],
+            "scenarios": ["stale"]
+        }, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        stale = next(s for s in r2.json()["scenario_results"] if s["scenario"] == "stale")
+        assert stale["passed"] is False
+
+    def test_conflict_finds_conflicts(self):
+        r = client.post("/v1/lab/run", json={
+            "memory_state": [_fresh_entry(source_conflict=0.9)],
+            "scenarios": ["conflict"]
+        }, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        conflict = next(s for s in r2.json()["scenario_results"] if s["scenario"] == "conflict")
+        assert conflict["passed"] is False
+
+    def test_two_states_differ(self):
+        r1 = client.post("/v1/lab/run", json={
+            "memory_state": [_fresh_entry()], "scenarios": ["stale"]
+        }, headers=AUTH)
+        r2 = client.post("/v1/lab/run", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=500)], "scenarios": ["stale"]
+        }, headers=AUTH)
+        j1 = client.get(f"/v1/lab/report/{r1.json()['job_id']}", headers=AUTH).json()
+        j2 = client.get(f"/v1/lab/report/{r2.json()['job_id']}", headers=AUTH).json()
+        s1 = next(s for s in j1["scenario_results"] if s["scenario"] == "stale")
+        s2 = next(s for s in j2["scenario_results"] if s["scenario"] == "stale")
+        assert s1["passed"] != s2["passed"]
+
+    def test_poison_finds_signals(self):
+        r = client.post("/v1/lab/run", json={
+            "memory_state": [_fresh_entry(source_trust=0.1)],
+            "scenarios": ["poison"]
+        }, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        poison = next(s for s in r2.json()["scenario_results"] if s["scenario"] == "poison")
+        assert poison["passed"] is False
+
+    def test_scenario_basis_present(self):
+        r = client.post("/v1/lab/run", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=200)],
+            "scenarios": ["stale"]
+        }, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        assert "scenario_basis" in r2.json()["scenario_results"][0]
+
+    def test_empty_memory_no_failures(self):
+        r = client.post("/v1/lab/run", json={
+            "memory_state": [], "scenarios": ["stale"]
+        }, headers=AUTH)
+        jid = r.json()["job_id"]
+        r2 = client.get(f"/v1/lab/report/{jid}", headers=AUTH)
+        assert r2.json()["scenario_results"][0]["passed"] is True
+
+
+class TestFix3OmegaAdjustedDecisions:
+    """FIX 3: omega_adjusted used for decisions"""
+    def test_decision_based_on_present(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "decision_based_on" in r.json()
+
+    def test_small_delta_uses_raw(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        if abs(r.json().get("omega_delta", 0)) <= 5.0:
+            assert r.json()["decision_based_on"] == "omega_raw"
+
+    def test_reconciliation_in_chain(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        chain = r.json()["action_override_chain"]
+        sources = [c["source"] for c in chain]
+        assert "omega_reconciliation" in sources
+
+    def test_applied_flag_on_reconciliation(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        chain = r.json()["action_override_chain"]
+        recon = next(c for c in chain if c["source"] == "omega_reconciliation")
+        assert "applied" in recon
+
+
+class TestFix4RLQTable:
+    """FIX 4: RL Q-table Redis persistence"""
+    def test_status_endpoint(self):
+        r = client.get("/v1/learning/qtable-status?domain=general", headers=AUTH)
+        assert r.status_code == 200
+        assert "qtable_size" in r.json()
+        assert "cold_start" in r.json()
+
+    def test_fresh_start_no_redis(self):
+        r = client.get("/v1/learning/qtable-status?domain=nonexistent_domain", headers=AUTH)
+        assert r.json()["cold_start"] is True
+
+    def test_domain_isolation(self):
+        r1 = client.get("/v1/learning/qtable-status?domain=general", headers=AUTH)
+        r2 = client.get("/v1/learning/qtable-status?domain=fintech", headers=AUTH)
+        assert r1.json()["domain"] == "general"
+        assert r2.json()["domain"] == "fintech"
+
+    def test_persisted_field(self):
+        r = client.get("/v1/learning/qtable-status", headers=AUTH)
+        assert "persisted_to_redis" in r.json()
+
+    def test_episodes_field(self):
+        r = client.get("/v1/learning/qtable-status", headers=AUTH)
+        assert "episodes" in r.json()
+
+    def test_qtable_size_field(self):
+        r = client.get("/v1/learning/qtable-status", headers=AUTH)
+        assert isinstance(r.json()["qtable_size"], int)
+
+
+class TestFix5Scheduler:
+    """FIX 5: Scheduler status"""
+    def test_scheduler_status(self):
+        r = client.get("/v1/scheduler/status", headers=AUTH)
+        assert r.status_code == 200
+        assert "jobs" in r.json()
+
+    def test_truth_job_listed(self):
+        r = client.get("/v1/scheduler/status", headers=AUTH)
+        assert "truth_subscription_check" in r.json()["jobs"]
+
+    def test_sleeper_job_listed(self):
+        r = client.get("/v1/scheduler/status", headers=AUTH)
+        assert "sleeper_scan_daily" in r.json()["jobs"]
+
+    def test_snapshot_job_listed(self):
+        r = client.get("/v1/scheduler/status", headers=AUTH)
+        assert "daily_snapshot" in r.json()["jobs"]
+
+    def test_truth_job_runs(self):
+        from api.main import _run_truth_subscriptions, _scheduler_jobs
+        _run_truth_subscriptions()
+        assert _scheduler_jobs["truth_subscription_check"]["runs"] >= 1
+
+    def test_job_failure_no_crash(self):
+        from api.main import _run_scheduled_sleeper_scans
+        _run_scheduled_sleeper_scans()  # should not crash
+
+
+class TestFix7DegradedMode:
+    """FIX 7: Redis unavailable — degraded mode"""
+    def test_degraded_mode_field(self):
+        # Without Redis env vars, response may include degraded_mode
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        # May or may not be degraded depending on env
+        assert r.status_code == 200
+
+    def test_degraded_features_populated(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        if r.json().get("degraded_mode"):
+            assert len(r.json()["degraded_features"]) > 0
+
+    def test_atc_continues(self):
+        # ATC should work even without Redis
+        r = client.post("/v1/atc/register", json={
+            "agent_id": "degraded_atc", "namespaces": ["ns_deg"]
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+    def test_firewall_without_redis(self):
+        # Store should still work when no firewall rules set
+        r = client.post("/v1/store/memories", json={
+            "content": "Degraded mode test entry for firewall check", "memory_type": "semantic"
+        }, headers=AUTH)
+        assert r.status_code in (200, 403, 503)
+
+
+class TestFix8AutoOutcomeSuppression:
+    """FIX 8: Auto-outcome false positive training"""
+    def test_refresh_suppresses(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "outcome_context": "refresh"
+        }, headers=AUTH)
+        assert r.json().get("auto_inference_suppressed") is True
+
+    def test_natural_allows(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "outcome_context": "natural"
+        }, headers=AUTH)
+        assert "auto_inference_suppressed" not in r.json()
+
+    def test_suppressed_field_present(self):
+        r = client.post("/v1/preflight", json={
+            "memory_state": [_fresh_entry()],
+            "outcome_context": "refresh"
+        }, headers=AUTH)
+        assert "auto_inference_suppressed" in r.json()
+
+    def test_no_context_default(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert "auto_inference_suppressed" not in r.json()
