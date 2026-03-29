@@ -69,15 +69,15 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
-  background-color: #faf9f6;
-  color: #1a1c1a;
+  background-color: #ffffff;
+  color: #000000;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 body {
-  background-color: #faf9f6;
-  color: #1a1c1a;
+  background-color: #ffffff;
+  color: #000000;
   font-family: 'Inter', sans-serif;
   line-height: 1.6;
 }
