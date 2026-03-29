@@ -16,7 +16,7 @@ const howSteps = [
 
 export default function DecidePage() {
   return (
-    <div style={{ backgroundColor: "#ffffff" }}>
+    <div style={{ backgroundColor: "#ffffff", paddingTop: "5rem" }}>
       <div style={{ maxWidth: "80rem", margin: "0 auto", padding: "5rem 2rem" }}>
         <p className="font-bold tracking-widest text-xs uppercase mb-4" style={{ color: "#c9a962" }}>DECIDE</p>
         <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-black mb-4" style={{ fontFamily: "'Manrope', sans-serif" }}>What the agent should do.</h1>
