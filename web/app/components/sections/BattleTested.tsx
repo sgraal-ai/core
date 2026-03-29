@@ -38,6 +38,9 @@ export function BattleTested() {
           </div>
         </div>
       </div>
+      <p className="text-sm text-muted text-center italic mt-4">
+        When memory governance is visible, manipulation becomes accountable.
+      </p>
     </section>
   );
 }

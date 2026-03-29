@@ -11,7 +11,8 @@ export function Navbar() {
           <a href="https://x.com/sgraal_ai" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition">X</a>
         </div>
       </div>
-      <a href="#pricing" className="bg-gold text-background font-semibold text-sm px-5 py-2 rounded-lg hover:bg-gold-dim transition">
+      <a href="#pricing" className="bg-gold text-background font-semibold text-sm px-5 py-2 rounded-lg hover:bg-gold-dim transition"
+        title="No signup required — demo key works immediately" aria-label="Get API Key — no signup required, demo key works immediately">
         Get API Key
       </a>
     </nav>
