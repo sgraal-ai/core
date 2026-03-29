@@ -38,8 +38,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <a href="https://x.com/sgraal_ai" target="_blank" rel="noopener noreferrer" className="text-[#6b6b6b] hover:text-[#1a1c1a] transition-colors">
                 <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
               </a>
-              <a href="/playground" className="hidden sm:inline-block px-5 py-2 text-sm font-medium hover:bg-surface-container-high rounded-md transition-colors">Playground</a>
-              <a href="https://app.sgraal.com" className="gold-gradient-bg px-5 py-2 text-sm font-semibold text-white rounded-md">Get API Key</a>
+              <a href="/playground" className="hidden sm:inline-block px-5 py-2 text-sm font-medium rounded-md transition-colors" style={{ color: '#1a1c1a' }}>Playground</a>
+              <a href="https://app.sgraal.com" className="px-5 py-2 text-sm font-semibold text-white rounded-md" style={{ background: 'linear-gradient(135deg, #745b1c 0%, #c9a962 100%)' }}>Get API Key</a>
             </div>
           </div>
         </nav>

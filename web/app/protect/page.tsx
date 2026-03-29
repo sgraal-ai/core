@@ -15,8 +15,8 @@ const howSteps = [
 
 export default function ProtectPage() {
   return (
-    <div className="bg-background">
-      <div className="max-w-4xl mx-auto py-20 px-8">
+    <div style={{ backgroundColor: "#faf9f6" }}>
+      <div className="max-w-7xl mx-auto px-8 md:px-16 py-20">
         <p className="text-primary-container font-bold tracking-widest text-xs uppercase mb-4">PROTECT</p>
         <h1 className="font-headline text-4xl md:text-5xl font-extrabold tracking-tighter text-on-background mb-4">Stop threats before they act.</h1>
         <p className="text-secondary text-lg mb-16">Memory poisoning, prompt injection, hallucination risk, tamper detection — stopped before they reach your agent.</p>
@@ -34,18 +34,18 @@ export default function ProtectPage() {
           </div>
         </div>
       </div>
-      <div className="max-w-4xl mx-auto px-8 py-20">
+      <div className="max-w-7xl mx-auto px-8 md:px-16 py-20">
         <h2 className="font-headline text-2xl font-bold text-on-background mb-10">Capabilities</h2>
         <div className="space-y-6">
           {capabilities.map((c) => (
-            <div key={c.title} className="bg-surface-container-lowest rounded-xl shadow-[0_12px_40px_rgba(11,15,20,0.04)] border border-outline-variant/10 p-8">
+            <div key={c.title} className="p-8 rounded-xl flex flex-col" style={{ backgroundColor: "#ffffff", boxShadow: "0 4px 24px rgba(11,15,20,0.08)", border: "1px solid rgba(208,197,180,0.2)" }}>
               <p className="text-primary-container font-bold font-headline mb-2">{c.title}</p>
               <p className="text-secondary text-sm leading-relaxed">{c.description}</p>
             </div>
           ))}
         </div>
       </div>
-      <div className="max-w-4xl mx-auto px-8 pb-8">
+      <div className="max-w-7xl mx-auto px-8 md:px-16 pb-8">
         <div className="bg-[#0b0f14] rounded-xl p-8">
           <p className="text-[#6b6b6b] text-xs mb-4">Integration</p>
           <pre className="text-sm overflow-x-auto leading-relaxed text-[#e2e8f0]">{`# Write firewall — block before storage
@@ -57,7 +57,7 @@ if result.firewall_blocked:
     print(result.block_reason)`}</pre>
         </div>
       </div>
-      <div className="bg-surface-container-low px-8 py-20 text-center">
+      <div className="px-8 md:px-16 py-20 text-center" style={{ backgroundColor: "#f4f3f0" }}>
         <p className="font-headline text-2xl font-bold text-on-background mb-6">Ready to protect your agent&apos;s memory?</p>
         <a href="https://app.sgraal.com" className="gold-gradient-bg px-8 py-4 text-lg font-bold text-white rounded-md inline-block">Get API Key</a>
       </div>

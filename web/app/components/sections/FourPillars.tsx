@@ -23,24 +23,25 @@ const pillars = [
 
 export function FourPillars() {
   return (
-    <section className="bg-surface-container-low px-8 md:px-16 py-24 lg:py-32">
-      <div className="max-w-7xl mx-auto">
-        <h2 className="font-headline text-3xl md:text-4xl font-bold tracking-tight text-center text-on-background mb-4">
-          One API. 15 capabilities. <span className="text-primary-container">Four pillars</span> of memory governance.
+    <section style={{ backgroundColor: '#f4f3f0' }}>
+      <div className="max-w-7xl mx-auto px-8 md:px-16 py-24">
+        <h2 className="font-headline text-3xl md:text-4xl font-bold tracking-tight text-center mb-4" style={{ color: '#1a1c1a' }}>
+          One API. 15 capabilities. <span style={{ color: '#c9a962' }}>Four pillars</span> of memory governance.
         </h2>
-        <p className="text-center text-secondary max-w-2xl mx-auto mb-24">
+        <p className="text-center max-w-2xl mx-auto mb-16" style={{ color: '#5e5e5e' }}>
           Before every agent action, Sgraal decides, protects, complies, and scales.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
           {pillars.map((p) => (
             <a key={p.title} href={p.href}
-              className="bg-surface-container-lowest p-8 rounded-xl shadow-[0_12px_40px_rgba(11,15,20,0.04)] border border-outline-variant/10 group hover:-translate-y-1 transition-transform flex flex-col">
-              <p className="text-primary-container font-bold tracking-widest text-xs mb-4 block">{p.title}</p>
-              <p className="font-headline text-lg font-bold text-on-surface mb-4">{p.subtitle}</p>
-              <ul className="text-sm text-secondary leading-relaxed space-y-3 mb-8 flex-1">
+              className="p-8 rounded-xl hover:-translate-y-1 transition-transform flex flex-col group"
+              style={{ backgroundColor: '#ffffff', boxShadow: '0 4px 24px rgba(11,15,20,0.08)', border: '1px solid rgba(208,197,180,0.2)' }}>
+              <p className="font-bold tracking-widest text-xs mb-4 block" style={{ color: '#c9a962' }}>{p.title}</p>
+              <p className="font-headline text-lg font-bold mb-4" style={{ color: '#1a1c1a' }}>{p.subtitle}</p>
+              <ul className="text-sm leading-relaxed space-y-3 mb-8 flex-1" style={{ color: '#5e5e5e' }}>
                 {p.capabilities.map((c) => <li key={c}>· {c}</li>)}
               </ul>
-              <span className="text-primary font-semibold text-sm mt-6 block">Explore {p.title} →</span>
+              <span className="font-semibold text-sm mt-6 block" style={{ color: '#745b1c' }}>Explore {p.title} →</span>
             </a>
           ))}
         </div>
