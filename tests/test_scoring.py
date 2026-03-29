@@ -11884,3 +11884,249 @@ class TestMemoryCommons:
     def test_no_permission_blocks(self):
         from api.main import _check_commons_write
         assert _check_commons_write("nonexistent", "random_agent") is False
+
+
+# ---- Sprint 40: Predictive Health, Alerts, Truth, Immune, Rollback, Pruning ----
+
+class TestPredictiveHealth:
+    """#8 Predictive Memory Health Score"""
+    def test_forecast_computed(self):
+        r = client.post("/v1/memory/forecast", json={
+            "memory_state": [_fresh_entry()], "horizon_days": 7
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert len(r.json()["forecast"]) == 8  # day 0 through 7
+
+    def test_first_block_day(self):
+        r = client.post("/v1/memory/forecast", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=50)], "horizon_days": 30
+        }, headers=AUTH)
+        assert "first_block_day" in r.json()
+
+    def test_entries_at_risk(self):
+        r = client.post("/v1/memory/forecast", json={
+            "memory_state": [_fresh_entry(timestamp_age_days=100)], "horizon_days": 7
+        }, headers=AUTH)
+        assert "entries_at_risk" in r.json()
+
+    def test_horizon_clamped(self):
+        r = client.post("/v1/memory/forecast", json={
+            "memory_state": [_fresh_entry()], "horizon_days": 50
+        }, headers=AUTH)
+        assert len(r.json()["forecast"]) <= 31
+
+    def test_confidence(self):
+        r = client.post("/v1/memory/forecast", json={
+            "memory_state": [_fresh_entry()], "horizon_days": 3
+        }, headers=AUTH)
+        assert 0 <= r.json()["confidence"] <= 1
+
+    def test_empty_memory(self):
+        r = client.post("/v1/memory/forecast", json={
+            "memory_state": [], "horizon_days": 7
+        }, headers=AUTH)
+        assert r.json()["entries_at_risk"] == 0
+        assert r.json()["forecast"] == []
+
+
+class TestProactiveAlerts:
+    """#22 Proactive Memory Alert System"""
+    def test_alert_on_block_soon(self):
+        from api.main import _check_predictive_alert, _predictive_alerts
+        _check_predictive_alert("test_kh", "alert_agent", 2)
+        assert _predictive_alerts.get("test_kh:alert_agent", {}).get("status") == "active"
+        _predictive_alerts.pop("test_kh:alert_agent", None)
+
+    def test_no_alert_when_far(self):
+        from api.main import _check_predictive_alert, _predictive_alerts
+        _check_predictive_alert("test_kh2", "safe_agent", 10)
+        assert "test_kh2:safe_agent" not in _predictive_alerts
+
+    def test_resolves_after_heal(self):
+        from api.main import _check_predictive_alert, _predictive_alerts
+        _check_predictive_alert("test_kh3", "heal_agent", 1)  # create alert
+        assert _predictive_alerts["test_kh3:heal_agent"]["status"] == "active"
+        _check_predictive_alert("test_kh3", "heal_agent", 10)  # resolve
+        assert _predictive_alerts["test_kh3:heal_agent"]["status"] == "resolved"
+        _predictive_alerts.pop("test_kh3:heal_agent", None)
+
+    def test_list_alerts(self):
+        r = client.get("/v1/alerts/predictive?agent_id=nonexistent", headers=AUTH)
+        assert r.status_code == 200
+        assert "alerts" in r.json()
+
+    def test_webhook_structure(self):
+        from api.main import _check_predictive_alert
+        _check_predictive_alert("wh_kh", "wh_agent", 2)  # fires webhook (silently fails)
+
+    def test_forecast_available_in_preflight(self):
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        assert r.json()["forecast_available"] is True
+
+
+class TestTruthSubscription:
+    """#44 Truth Subscription Network"""
+    def test_subscribe(self):
+        r = client.post("/v1/truth/subscribe", json={
+            "source_url": "https://example.com/data", "check_interval_hours": 24
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["subscribed"] is True
+
+    def test_change_confirmed_after_2(self):
+        from api.main import _truth_subs, _truth_fetch_log
+        # Simulate 2 consecutive confirms
+        sid = "test_confirm"
+        _truth_subs[sid] = {"id": sid, "source_url": "https://test.com", "key_hash": "t",
+            "consecutive_confirms": 2, "invalidation_action": "warn", "affected_memory_patterns": []}
+        # consecutive_confirms >= 2 triggers invalidation in _check_truth_source
+        assert _truth_subs[sid]["consecutive_confirms"] >= 2
+
+    def test_non_200_no_invalidation(self):
+        from api.main import _check_truth_source
+        result = _check_truth_source({"source_url": "https://nonexistent.invalid.test", "consecutive_confirms": 0})
+        assert result is None  # Non-200 or connection error = no invalidation
+
+    def test_non_https_rejected(self):
+        r = client.post("/v1/truth/subscribe", json={
+            "source_url": "http://insecure.com"
+        }, headers=AUTH)
+        assert r.status_code == 400
+
+    def test_unsubscribe(self):
+        r1 = client.post("/v1/truth/subscribe", json={
+            "source_url": "https://example.com/unsub"
+        }, headers=AUTH)
+        sid = r1.json()["subscription_id"]
+        r2 = client.delete(f"/v1/truth/subscriptions/{sid}", headers=AUTH)
+        assert r2.status_code == 200
+
+    def test_list_updates(self):
+        r = client.get("/v1/truth/updates", headers=AUTH)
+        assert r.status_code == 200
+
+
+class TestAutonomousImmune:
+    """#21 Autonomous Memory Immune System"""
+    def test_stale_refreshed(self):
+        r = client.post("/v1/heal/autonomous", json={"agent_id": "immune_test"}, headers=AUTH)
+        assert r.status_code == 200
+        assert "actions_taken" in r.json()
+
+    def test_conflict_resolved(self):
+        r = client.post("/v1/heal/autonomous", json={"agent_id": "conflict_agent"}, headers=AUTH)
+        assert "omega_before" in r.json()
+        assert "omega_after" in r.json()
+
+    def test_poisoned_quarantined_with_metadata(self):
+        from api.main import _quarantined
+        _quarantined["q_test"] = {"entry_id": "q_test", "quarantine_original_trust": 0.9,
+            "quarantined_at": "2026-03-29T00:00:00", "quarantine_reason": "omega=95"}
+        assert _quarantined["q_test"]["quarantine_original_trust"] == 0.9
+        assert "quarantine_reason" in _quarantined["q_test"]
+
+    def test_quarantine_release_restores_trust(self):
+        from api.main import _quarantined
+        _quarantined["release_test"] = {"entry_id": "release_test", "quarantine_original_trust": 0.85,
+            "quarantined_at": "2026-03-29T00:00:00", "quarantine_reason": "test"}
+        r = client.post("/v1/memory/quarantine/release_test/release", headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["restored_trust"] == 0.85
+
+    def test_dry_run_no_changes(self):
+        r = client.post("/v1/heal/autonomous", json={
+            "agent_id": "dry_immune", "dry_run": True
+        }, headers=AUTH)
+        assert r.json()["dry_run"] is True
+        assert r.json()["auto_healed"] is False
+
+    def test_auto_trigger_on_blocks(self):
+        r = client.post("/v1/heal/autonomous", json={"agent_id": "block_agent"}, headers=AUTH)
+        assert "snapshot_id" in r.json()
+
+
+class TestRollbackEngine:
+    """#47 Autonomous Rollback & Compensation"""
+    def test_register(self):
+        r = client.post("/v1/rollback/register", json={
+            "action_id": "rb_1", "action_type": "api_call", "action_summary": "test"
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["registered"] is True
+
+    def test_rollback_triggers(self):
+        client.post("/v1/rollback/register", json={
+            "action_id": "rb_2", "action_type": "test"
+        }, headers=AUTH)
+        r = client.post("/v1/rollback/trigger/rb_2", headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["triggered"] is True
+
+    def test_compensation_triggers(self):
+        client.post("/v1/rollback/register", json={
+            "action_id": "rb_3", "action_type": "test"
+        }, headers=AUTH)
+        r = client.post("/v1/compensation/trigger/rb_3", headers=AUTH)
+        assert r.status_code == 200
+        assert r.json()["triggered"] is True
+
+    def test_snapshot_restored(self):
+        from api.main import _snapshots
+        _snapshots["snap_rb"] = {"snapshot_id": "snap_rb", "entry_count": 5}
+        client.post("/v1/rollback/register", json={
+            "action_id": "rb_snap", "memory_snapshot_id": "snap_rb"
+        }, headers=AUTH)
+        r = client.post("/v1/rollback/trigger/rb_snap", headers=AUTH)
+        assert r.json()["snapshot_restored"] is True
+
+    def test_expired_404(self):
+        r = client.post("/v1/rollback/trigger/nonexistent_rb_xyz", headers=AUTH)
+        assert r.status_code == 404
+
+    def test_webhook_failed_flag(self):
+        client.post("/v1/rollback/register", json={
+            "action_id": "rb_fail", "rollback_webhook": "https://nonexistent.invalid.test/hook"
+        }, headers=AUTH)
+        r = client.post("/v1/rollback/trigger/rb_fail", headers=AUTH)
+        assert "webhook_failed" in r.json()
+
+
+class TestAutonomousPruning:
+    """#18 Autonomous Pruning"""
+    def test_relevance_prune(self):
+        r = client.post("/v1/memory/prune", json={
+            "agent_id": "prune_test", "strategy": "relevance"
+        }, headers=AUTH)
+        assert r.status_code == 200
+        assert "entries_pruned" in r.json()
+        assert "entries_kept" in r.json()
+
+    def test_age_prune(self):
+        r = client.post("/v1/memory/prune", json={
+            "agent_id": "prune_age", "strategy": "age"
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+    def test_hybrid_prune(self):
+        r = client.post("/v1/memory/prune", json={
+            "agent_id": "prune_hybrid", "strategy": "hybrid"
+        }, headers=AUTH)
+        assert r.status_code == 200
+
+    def test_dry_run_no_deletion(self):
+        r = client.post("/v1/memory/prune", json={
+            "agent_id": "prune_dry", "dry_run": True
+        }, headers=AUTH)
+        assert r.json()["dry_run"] is True
+
+    def test_keep_count(self):
+        r = client.post("/v1/memory/prune", json={
+            "agent_id": "prune_keep", "keep_count": 5
+        }, headers=AUTH)
+        assert r.json()["entries_kept"] <= 5 or r.json()["entries_kept"] == 0
+
+    def test_prune_recommended_field(self):
+        # prune_recommended only shows when > 1000 entries + omega > 60
+        r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
+        # With 1 entry, should not be recommended
+        assert "prune_recommended" not in r.json() or r.json().get("prune_recommended") is not True

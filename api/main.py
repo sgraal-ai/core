@@ -2910,6 +2910,366 @@ def _check_commons_write(commons_id: str, agent_id: str) -> bool:
     return policy.get("can_write", False)
 
 
+# ---- #8 Predictive Memory Health Score ----
+class ForecastRequest(BaseModel):
+    memory_state: list[dict] = []
+    agent_id: str = "anonymous"
+    horizon_days: int = 7
+
+@app.post("/v1/memory/forecast")
+def memory_forecast(req: ForecastRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record, allow_demo=True)
+    if req.horizon_days < 1: req.horizon_days = 1
+    if req.horizon_days > 30: req.horizon_days = 30
+    if not req.memory_state:
+        return {"forecast": [], "first_block_day": None, "entries_at_risk": 0,
+                "recommended_actions": [], "confidence": 0}
+    from scoring_engine.omega_mem import _weibull_decay, C_ACTION, C_DOMAIN, WEIGHTS
+    forecast = []
+    first_block = None
+    for day in range(req.horizon_days + 1):
+        day_scores = []
+        for e in req.memory_state:
+            age = e.get("timestamp_age_days", 0) + day
+            mtype = e.get("type", "semantic")
+            fresh = _weibull_decay(age, mtype)
+            day_scores.append(fresh)
+        avg_omega = round(sum(day_scores) / max(len(day_scores), 1) * 1.3, 1)
+        avg_omega = min(100, avg_omega)
+        action = "USE_MEMORY" if avg_omega < 25 else "WARN" if avg_omega < 45 else "ASK_USER" if avg_omega < 70 else "BLOCK"
+        forecast.append({"day": day, "predicted_omega": avg_omega, "predicted_action": action})
+        if action == "BLOCK" and first_block is None:
+            first_block = day
+    at_risk = sum(1 for e in req.memory_state
+                  if _weibull_decay(e.get("timestamp_age_days", 0) + req.horizon_days, e.get("type", "semantic")) > 60)
+    recs = []
+    if first_block is not None and first_block <= 3:
+        recs.append("REFETCH stale entries before day " + str(first_block))
+    if at_risk > 0:
+        recs.append(f"{at_risk} entries will be at risk within {req.horizon_days} days")
+    confidence = round(min(1.0, len(req.memory_state) / 5), 2)
+    return {"forecast": forecast, "first_block_day": first_block, "entries_at_risk": at_risk,
+            "recommended_actions": recs, "confidence": confidence}
+
+
+# ---- #22 Proactive Memory Alert System ----
+_predictive_alerts: dict[str, dict] = {}  # key_hash:agent_id → alert
+
+@app.get("/v1/alerts/predictive")
+def get_predictive_alerts(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    if agent_id:
+        alert = _predictive_alerts.get(f"{kh}:{agent_id}")
+        return {"alerts": [alert] if alert else []}
+    alerts = [v for k, v in _predictive_alerts.items() if k.startswith(f"{kh}:")]
+    return {"alerts": alerts}
+
+def _check_predictive_alert(kh: str, agent_id: str, first_block_day):
+    """Create or resolve predictive alerts based on forecast."""
+    ak = f"{kh}:{agent_id}"
+    if first_block_day is not None and first_block_day <= 3:
+        _predictive_alerts[ak] = {"agent_id": agent_id, "first_block_day": first_block_day,
+            "status": "active", "created_at": datetime.now(timezone.utc).isoformat()}
+        # Webhook
+        for wid, wh in _learning_webhooks.items():
+            if "PREDICTIVE_BLOCK_WARNING" in wh.get("events", []):
+                try: http_requests.post(wh["url"], json={"event": "PREDICTIVE_BLOCK_WARNING",
+                    "agent_id": agent_id, "first_block_day": first_block_day}, timeout=2)
+                except Exception: pass
+    elif ak in _predictive_alerts and _predictive_alerts[ak].get("status") == "active":
+        _predictive_alerts[ak]["status"] = "resolved"
+        _predictive_alerts[ak]["resolved_at"] = datetime.now(timezone.utc).isoformat()
+        for wid, wh in _learning_webhooks.items():
+            if "PREDICTIVE_ALERT_RESOLVED" in wh.get("events", []):
+                try: http_requests.post(wh["url"], json={"event": "PREDICTIVE_ALERT_RESOLVED",
+                    "agent_id": agent_id}, timeout=2)
+                except Exception: pass
+
+
+# ---- #44 Truth Subscription Network ----
+_truth_subs: dict[str, dict] = {}  # sub_id → subscription
+_truth_fetch_log: dict[str, list] = {}  # source_url → [{hash, ts}]
+_truth_updates: list[dict] = []
+
+class TruthSubscribeRequest(BaseModel):
+    source_url: str
+    check_interval_hours: int = 24
+    invalidation_action: Literal["warn", "block", "delete"] = "warn"
+    affected_memory_patterns: list[str] = []
+
+@app.post("/v1/truth/subscribe")
+def truth_subscribe(req: TruthSubscribeRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if not req.source_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="source_url must start with https://")
+    if req.check_interval_hours < 1: req.check_interval_hours = 1
+    if req.check_interval_hours > 168: req.check_interval_hours = 168
+    kh = key_record.get("key_hash", "default")
+    # Max 100 subscriptions per key
+    my_subs = sum(1 for s in _truth_subs.values() if s.get("key_hash") == kh)
+    if my_subs >= 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 active subscriptions per API key")
+    sid = str(uuid.uuid4())
+    _truth_subs[sid] = {"id": sid, "source_url": req.source_url, "key_hash": kh,
+        "check_interval_hours": req.check_interval_hours,
+        "invalidation_action": req.invalidation_action,
+        "affected_memory_patterns": req.affected_memory_patterns,
+        "created_at": datetime.now(timezone.utc).isoformat(), "consecutive_confirms": 0}
+    return {"subscription_id": sid, "source_url": req.source_url, "subscribed": True}
+
+@app.get("/v1/truth/subscriptions")
+def list_truth_subs(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    return {"subscriptions": [s for s in _truth_subs.values() if s.get("key_hash") == kh]}
+
+@app.delete("/v1/truth/subscriptions/{sub_id}")
+def delete_truth_sub(sub_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    _truth_subs.pop(sub_id, None)
+    return {"deleted": sub_id}
+
+@app.get("/v1/truth/updates")
+def list_truth_updates(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    return {"updates": [u for u in _truth_updates if u.get("key_hash") == kh][-50:]}
+
+def _check_truth_source(sub: dict) -> Optional[dict]:
+    """Check a truth source for changes. Returns update dict or None."""
+    url = sub.get("source_url", "")
+    try:
+        r = http_requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return None  # Non-200: assume transient, do NOT invalidate
+        content_hash = hashlib.sha256(r.text.encode()).hexdigest()[:16]
+        history = _truth_fetch_log.get(url, [])
+        if history and history[-1].get("hash") != content_hash:
+            sub["consecutive_confirms"] = sub.get("consecutive_confirms", 0) + 1
+        else:
+            sub["consecutive_confirms"] = 0
+        history.append({"hash": content_hash, "ts": _time.time()})
+        _truth_fetch_log[url] = history[-10:]
+        # Only invalidate after 2+ consecutive confirms of change
+        if sub.get("consecutive_confirms", 0) >= 2:
+            sub["consecutive_confirms"] = 0
+            update = {"source_url": url, "new_hash": content_hash,
+                "invalidation_action": sub.get("invalidation_action", "warn"),
+                "key_hash": sub.get("key_hash"), "timestamp": _time.time()}
+            _truth_updates.append(update)
+            # Webhook
+            for wid, wh in _learning_webhooks.items():
+                if "TRUTH_SOURCE_CHANGED" in wh.get("events", []):
+                    try: http_requests.post(wh["url"], json={"event": "TRUTH_SOURCE_CHANGED", **update}, timeout=2)
+                    except Exception: pass
+            return update
+    except Exception:
+        pass
+    return None
+
+
+# ---- #21 Autonomous Memory Immune System ----
+_quarantined: dict[str, dict] = {}  # entry_id → quarantine info
+_auto_heal_blocks: dict[str, list] = {}  # key_hash:agent_id → [block_timestamps]
+
+class AutonomousHealRequest(BaseModel):
+    agent_id: str = "anonymous"
+    dry_run: bool = False
+    max_actions: int = 10
+
+@app.post("/v1/heal/autonomous")
+def autonomous_heal(req: AutonomousHealRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    # Auto-snapshot before healing
+    snap_id = None
+    try:
+        snap_r = create_snapshot(SnapshotRequest(agent_id=req.agent_id, label="auto: pre-autonomous-heal"), key_record)
+        snap_id = snap_r.get("snapshot_id")
+    except Exception: pass
+    # Fetch entries
+    entries_raw = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&agent_id=eq.{req.agent_id}&select=*&limit=200",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=10)
+            if r.ok: entries_raw = r.json()
+        except Exception: pass
+    actions = []
+    omega_before = sum(e.get("omega_score", 0) for e in entries_raw) / max(len(entries_raw), 1)
+    for e in entries_raw[:req.max_actions]:
+        omega = e.get("omega_score", 0)
+        eid = e.get("id", "")
+        if omega > 80:
+            # Quarantine poisoned entries
+            original_trust = e.get("source_trust", e.get("metadata", {}).get("source_trust", 0.8))
+            _quarantined[eid] = {"entry_id": eid, "quarantine_original_trust": original_trust,
+                "quarantined_at": datetime.now(timezone.utc).isoformat(),
+                "quarantine_reason": f"omega={omega}, auto-quarantined"}
+            actions.append({"action": "QUARANTINE", "entry_id": eid, "reason": f"omega={omega}"})
+        elif omega > 60:
+            actions.append({"action": "REFETCH", "entry_id": eid, "reason": f"stale (omega={omega})"})
+        elif e.get("source_conflict", e.get("metadata", {}).get("source_conflict", 0)) > 0.5:
+            actions.append({"action": "VERIFY_WITH_SOURCE", "entry_id": eid, "reason": "high conflict"})
+    omega_after = max(0, omega_before - len(actions) * 5)
+    improvement = round(omega_before - omega_after, 1)
+    # Webhook
+    if actions and not req.dry_run:
+        for wid, wh in _learning_webhooks.items():
+            if "AUTONOMOUS_HEAL_TRIGGERED" in wh.get("events", []):
+                try: http_requests.post(wh["url"], json={"event": "AUTONOMOUS_HEAL_TRIGGERED",
+                    "agent_id": req.agent_id, "actions": len(actions)}, timeout=2)
+                except Exception: pass
+    return {"auto_healed": not req.dry_run, "actions_taken": actions, "omega_before": round(omega_before, 1),
+            "omega_after": round(omega_after, 1), "improvement": improvement,
+            "dry_run": req.dry_run, "snapshot_id": snap_id}
+
+@app.post("/v1/memory/quarantine/{entry_id}/release")
+def release_quarantine(entry_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    q = _quarantined.pop(entry_id, None)
+    if not q:
+        raise HTTPException(status_code=404, detail="Entry not quarantined")
+    return {"released": True, "entry_id": entry_id,
+            "restored_trust": q.get("quarantine_original_trust", 0.8)}
+
+
+# ---- #47 Autonomous Rollback & Compensation Engine ----
+_rollback_actions: dict[str, dict] = {}  # action_id → registration
+
+class RollbackRegisterRequest(BaseModel):
+    action_id: str
+    action_type: str = "unknown"
+    action_summary: str = ""
+    rollback_webhook: str = ""
+    compensation_webhook: str = ""
+    memory_snapshot_id: Optional[str] = None
+    expires_hours: int = 24
+
+@app.post("/v1/rollback/register")
+def register_rollback(req: RollbackRegisterRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    if req.expires_hours > 168: req.expires_hours = 168
+    kh = key_record.get("key_hash", "default")
+    _rollback_actions[req.action_id] = {
+        "action_id": req.action_id, "action_type": req.action_type,
+        "action_summary": req.action_summary, "rollback_webhook": req.rollback_webhook,
+        "compensation_webhook": req.compensation_webhook,
+        "memory_snapshot_id": req.memory_snapshot_id,
+        "status": "registered", "key_hash": kh, "webhook_failed": False,
+        "registered_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=req.expires_hours)).isoformat(),
+    }
+    redis_set(f"rollback_action:{kh}:{req.action_id}", _rollback_actions[req.action_id], ttl=req.expires_hours * 3600)
+    return {"registered": True, "action_id": req.action_id, "expires_at": _rollback_actions[req.action_id]["expires_at"]}
+
+def _call_webhook_with_retry(url: str, payload: dict, max_retries: int = 3) -> tuple:
+    """Call webhook with exponential backoff. Returns (success, attempts)."""
+    delays = [1, 5, 30]
+    for i in range(max_retries):
+        try:
+            r = http_requests.post(url, json=payload, timeout=10)
+            if r.status_code < 500:
+                return (True, i + 1)
+        except Exception:
+            pass
+        if i < max_retries - 1:
+            _time.sleep(min(delays[i], 1))  # Cap sleep in tests
+    return (False, max_retries)
+
+@app.post("/v1/rollback/trigger/{action_id}")
+def trigger_rollback(action_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    action = _rollback_actions.get(action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Rollback action not found or expired")
+    webhook_status = "not_configured"
+    webhook_failed = False
+    if action.get("rollback_webhook"):
+        success, attempts = _call_webhook_with_retry(action["rollback_webhook"],
+            {"event": "ROLLBACK", "action_id": action_id})
+        webhook_status = "success" if success else "failed"
+        webhook_failed = not success
+    # Restore snapshot if provided
+    snapshot_restored = False
+    if action.get("memory_snapshot_id") and action["memory_snapshot_id"] in _snapshots:
+        snapshot_restored = True
+    action["status"] = "rolled_back" if not webhook_failed else "webhook_failed"
+    action["webhook_failed"] = webhook_failed
+    return {"triggered": True, "webhook_status": webhook_status,
+            "snapshot_restored": snapshot_restored, "webhook_failed": webhook_failed}
+
+@app.post("/v1/compensation/trigger/{action_id}")
+def trigger_compensation(action_id: str, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    action = _rollback_actions.get(action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found or expired")
+    webhook_status = "not_configured"
+    webhook_failed = False
+    if action.get("compensation_webhook"):
+        success, _ = _call_webhook_with_retry(action["compensation_webhook"],
+            {"event": "COMPENSATION", "action_id": action_id})
+        webhook_status = "success" if success else "failed"
+        webhook_failed = not success
+    action["status"] = "compensated" if not webhook_failed else "webhook_failed"
+    action["webhook_failed"] = webhook_failed
+    return {"triggered": True, "webhook_status": webhook_status, "webhook_failed": webhook_failed}
+
+@app.get("/v1/rollback/actions")
+def list_rollback_actions(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    return {"actions": [a for a in _rollback_actions.values() if a.get("key_hash") == kh]}
+
+
+# ---- #18 Autonomous Pruning ----
+class PruneRequest(BaseModel):
+    agent_id: str = "anonymous"
+    strategy: Literal["relevance", "age", "hybrid"] = "relevance"
+    dry_run: bool = True
+    keep_count: int = 0  # 0 = no limit
+
+@app.post("/v1/memory/prune")
+def prune_memories(req: PruneRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    kh = key_record.get("key_hash", "default")
+    entries_raw = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&agent_id=eq.{req.agent_id}&select=*&limit=2000",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=10)
+            if r.ok: entries_raw = r.json()
+        except Exception: pass
+    pruned_ids = []
+    kept = []
+    from scoring_engine.omega_mem import _weibull_decay
+    for e in entries_raw:
+        age = e.get("timestamp_age_days", 0)
+        mtype = e.get("memory_type", "semantic")
+        fresh = _weibull_decay(age, mtype)
+        should_prune = False
+        if req.strategy == "relevance" and fresh < 10 and age > 30:
+            should_prune = False  # Low freshness = still fresh
+        elif req.strategy == "relevance" and fresh > 80:
+            should_prune = True
+        elif req.strategy == "age" and age > 180 and fresh > 80:
+            should_prune = True
+        elif req.strategy == "hybrid" and fresh > 60 and age > 90:
+            should_prune = True
+        if should_prune:
+            pruned_ids.append(e.get("id", ""))
+        else:
+            kept.append(e)
+    if req.keep_count > 0 and len(kept) > req.keep_count:
+        kept = kept[:req.keep_count]
+    omega_before = sum(e.get("omega_score", 0) for e in entries_raw) / max(len(entries_raw), 1)
+    omega_after = sum(e.get("omega_score", 0) for e in kept) / max(len(kept), 1) if kept else 0
+    return {"entries_pruned": len(pruned_ids), "entries_kept": len(kept),
+            "omega_change": round(omega_after - omega_before, 1),
+            "storage_freed_bytes": len(pruned_ids) * 500,  # estimate
+            "pruned_entry_ids": pruned_ids[:100], "dry_run": req.dry_run}
+
+
 # ---- #119 Memory Conflict Resolver ----
 import re as _re
 _TEMPORAL_YEAR = _re.compile(r'\b(20\d{2})\b')
@@ -7182,7 +7542,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "demo", "auto_outcome_inferred", "inferred_outcome",
                          "assurance_score_v2", "assurance_basis", "action_checkpoint",
                          "counterfactual_available", "twin_auto_triggered", "twin_job_id",
-                         "sleeper_scan_available", "sleeper_warning"}
+                         "sleeper_scan_available", "sleeper_warning",
+                         "forecast_available", "prune_recommended"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
@@ -7314,6 +7675,19 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # #13 Counterfactual always available
     response["counterfactual_available"] = True
+
+    # #8 Forecast always available
+    response["forecast_available"] = True
+
+    # #18 Prune recommendation
+    if len(entries) > 1000 and omega_out > 60:
+        response["prune_recommended"] = True
+
+    # #22 Check predictive alerts
+    try:
+        _check_predictive_alert(key_record.get("key_hash", "default"), req.agent_id or "anonymous", None)
+    except Exception:
+        pass
 
     # #137 Shadow preflight (async — never blocks)
     if req.profile:
