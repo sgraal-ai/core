@@ -41,7 +41,7 @@ export default function Home() {
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#c9a962" }} />
               MEMORY GOVERNANCE PROTOCOL
             </div>
-            <h1 style={{ fontSize: "clamp(1.5rem, 4vw, 3rem)", lineHeight: "1.05", fontWeight: 800, letterSpacing: "-0.02em", color: "#000000", marginBottom: "2rem" }}>
+            <h1 style={{ fontSize: "clamp(2.5rem, 5vw, 4rem)", lineHeight: "1.05", fontWeight: 800, letterSpacing: "-0.02em", color: "#000000", marginBottom: "2rem" }}>
               AI agents act on memory. Sgraal decides if that memory is{" "}
               <span style={{ color: "#c9a962" }}>safe to act on.</span>
             </h1>
