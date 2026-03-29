@@ -2755,8 +2755,33 @@ def atc_conflicts(agent_id: str = "", key_record: dict = Depends(verify_api_key)
                 conflicts.append({"agent_id": ov["agent_id"], "overlapping_namespaces": list(overlap)})
     return {"agent_id": agent_id, "conflicts": conflicts}
 
+def _cleanup_expired_holds():
+    """Remove expired holds from in-memory dict and emit ATC_HOLD_EXPIRED webhook."""
+    now = _time.time()
+    expired_keys = []
+    for hk, hv in _atc_holds.items():
+        held_at = hv.get("held_at", now)
+        if now - held_at > 300:  # 300s TTL
+            expired_keys.append(hk)
+    for hk in expired_keys:
+        hold = _atc_holds.pop(hk, {})
+        agent_id = hk.split(":")[-1] if ":" in hk else hk
+        # Emit ATC_HOLD_EXPIRED webhook
+        for wid, wh in _learning_webhooks.items():
+            if "ATC_HOLD_EXPIRED" in wh.get("events", []):
+                try:
+                    http_requests.post(wh["url"], json={
+                        "event": "ATC_HOLD_EXPIRED", "agent_id": agent_id,
+                        "held_at": hold.get("held_at"), "reason": hold.get("reason", "unknown"),
+                    }, timeout=2)
+                except Exception:
+                    pass
+    return len(expired_keys)
+
 @app.get("/v1/atc/status")
 def atc_status(key_record: dict = Depends(verify_api_key)):
+    # Clean up expired holds on every status check
+    _cleanup_expired_holds()
     kh = key_record.get("key_hash", "default")
     agents = [v for k, v in _atc_agents.items() if k.startswith(f"{kh}:")]
     holds = [{"agent_id": k.split(":")[-1], **v} for k, v in _atc_holds.items() if k.startswith(f"{kh}:")]
@@ -3656,7 +3681,7 @@ def token_waste(period_days: int = 30, agent_id: str = "", key_record: dict = De
 _immunity_jobs: dict[str, dict] = {}
 _immunity_certs: dict[str, dict] = {}
 _immunity_active: dict[str, str] = {}  # agent_id → job_id
-_immunity_thorough_last: dict[str, float] = {}  # agent_id → timestamp
+_immunity_thorough_last: dict[str, float] = {}  # key_hash:agent_id → timestamp
 
 class ImmunityCertRequest(BaseModel):
     agent_id: str = "anonymous"
@@ -3672,12 +3697,14 @@ def generate_immunity(req: ImmunityCertRequest, key_record: dict = Depends(verif
         if existing in _immunity_jobs and _immunity_jobs[existing].get("status") == "processing":
             raise HTTPException(status_code=409, detail=_json.dumps(
                 {"error": "certificate_in_progress", "job_id": existing}))
-    # Thorough: max 1 per 7 days
+    # Thorough: max 1 per 7 days per key+agent
+    kh = key_record.get("key_hash", "default")
     if req.level == "thorough":
-        last = _immunity_thorough_last.get(req.agent_id, 0)
+        _thorough_key = f"{kh}:{req.agent_id}"
+        last = _immunity_thorough_last.get(_thorough_key, 0)
         if _time.time() - last < 7 * 86400:
             raise HTTPException(status_code=429, detail="Thorough certificate limited to 1 per 7 days per agent")
-        _immunity_thorough_last[req.agent_id] = _time.time()
+        _immunity_thorough_last[_thorough_key] = _time.time()
     job_id = str(uuid.uuid4())
     cert_id = str(uuid.uuid4())
     _immunity_active[req.agent_id] = job_id
@@ -8254,6 +8281,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # #18 Prune recommendation
     if len(entries) > 1000 and omega_out > 60:
         response["prune_recommended"] = True
+
+    # #43 Cleanup expired ATC holds (piggyback on preflight — most frequent call)
+    try:
+        _cleanup_expired_holds()
+    except Exception:
+        pass
 
     # #22 Check predictive alerts
     try:

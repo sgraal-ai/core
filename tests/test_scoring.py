@@ -12544,12 +12544,12 @@ class TestImmunityCertificate:
     def test_thorough_7day_limit(self):
         import time as _t7
         from api.main import _immunity_thorough_last
-        _immunity_thorough_last["imm_thorough"] = _t7.time()
+        _immunity_thorough_last["None:imm_thorough"] = _t7.time()
         r = client.post("/v1/certificate/generate", json={
             "agent_id": "imm_thorough", "level": "thorough"
         }, headers=AUTH)
         assert r.status_code == 429
-        del _immunity_thorough_last["imm_thorough"]
+        del _immunity_thorough_last["None:imm_thorough"]
 
     def test_score_computed(self):
         r = client.post("/v1/certificate/generate", json={
