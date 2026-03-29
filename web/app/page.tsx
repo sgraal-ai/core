@@ -1,10 +1,10 @@
 "use client";
 
 const pillars = [
-  { label: "DECIDE", title: "What the agent should do.", href: "/decide", items: ["Risk decision (USE_MEMORY / WARN / ASK_USER / BLOCK)", "Full explanation (Entry Shapley · causal graph)", "Repair plan (heal · closed loop · MTTR)", "Time machine (counterfactual · decision twin)", "AI advertising integrity (commercial intent)"] },
-  { label: "PROTECT", title: "Stop threats before they act.", href: "/protect", items: ["Security signals (poisoning · hallucination · tamper)", "Write-time protection (write firewall · sleeper detection)", "Legal & cryptographic layer (forensics · black box · ZK)", "Testing & visualization (red team · immunity certificate)"] },
-  { label: "COMPLY", title: "Meet every regulation. Prove it.", href: "/comply", items: ["Compliance engine (EU AI Act · HIPAA · MiFID2 · Basel4)", "Memory portability (passport · cross-LLM · memory DNS)", "Multi-agent coordination (ATC · court · commons)", "Audit trail & last will (SHA256 · GDPR · SIEM export)"] },
-  { label: "SCALE", title: "Learn, adapt, and grow autonomously.", href: "/scale", items: ["Learning (RL optimization · meta-learning · calibration)", "Integrations (6 SDKs · 14 frameworks · MCP · CLI)", "Autonomous intelligence (predictive heal · rollback · pruning)"] },
+  { label: "DECIDE", title: "Conflict Resolution", href: "/decide", items: ["Temporal decay weighting", "Multi-source consensus", "Uncertainty flagging"] },
+  { label: "PROTECT", title: "Poison Detection", href: "/protect", items: ["Injection filtering", "Bias triangulation", "Adversarial buffer"] },
+  { label: "COMPLY", title: "Policy Guardrails", href: "/comply", items: ["PII isolation", "Regional siloing", "Audit trail exports"] },
+  { label: "SCALE", title: "High Availability", href: "/scale", items: ["< 10ms latency", "Edge deployment", "Global sync"] },
 ];
 
 const badges = ["LangChain", "CrewAI", "AutoGen", "LlamaIndex", "mem0", "MCP", "OpenAI", "Anthropic"];
@@ -18,14 +18,14 @@ const stats = [
 
 export default function Home() {
   return (
-    <>
+    <main className="pt-20">
       {/* HERO */}
-      <section className="relative overflow-hidden px-8 md:px-16 py-16 lg:py-24 flex flex-col items-center text-center max-w-[1440px] mx-auto">
+      <section className="relative overflow-hidden px-8 md:px-16 py-32 lg:py-48 flex flex-col items-center text-center max-w-[1440px] mx-auto">
         <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-surface-container-high border border-outline-variant/20 text-[10px] uppercase tracking-[0.2em] font-bold text-secondary mb-12">
           <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
           MEMORY GOVERNANCE PROTOCOL
         </div>
-        <h1 className="font-headline text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tighter text-on-background max-w-5xl leading-[1.05] mb-8 text-balance">
+        <h1 className="font-headline text-5xl md:text-7xl lg:text-8xl font-extrabold tracking-tighter text-on-background max-w-5xl leading-[1.05] mb-8 text-balance">
           AI agents act on memory. Sgraal decides if that memory is <span className="text-primary-container">safe to act on.</span>
         </h1>
         <p className="text-xl md:text-2xl text-secondary max-w-2xl mb-12 font-light leading-relaxed">
@@ -103,7 +103,7 @@ export default function Home() {
       </section>
 
       {/* HOW IT WORKS */}
-      <section className="bg-background px-8 md:px-16 py-24 lg:py-32">
+      <section className="bg-background px-8 md:px-16 py-32 lg:py-48">
         <div className="max-w-7xl mx-auto">
           <div className="mb-24">
             <p className="text-primary font-semibold text-lg mb-4">Memory poisoning is invisible — <span className="text-primary-container">until Sgraal.</span></p>
@@ -127,7 +127,7 @@ export default function Home() {
       </section>
 
       {/* FOUR PILLARS */}
-      <section className="bg-surface-container-low px-8 md:px-16 py-24 lg:py-32">
+      <section className="bg-surface-container-low px-8 md:px-16 py-32 lg:py-48">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-24 space-y-4">
             <h2 className="font-headline text-4xl md:text-5xl font-bold tracking-tight">One API. 15 capabilities. <span className="text-primary-container">Four pillars</span> of memory governance.</h2>
@@ -143,7 +143,7 @@ export default function Home() {
                     <li key={item} className="flex items-start gap-2"><span className="text-primary text-sm mt-0.5">✓</span> {item}</li>
                   ))}
                 </ul>
-                <a className="text-primary font-semibold text-sm inline-flex items-center gap-1" href={p.href}>Explore {p.label} →</a>
+                <a className="text-primary font-semibold text-sm inline-flex items-center gap-1" href={p.href}>Learn more →</a>
               </div>
             ))}
           </div>
@@ -151,13 +151,14 @@ export default function Home() {
       </section>
 
       {/* SOCIAL PROOF */}
-      <section className="bg-background px-8 md:px-16 py-24 lg:py-32 text-center relative overflow-hidden">
+      <section className="bg-background px-8 md:px-16 py-32 lg:py-48 text-center relative overflow-hidden">
         <div className="max-w-4xl mx-auto relative z-10">
           <div className="text-7xl text-primary-container/20 mb-8 select-none">&ldquo;</div>
           <blockquote className="font-headline text-3xl md:text-5xl font-bold tracking-tight mb-12 italic leading-tight">
             &ldquo;Ran 300+ step regulated test with zero drift.&rdquo;
           </blockquote>
           <div className="flex items-center justify-center gap-3 mb-16">
+            <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuAX0QGm9IOMLHTxZ2M0UpYviPdNPLjgTgAM0c2-8mIf67CozEhdNTu2DVHYclre4e8nWfnl6x2Gnhag1sLVp5uaIFmgEUl3NSqHOapreIjJdYKEVq1jAaSr4Opss-286xvOoldCB2OERUZhGuvAb2ADQnnsmrLLGvTCFDx3UDJBJ892ue0RgqjrCCEOGrv33DWLdiExDuVVekeiiB--pBA3uA4_ln35aZlq9PNkGjMlfDN8y5pwGXLSufAr47w_tm6AN_5_FnpMmA" alt="grok" className="w-10 h-10 rounded-full grayscale" />
             <span className="font-bold text-on-surface">@grok</span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 py-12 border-y border-outline-variant/10">
@@ -187,7 +188,7 @@ export default function Home() {
       </section>
 
       {/* PRICING */}
-      <section id="pricing" className="bg-background px-8 md:px-16 py-24 lg:py-32">
+      <section id="pricing" className="bg-background px-8 md:px-16 py-32 lg:py-48">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-24">
             <h2 className="font-headline text-5xl md:text-6xl font-extrabold tracking-tight mb-6">Simple <span className="text-primary-container">pricing</span></h2>
@@ -201,10 +202,9 @@ export default function Home() {
                 <div className="flex items-baseline gap-1"><span className="text-4xl font-extrabold tracking-tight">$0</span><span className="text-secondary/60 text-sm">/ mo</span></div>
               </div>
               <ul className="space-y-4 mb-12 flex-grow">
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> 10,000 calls / month</li>
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> All core features</li>
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> Demo key — no credit card</li>
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> 10 risk components + repair plan</li>
+                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> 1,000 checks / mo</li>
+                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> Community Support</li>
+                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> Basic Trace Logs</li>
               </ul>
               <a className="w-full py-4 font-bold border-2 border-primary-container text-primary rounded-md hover:bg-primary/5 transition-all text-center block" href="https://app.sgraal.com">Start Free</a>
             </div>
@@ -216,12 +216,12 @@ export default function Home() {
                 <div className="flex items-baseline gap-1"><span className="text-4xl font-extrabold tracking-tight">$0.001</span><span className="text-secondary/60 text-sm">/ call</span></div>
               </div>
               <ul className="space-y-4 mb-12 flex-grow">
-                <li className="flex items-center gap-3 text-sm text-on-surface"><span className="text-primary">✓</span> Webhooks + streaming</li>
-                <li className="flex items-center gap-3 text-sm text-on-surface"><span className="text-primary">✓</span> Compliance profiles</li>
-                <li className="flex items-center gap-3 text-sm text-on-surface"><span className="text-primary">✓</span> Priority support</li>
-
+                <li className="flex items-center gap-3 text-sm text-on-surface"><span className="text-primary">✓</span> Unlimited volume</li>
+                <li className="flex items-center gap-3 text-sm text-on-surface"><span className="text-primary">✓</span> Advanced drift analysis</li>
+                <li className="flex items-center gap-3 text-sm text-on-surface"><span className="text-primary">✓</span> PII filtering (Global)</li>
+                <li className="flex items-center gap-3 text-sm text-on-surface"><span className="text-primary">✓</span> Priority 24/7 support</li>
               </ul>
-              <a className="gold-gradient-bg w-full py-4 font-bold text-white rounded-md shadow-lg shadow-primary/20 hover:brightness-110 transition-all text-center block" href="https://app.sgraal.com">Get API Key</a>
+              <a className="gold-gradient-bg w-full py-4 font-bold text-white rounded-md shadow-lg shadow-primary/20 hover:brightness-110 transition-all text-center block" href="https://app.sgraal.com">Go Pro</a>
             </div>
             {/* ENTERPRISE */}
             <div className="bg-surface-container-lowest p-10 rounded-xl shadow-[0_12px_40px_rgba(11,15,20,0.04)] border border-outline-variant/10 flex flex-col">
@@ -230,15 +230,12 @@ export default function Home() {
                 <div className="flex items-baseline gap-1"><span className="text-4xl font-extrabold tracking-tight">Custom</span></div>
               </div>
               <ul className="space-y-4 mb-12 flex-grow">
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> ZK mode — content never leaves your system</li>
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> SIEM export (Splunk / Datadog / Elastic)</li>
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> On-prem deployment option</li>
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> EU AI Act conformity declaration</li>
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> Memory Immunity Certificate</li>
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> Dedicated SLA + support</li>
-                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> Red Team as a Service</li>
+                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> VPC / On-prem deployment</li>
+                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> Dedicated model tuning</li>
+                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> SOC2 / HIPAA Compliance</li>
+                <li className="flex items-center gap-3 text-sm text-secondary"><span className="text-primary">✓</span> Custom SLA</li>
               </ul>
-              <a className="w-full py-4 font-bold bg-surface-container-highest text-on-surface rounded-md hover:bg-surface-dim transition-all text-center block" href="mailto:contact@sgraal.com">Contact us</a>
+              <a className="w-full py-4 font-bold bg-surface-container-highest text-on-surface rounded-md hover:bg-surface-dim transition-all text-center block" href="mailto:contact@sgraal.com">Contact Sales</a>
             </div>
           </div>
         </div>
@@ -281,6 +278,6 @@ export default function Home() {
           </div>
         </div>
       </footer>
-    </>
+    </main>
   );
 }
