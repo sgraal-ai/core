@@ -44,7 +44,7 @@ const tiers = [
 
 export function Pricing() {
   return (
-    <section id="pricing" className="px-6 py-16 max-w-5xl mx-auto">
+    <section id="pricing" className="px-6 py-14 max-w-5xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
         Simple <span className="text-gold">pricing</span>
       </h2>
@@ -54,7 +54,7 @@ export function Pricing() {
 
       <div className="grid md:grid-cols-3 gap-6">
         {tiers.map((t) => (
-          <div key={t.name} className={`border ${t.border} bg-surface rounded-xl p-8 flex flex-col`}>
+          <div key={t.name} className={`border ${t.border} bg-surface rounded-xl p-8 flex flex-col justify-between`}>
             <p className="font-mono text-gold text-sm tracking-wider uppercase mb-2">{t.name}</p>
             <p className="text-4xl font-bold mb-1">
               {t.price}

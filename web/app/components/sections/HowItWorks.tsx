@@ -11,14 +11,14 @@ const steps = [
   },
   {
     step: "3",
-    title: "The agent acts safely \u2014 or stops.",
-    description: "USE_MEMORY \u00b7 WARN \u00b7 ASK_USER \u00b7 BLOCK. Every decision logged, traced, and explainable.",
+    title: "The agent acts safely — or stops.",
+    description: "USE_MEMORY · WARN · ASK_USER · BLOCK. Every decision logged, traced, and explainable.",
   },
 ];
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="px-6 py-16 max-w-5xl mx-auto">
+    <section id="how-it-works" className="px-6 py-14 max-w-5xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
         How Sgraal <span className="text-gold">works</span>
       </h2>

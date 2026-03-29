@@ -1,11 +1,11 @@
 export const metadata = { title: "DECIDE — Sgraal", description: "Before every memory-based action, get a risk score, a decision, and a full explanation. Under 10ms." };
 
 const capabilities = [
-  { title: "Risk Decision Engine", description: "omega_mem_final: 0\u2013100 risk score. USE_MEMORY / WARN / ASK_USER / BLOCK. Action multiplier: read 0.5\u00d7 \u00b7 irreversible 2.5\u00d7. Assurance score + confidence intervals." },
+  { title: "Risk Decision Engine", description: "omega_mem_final: 0–100 risk score. USE_MEMORY / WARN / ASK_USER / BLOCK. Action multiplier: read 0.5× · irreversible 2.5×. Assurance score + confidence intervals." },
   { title: "Full Explanation", description: "Entry Shapley: which exact memory entry causes the risk. Causal graph: which entry caused drift in another. Natural language explanation in EN/DE/FR for developer, compliance officer, or executive." },
   { title: "Repair Plan", description: "REFRESH / DELETE / VERIFY / KEEP / WAIT per entry. Expected omega after heal. Closed-loop: heal + re-preflight in one call. MTTR prediction: p95 convergence steps." },
-  { title: "Time Machine & Counterfactual", description: "Memory Time Machine: restore to any previous validated state. Counterfactual engine: \u2018what would the decision have been with different memory?\u2019 Decision twin: parallel shadow execution." },
-  { title: "AI Advertising Integrity", description: "commercial_intent score (0\u20131). sponsorship_probability. affiliate_pattern_detected. cross_agent_spread_risk. ad_integrity: PASS / WARN / BLOCK. Detects economically manipulated recommendations." },
+  { title: "Time Machine & Counterfactual", description: "Memory Time Machine: restore to any previous validated state. Counterfactual engine: ‘what would the decision have been with different memory?’ Decision twin: parallel shadow execution." },
+  { title: "AI Advertising Integrity", description: "commercial_intent score (0–1). sponsorship_probability. affiliate_pattern_detected. cross_agent_spread_risk. ad_integrity: PASS / WARN / BLOCK. Detects economically manipulated recommendations." },
 ];
 
 export default function DecidePage() {
@@ -19,8 +19,8 @@ export default function DecidePage() {
       <div className="space-y-6 mb-14">
         {[
           ["Send your memory state and action type", "POST /v1/preflight with memory entries, action_type (read/write/financial/irreversible), and domain."],
-          ["108 models evaluate in parallel", "Freshness decay (Weibull) \u00b7 drift detection (5-method ensemble) \u00b7 provenance \u00b7 conflict \u00b7 causal graph \u00b7 commercial intent."],
-          ["Get a decision + full explanation", "omega_mem_final (0\u2013100) \u00b7 USE_MEMORY / WARN / ASK_USER / BLOCK \u00b7 Entry Shapley attribution \u00b7 repair plan."],
+          ["108 models evaluate in parallel", "Freshness decay (Weibull) · drift detection (5-method ensemble) · provenance · conflict · causal graph · commercial intent."],
+          ["Get a decision + full explanation", "omega_mem_final (0–100) · USE_MEMORY / WARN / ASK_USER / BLOCK · Entry Shapley attribution · repair plan."],
         ].map(([title, desc], i) => (
           <div key={i} className="flex gap-4">
             <span className="w-7 h-7 rounded-full bg-gold text-background flex items-center justify-center font-mono font-bold text-xs shrink-0 mt-0.5">{i + 1}</span>

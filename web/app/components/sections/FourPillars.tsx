@@ -5,10 +5,10 @@ const pillars = [
     subtitle: "What the agent should do.",
     capabilities: [
       "Risk decision (USE_MEMORY / WARN / ASK_USER / BLOCK)",
-      "Full explanation (Entry Shapley \u00b7 causal graph)",
-      "Repair plan (heal \u00b7 closed loop \u00b7 MTTR)",
-      "Time machine (counterfactual \u00b7 decision twin)",
-      "AI advertising integrity (commercial intent \u00b7 sponsorship detection)",
+      "Full explanation (Entry Shapley · causal graph)",
+      "Repair plan (heal · closed loop · MTTR)",
+      "Time machine (counterfactual · decision twin)",
+      "AI advertising integrity (commercial intent · sponsorship detection)",
     ],
     href: "/decide",
   },
@@ -17,10 +17,10 @@ const pillars = [
     title: "PROTECT",
     subtitle: "Stop threats before they act.",
     capabilities: [
-      "Security signals (poisoning \u00b7 hallucination \u00b7 tamper \u00b7 circuit breaker)",
-      "Write-time protection (write firewall \u00b7 sleeper detection)",
-      "Legal & cryptographic layer (forensics \u00b7 black box \u00b7 ZK validation)",
-      "Testing & visualization (red team \u00b7 immunity certificate \u00b7 dashboard)",
+      "Security signals (poisoning · hallucination · tamper · circuit breaker)",
+      "Write-time protection (write firewall · sleeper detection)",
+      "Legal & cryptographic layer (forensics · black box · ZK validation)",
+      "Testing & visualization (red team · immunity certificate · dashboard)",
     ],
     href: "/protect",
   },
@@ -29,10 +29,10 @@ const pillars = [
     title: "COMPLY",
     subtitle: "Meet every regulation. Prove it.",
     capabilities: [
-      "Compliance engine (EU AI Act \u00b7 HIPAA \u00b7 MiFID2 \u00b7 Basel4 \u00b7 FDA \u00b7 GDPR)",
-      "Portability (memory passport \u00b7 cross-LLM \u00b7 memory DNS)",
-      "Multi-agent coordination (ATC \u00b7 court \u00b7 commons)",
-      "Testing & audit trail (immunity certificate \u00b7 synthetic lab)",
+      "Compliance engine (EU AI Act · HIPAA · MiFID2 · Basel4 · FDA · GDPR)",
+      "Portability (memory passport · cross-LLM · memory DNS)",
+      "Multi-agent coordination (ATC · court · commons)",
+      "Testing & audit trail (immunity certificate · synthetic lab)",
     ],
     href: "/comply",
   },
@@ -41,9 +41,9 @@ const pillars = [
     title: "SCALE",
     subtitle: "Learn, adapt, and grow autonomously.",
     capabilities: [
-      "Learning (RL optimization \u00b7 meta-learning \u00b7 calibrated thresholds)",
-      "Integrations (6 SDKs \u00b7 14 frameworks \u00b7 MCP \u00b7 CLI)",
-      "Autonomous intelligence (predictive health \u00b7 autonomous heal \u00b7 rollback \u00b7 pruning)",
+      "Learning (RL optimization · meta-learning · calibrated thresholds)",
+      "Integrations (6 SDKs · 14 frameworks · MCP · CLI)",
+      "Autonomous intelligence (predictive health · autonomous heal · rollback · pruning)",
     ],
     href: "/scale",
   },
@@ -51,7 +51,7 @@ const pillars = [
 
 export function FourPillars() {
   return (
-    <section className="px-6 py-16 max-w-6xl mx-auto">
+    <section className="px-6 py-14 max-w-6xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-3">
         One API. 15 capabilities. <span className="text-gold">Four pillars</span> of memory governance.
       </h2>

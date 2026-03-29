@@ -1,10 +1,10 @@
 export const metadata = { title: "COMPLY — Sgraal", description: "EU AI Act, HIPAA, MiFID2, Basel4, FDA, GDPR — built into every preflight call. Full audit trail. Cryptographic proof." };
 
 const capabilities = [
-  { title: "Compliance Engine", description: "4 built-in profiles: EU AI Act (Article 9, 12, 13), HIPAA \u00a7164.312, MiFID2, Basel4. Non-compliant + irreversible = automatic BLOCK. Conformity score 0\u20131. Declaration template export." },
-  { title: "Memory Portability", description: "Memory Passport: cryptographically signed, portable memory envelope \u2014 provenance, freshness, conflict state, policy flags. Cross-LLM Translator: OpenAI \u2194 Anthropic \u2194 Llama compatible. Memory-DNS: globally unique identifiers (mem://user/123/preference/language). Memory Inheritance: validated memory transfer between agents." },
-  { title: "Multi-agent Coordination", description: "Agent Air Traffic Control (ATC): which agent writes to which namespace, conflict prevention. Memory Court: formal causal inference + Z3 SMT solver for contradicting agents. Memory Commons: shared organizational memory graph with RBAC. Cross-agent Firewall: agent A writes \u2192 Sgraal validates \u2192 agent B sees only if omega < 50." },
-  { title: "Audit Trail & Last Will", description: "Full tamper-proof audit log with SHA256 chain. Memory Last Will & Testament: GDPR right-to-be-forgotten AND EU AI Act 10-year audit trail \u2014 handled simultaneously. legal_hold_entries: never deleted. SIEM export." },
+  { title: "Compliance Engine", description: "4 built-in profiles: EU AI Act (Article 9, 12, 13), HIPAA §164.312, MiFID2, Basel4. Non-compliant + irreversible = automatic BLOCK. Conformity score 0–1. Declaration template export." },
+  { title: "Memory Portability", description: "Memory Passport: cryptographically signed, portable memory envelope — provenance, freshness, conflict state, policy flags. Cross-LLM Translator: OpenAI ↔ Anthropic ↔ Llama compatible. Memory-DNS: globally unique identifiers (mem://user/123/preference/language). Memory Inheritance: validated memory transfer between agents." },
+  { title: "Multi-agent Coordination", description: "Agent Air Traffic Control (ATC): which agent writes to which namespace, conflict prevention. Memory Court: formal causal inference + Z3 SMT solver for contradicting agents. Memory Commons: shared organizational memory graph with RBAC. Cross-agent Firewall: agent A writes → Sgraal validates → agent B sees only if memory risk is below threshold." },
+  { title: "Audit Trail & Last Will", description: "Full tamper-proof audit log with SHA256 chain. Memory Last Will & Testament: GDPR right-to-be-forgotten AND EU AI Act 10-year audit trail — handled simultaneously. legal_hold_entries: never deleted. SIEM export." },
 ];
 
 export default function ComplyPage() {
@@ -12,14 +12,14 @@ export default function ComplyPage() {
     <div className="max-w-4xl mx-auto py-16 px-6">
       <p className="text-gold font-mono text-sm tracking-widest uppercase mb-3">COMPLY</p>
       <h1 className="text-4xl sm:text-5xl font-bold mb-4">Meet every regulation. Prove it.</h1>
-      <p className="text-muted text-lg mb-12">EU AI Act, HIPAA, MiFID2, Basel4, FDA, GDPR \u2014 built into every preflight call. Full audit trail. Cryptographic proof.</p>
+      <p className="text-muted text-lg mb-12">EU AI Act, HIPAA, MiFID2, Basel4, FDA, GDPR — built into every preflight call. Full audit trail. Cryptographic proof.</p>
 
       <h2 className="text-xl font-semibold mb-6">How it works</h2>
       <div className="space-y-6 mb-14">
         {[
           ["Every decision is compliance-checked in real time", "Compliance profile (EU_AI_ACT / HIPAA / MIFID2 / BASEL4 / FDA) is evaluated on every preflight call. Non-compliant + irreversible action = automatic BLOCK before the decision is made."],
-          ["Every decision is logged with tamper-proof audit trail", "SHA256 hash chain. request_id, omega_mem_final, component_breakdown, action_override_chain \u2014 all recorded. SIEM export: Splunk / Datadog / Elastic."],
-          ["Compliance reports generated on demand", "/v1/compliance/eu-ai-act/report \u2014 Article 9/12/13/14/17 evidence. Conformity declaration template. Chain verify endpoint."],
+          ["Every decision is logged with tamper-proof audit trail", "SHA256 hash chain. request_id, omega_mem_final, component_breakdown, action_override_chain — all recorded. SIEM export: Splunk / Datadog / Elastic."],
+          ["Compliance reports generated on demand", "/v1/compliance/eu-ai-act/report — Article 9/12/13/14/17 evidence. Conformity declaration template. Chain verify endpoint."],
         ].map(([title, desc], i) => (
           <div key={i} className="flex gap-4">
             <span className="w-7 h-7 rounded-full bg-gold text-background flex items-center justify-center font-mono font-bold text-xs shrink-0 mt-0.5">{i + 1}</span>

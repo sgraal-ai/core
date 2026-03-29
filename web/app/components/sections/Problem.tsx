@@ -1,6 +1,6 @@
 export function Problem() {
   return (
-    <section className="px-6 py-16 max-w-5xl mx-auto">
+    <section className="px-6 py-14 max-w-5xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-12">
         One wrong memory. <span className="text-gold">One wrong decision.</span>
       </h2>

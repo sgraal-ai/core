@@ -2,8 +2,8 @@ export const metadata = { title: "SCALE — Sgraal", description: "Self-improvin
 
 const capabilities = [
   { title: "Learning & Calibration", description: "RL Q-table: every decision outcome improves future thresholds. Meta-learning: cross-agent pattern recognition. Calibrated thresholds: per domain, per action type, per memory type. Weight export/import for reproducibility." },
-  { title: "Autonomous Intelligence", description: "Predictive Memory Health Score: \u2018first_block_day in 18 days \u2014 73% probability.\u2019 Autonomous Immune System: auto-heal triggered after 3+ BLOCKs in one hour. Autonomous Rollback: wrong email \u2192 revoke, wrong trade \u2192 compensation workflow. Autonomous Pruning: Shapley-weighted removal of low-relevance entries." },
-  { title: "Integrations & SDKs", description: "Python SDK (sgraal-py): async + sync, Pydantic v2, MemoryBuilder helper. LangChain: pip install langchain-sgraal \u2014 SgraalMemoryValidator middleware. MCP Server: npm install @sgraal/mcp \u2014 Claude Desktop, Cursor, Windsurf compatible. Also: CrewAI \u00b7 AutoGen \u00b7 LlamaIndex \u00b7 mem0 \u00b7 CLI \u00b7 Zero-config embed \u00b7 Universal adapter." },
+  { title: "Autonomous Intelligence", description: "Predictive Memory Health Score: ‘first_block_day in 18 days — 73% probability.’ Autonomous Immune System: auto-heal triggered after 3+ BLOCKs in one hour. Autonomous Rollback: wrong email → revoke, wrong trade → compensation workflow. Autonomous Pruning: Shapley-weighted removal of low-relevance entries." },
+  { title: "Integrations & SDKs", description: "Python SDK (sgraal-py): async + sync, Pydantic v2, MemoryBuilder helper. LangChain: pip install langchain-sgraal — SgraalMemoryValidator middleware. MCP Server: npm install @sgraal/mcp — Claude Desktop, Cursor, Windsurf compatible. Also: CrewAI · AutoGen · LlamaIndex · mem0 · CLI · Zero-config embed · Universal adapter." },
 ];
 
 export default function ScalePage() {
@@ -11,14 +11,14 @@ export default function ScalePage() {
     <div className="max-w-4xl mx-auto py-16 px-6">
       <p className="text-gold font-mono text-sm tracking-widest uppercase mb-3">SCALE</p>
       <h1 className="text-4xl sm:text-5xl font-bold mb-4">Learn, adapt, and grow autonomously.</h1>
-      <p className="text-muted text-lg mb-12">Self-improving thresholds, autonomous healing, 6 SDKs, 14 frameworks \u2014 Sgraal runs itself so your agents can run anything.</p>
+      <p className="text-muted text-lg mb-12">Self-improving thresholds, autonomous healing, 6 SDKs, 14 frameworks — Sgraal runs itself so your agents can run anything.</p>
 
       <h2 className="text-xl font-semibold mb-6">How it works</h2>
       <div className="space-y-6 mb-14">
         {[
           ["Every decision outcome trains the system", "Reinforcement learning records every preflight outcome. Calibrated thresholds improve automatically. The system gets more accurate with every call."],
           ["The system heals itself", "Predictive health forecasts first_block_day 30 days ahead. Autonomous heal triggers before problems surface. Truth Subscription invalidates stale memory when authoritative sources change."],
-          ["Works inside any stack", "pip install sgraal \u00b7 pip install langchain-sgraal \u00b7 npm install @sgraal/mcp. Zero-config embed. Universal adapter. 14 framework integrations."],
+          ["Works inside any stack", "pip install sgraal · pip install langchain-sgraal · npm install @sgraal/mcp. Zero-config embed. Universal adapter. 14 framework integrations."],
         ].map(([title, desc], i) => (
           <div key={i} className="flex gap-4">
             <span className="w-7 h-7 rounded-full bg-gold text-background flex items-center justify-center font-mono font-bold text-xs shrink-0 mt-0.5">{i + 1}</span>

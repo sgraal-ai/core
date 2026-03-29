@@ -1,14 +1,29 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+
 export function Navbar() {
+  const path = usePathname();
+
+  const pillars = [
+    { label: "DECIDE", href: "/decide" },
+    { label: "PROTECT", href: "/protect" },
+    { label: "COMPLY", href: "/comply" },
+    { label: "SCALE", href: "/scale" },
+  ];
+
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b border-surface-light px-6 py-3 flex items-center justify-between">
       <div className="flex items-center gap-5">
         <a href="/" className="font-mono text-gold text-lg font-bold mr-2">Sgraal</a>
-        <div className="hidden md:flex items-center gap-4 text-sm text-muted">
-          <a href="/decide" className="hover:text-foreground transition font-medium">DECIDE</a>
-          <a href="/protect" className="hover:text-foreground transition font-medium">PROTECT</a>
-          <a href="/comply" className="hover:text-foreground transition font-medium">COMPLY</a>
-          <a href="/scale" className="hover:text-foreground transition font-medium">SCALE</a>
-          <a href="/#pricing" className="hover:text-foreground transition">Pricing</a>
+        <div className="hidden md:flex items-center gap-4 text-sm">
+          {pillars.map((p) => (
+            <a key={p.label} href={p.href}
+              className={`transition font-medium ${path.startsWith(p.href) ? "text-gold" : "text-muted hover:text-foreground"}`}>
+              {p.label}
+            </a>
+          ))}
+          <a href="/#pricing" className="text-muted hover:text-foreground transition">Pricing</a>
         </div>
       </div>
       <div className="flex items-center gap-3">
@@ -18,7 +33,7 @@ export function Navbar() {
         <a href="https://x.com/sgraal_ai" target="_blank" rel="noopener noreferrer" className="text-muted hover:text-foreground transition" title="X">
           <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
         </a>
-        <a href="https://app.sgraal.com/playground" className="hidden sm:inline-block border border-surface-light text-foreground text-sm px-4 py-1.5 rounded-lg hover:bg-surface transition">
+        <a href="/playground" className="hidden sm:inline-block border border-surface-light text-foreground text-sm px-4 py-1.5 rounded-lg hover:bg-surface transition">
           Playground
         </a>
         <a href="https://app.sgraal.com" className="bg-gold text-background font-semibold text-sm px-5 py-1.5 rounded-lg hover:bg-gold-dim transition">
