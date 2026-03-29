@@ -21,18 +21,20 @@ const steps = [
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="px-6 py-20 max-w-5xl mx-auto">
+    <section id="how-it-works" className="px-6 py-16 max-w-5xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-14">
         How it <span className="text-gold">works</span>
       </h2>
-      <div className="grid md:grid-cols-3 gap-8">
+      <div className="grid md:grid-cols-3 gap-8 relative">
+        {/* Connector line — desktop only */}
+        <div className="hidden md:block absolute top-4 left-[16.67%] right-[16.67%] h-px bg-gold/20" />
         {steps.map((s) => (
           <div key={s.step} className="relative">
             <div className="flex items-center gap-3 mb-4">
-              <span className="w-8 h-8 rounded-full bg-gold text-background flex items-center justify-center font-mono font-bold text-sm shrink-0">
+              <span className="w-8 h-8 rounded-full bg-gold text-background flex items-center justify-center font-mono font-bold text-sm shrink-0 relative z-10">
                 {s.step}
               </span>
-              <h3 className="font-semibold text-foreground">{s.title}</h3>
+              <h3 className="font-semibold text-foreground text-lg">{s.title}</h3>
             </div>
             <p className="text-foreground/90 text-sm mb-2">{s.description}</p>
             <p className="text-muted text-xs">{s.detail}</p>

@@ -6,7 +6,7 @@ const stats = [
 
 export function BattleTested() {
   return (
-    <section className="px-6 py-20 max-w-5xl mx-auto">
+    <section className="px-6 py-16 max-w-5xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-14">
         Tested in the <span className="text-gold">wild</span>
       </h2>
@@ -21,9 +21,9 @@ export function BattleTested() {
       </div>
 
       <div className="border border-surface-light bg-surface rounded-xl p-6 mb-8 text-center">
-        <p className="text-muted text-sm mb-2 font-mono">GrokGuard v2 — 58-step run &middot; 97% assurance</p>
-        <div className="bg-background border border-surface-light rounded-lg h-32 flex items-center justify-center">
-          <p className="text-muted text-xs italic">Screenshot placeholder — real capture to be added</p>
+        <p className="text-muted text-sm mb-3 font-mono">GrokGuard v2 &mdash; 58-step run &middot; 97% assurance</p>
+        <div className="bg-background border border-dashed border-surface-light rounded-lg flex items-center justify-center" style={{ minHeight: "120px" }}>
+          <p className="text-muted text-xs italic">GrokGuard v2 &mdash; screenshot coming</p>
         </div>
       </div>
 

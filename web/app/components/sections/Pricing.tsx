@@ -33,7 +33,7 @@ const tiers = [
 
 export function Pricing() {
   return (
-    <section id="pricing" className="px-6 py-20 max-w-5xl mx-auto">
+    <section id="pricing" className="px-6 py-16 max-w-5xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
         Simple <span className="text-gold">pricing</span>
       </h2>

@@ -17,7 +17,7 @@ export function Integrations() {
   const [active, setActive] = useState<string>("python");
 
   return (
-    <section className="px-6 py-20 max-w-5xl mx-auto">
+    <section className="px-6 py-16 max-w-5xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
         Works with your <span className="text-gold">stack</span>
       </h2>

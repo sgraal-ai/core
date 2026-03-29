@@ -27,14 +27,15 @@ const moments = [
 
 export function AhaMoments() {
   return (
-    <section className="px-6 py-20 max-w-5xl mx-auto">
+    <section className="px-6 py-16 max-w-5xl mx-auto">
       <h2 className="text-3xl sm:text-4xl font-bold text-center mb-14">
-        Six reasons teams <span className="text-gold">switch</span>
+        Six things that make developers{" "}
+        <span className="text-gold">stop and re-read.</span>
       </h2>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {moments.map((m) => (
-          <div key={m.title} className="border border-surface-light bg-surface rounded-xl p-6">
-            <p className="font-semibold text-foreground mb-2">{m.title}</p>
+          <div key={m.title} className="border border-surface-light bg-surface rounded-xl p-6 hover:bg-surface-light transition">
+            <p className="font-semibold text-gold mb-2">{m.title}</p>
             <p className="text-muted text-sm leading-relaxed">{m.description}</p>
           </div>
         ))}

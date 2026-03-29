@@ -10,10 +10,10 @@ export function Hero() {
 }`;
 
   return (
-    <section className="px-6 pt-32 pb-20 max-w-6xl mx-auto">
+    <section className="px-6 pt-20 pb-16 max-w-6xl mx-auto">
       <div className="grid md:grid-cols-2 gap-12 items-center">
         <div>
-          <p className="text-gold font-mono text-sm tracking-widest uppercase mb-6">
+          <p className="text-gold font-mono text-sm tracking-widest uppercase mb-3">
             Memory Governance Protocol
           </p>
           <h1 className="text-4xl sm:text-5xl font-bold leading-tight mb-6">
@@ -24,10 +24,10 @@ export function Hero() {
             The memory governance protocol between AI agent memory and AI agent action.
           </p>
           <div className="flex flex-wrap gap-4">
-            <a href="/playground" className="bg-gold text-background font-semibold px-8 py-3 rounded-lg hover:bg-gold-dim transition">
+            <a href="/playground" className="bg-gold text-background font-semibold px-8 py-3 rounded-lg hover:bg-gold-dim transition text-base">
               Try it now — no signup
             </a>
-            <a href="https://api.sgraal.com/docs" className="border border-surface-light text-foreground font-semibold px-8 py-3 rounded-lg hover:bg-surface transition">
+            <a href="https://api.sgraal.com/docs" className="border border-foreground/30 text-foreground font-semibold px-8 py-3 rounded-lg hover:bg-foreground/5 transition text-base">
               Read the docs
             </a>
           </div>
