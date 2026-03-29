@@ -1,22 +1,33 @@
 export function Footer() {
   return (
-    <footer className="mt-10" style={{ backgroundColor: "var(--obsidian)" }}>
-      <div className="max-w-5xl mx-auto px-6 py-8">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, color: "#ffffff", fontSize: "1.125rem" }}>Sgraal</span>
-            <span className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>· Memory Governance Protocol</span>
+    <footer className="bg-[#1a1c1a] border-t border-[#d0c5b4]/10">
+      <div className="max-w-7xl mx-auto px-12">
+        <div className="flex flex-col md:flex-row justify-between py-20 gap-16">
+          <div>
+            <p className="text-3xl font-bold text-[#faf9f6] tracking-tighter font-headline mb-2">Sgraal</p>
+            <p className="text-xs uppercase tracking-[0.1em] text-[#d0c5b4]">Memory Governance Protocol</p>
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" style={{ color: "rgba(255,255,255,0.6)" }}>
-            <a href="https://docs.sgraal.com" className="transition hover:text-white">Docs</a>
-            <a href="https://docs.sgraal.com/api" className="transition hover:text-white">API Reference</a>
-            <a href="https://github.com/sgraal-ai" target="_blank" rel="noopener noreferrer" className="transition hover:text-white">GitHub</a>
-            <a href="https://x.com/sgraal_ai" target="_blank" rel="noopener noreferrer" className="transition hover:text-white">X</a>
-            <a href="https://app.sgraal.com" className="transition hover:text-white">Dashboard</a>
-            <a href="/privacy" className="transition hover:text-white">Privacy</a>
-            <a href="/terms" className="transition hover:text-white">Terms</a>
-            <a href="/security" className="transition hover:text-white">Security</a>
-            <span style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.8rem" }}>© 2026 Apache 2.0</span>
+          <div className="grid grid-cols-2 gap-x-20 gap-y-4">
+            <div className="space-y-3">
+              <p className="text-[10px] font-bold tracking-widest uppercase text-[#6b6b6b] mb-2">Developers</p>
+              <a href="https://docs.sgraal.com" className="block text-[#6b6b6b] hover:text-[#c9a962] transition-colors text-xs uppercase tracking-[0.1em]">Docs</a>
+              <a href="https://docs.sgraal.com/api" className="block text-[#6b6b6b] hover:text-[#c9a962] transition-colors text-xs uppercase tracking-[0.1em]">API Reference</a>
+              <a href="https://github.com/sgraal-ai" target="_blank" rel="noopener noreferrer" className="block text-[#6b6b6b] hover:text-[#c9a962] transition-colors text-xs uppercase tracking-[0.1em]">GitHub</a>
+            </div>
+            <div className="space-y-3">
+              <p className="text-[10px] font-bold tracking-widest uppercase text-[#6b6b6b] mb-2">Protocol</p>
+              <a href="https://x.com/sgraal_ai" target="_blank" rel="noopener noreferrer" className="block text-[#6b6b6b] hover:text-[#c9a962] transition-colors text-xs uppercase tracking-[0.1em]">X</a>
+              <a href="https://app.sgraal.com" className="block text-[#6b6b6b] hover:text-[#c9a962] transition-colors text-xs uppercase tracking-[0.1em]">Dashboard</a>
+              <a href="/security" className="block text-[#6b6b6b] hover:text-[#c9a962] transition-colors text-xs uppercase tracking-[0.1em]">Security</a>
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-white/5 pt-8 pb-12 flex flex-col sm:flex-row justify-between gap-4">
+          <p className="text-[#6b6b6b] text-xs uppercase tracking-[0.1em]">© 2026 Sgraal Protocol · Apache 2.0</p>
+          <div className="flex gap-6">
+            <a href="/privacy" className="text-[#6b6b6b] hover:text-[#c9a962] transition-colors text-xs uppercase tracking-[0.1em]">Privacy</a>
+            <a href="/terms" className="text-[#6b6b6b] hover:text-[#c9a962] transition-colors text-xs uppercase tracking-[0.1em]">Terms</a>
+            <a href="/security" className="text-[#6b6b6b] hover:text-[#c9a962] transition-colors text-xs uppercase tracking-[0.1em]">Security</a>
           </div>
         </div>
       </div>

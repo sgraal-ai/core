@@ -1,30 +1,30 @@
 export function Hero() {
   return (
-    <section className="px-6 pt-16 pb-12 max-w-5xl mx-auto text-center">
-      <span className="inline-block mb-4 px-3 py-1 text-xs uppercase tracking-widest rounded-full"
-        style={{ backgroundColor: "var(--surface-container-low)", color: "var(--on-surface-variant)", fontFamily: "'Inter', sans-serif", letterSpacing: "0.1em" }}>
+    <section className="relative overflow-hidden px-8 md:px-16 py-32 lg:py-48 flex flex-col items-center text-center">
+      <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-surface-container-high border border-outline-variant/20 text-[10px] uppercase tracking-[0.2em] font-bold text-secondary mb-12">
+        <span className="w-1.5 h-1.5 rounded-full bg-primary-container animate-pulse" />
         Memory Governance Protocol
-      </span>
-      <h1 className="mb-6 max-w-4xl mx-auto" style={{ fontFamily: "'Manrope', sans-serif", fontWeight: 800, fontSize: "clamp(2.5rem, 5vw, 3.5rem)", letterSpacing: "-0.02em", color: "var(--on-surface)" }}>
+      </div>
+      <h1 className="font-headline text-5xl md:text-7xl lg:text-8xl font-extrabold tracking-tighter text-on-background max-w-5xl leading-[1.05] mb-8 text-balance">
         AI agents act on memory. Sgraal decides if that memory is{" "}
-        <span style={{ color: "var(--primary-container)" }}>safe to act on.</span>
+        <span className="text-primary-container">safe to act on.</span>
       </h1>
-      <p className="mb-8 max-w-xl mx-auto" style={{ fontFamily: "'Inter', sans-serif", color: "var(--on-surface-variant)", fontSize: "1.125rem" }}>
+      <p className="text-xl md:text-2xl text-secondary max-w-2xl mb-12 font-light leading-relaxed">
         The memory governance protocol between AI agent memory and AI agent action.
       </p>
-      <div className="flex flex-wrap justify-center gap-4">
-        <a href="/playground" className="px-8 py-3 rounded-md transition text-base"
-          style={{ background: "linear-gradient(135deg, #745b1c, #c9a962)", color: "#533d00", fontWeight: 600 }}>
+      <div className="flex flex-wrap justify-center gap-4 mb-16">
+        <a href="/playground" className="gold-gradient-bg px-8 py-4 text-lg font-bold text-white rounded-md">
           Try it now — no signup
         </a>
-        <a href="https://docs.sgraal.com" className="px-8 py-3 rounded-md transition text-base"
-          style={{ color: "var(--on-surface)" }}>
+        <a href="https://docs.sgraal.com" className="px-8 py-4 text-lg font-bold text-on-surface hover:bg-surface-container-high rounded-md transition-colors">
           Read the docs
         </a>
       </div>
-      <p className="mt-6 text-sm" style={{ color: "var(--on-surface-variant)" }}>
-        1,834 tests · 0 failures · production ready
-      </p>
+      <div className="flex flex-wrap justify-center gap-x-12 text-sm uppercase tracking-widest text-secondary/60">
+        <span><span className="text-primary-container">1,834</span> tests</span>
+        <span><span className="text-primary-container">0</span> failures</span>
+        <span>production ready</span>
+      </div>
     </section>
   );
 }
