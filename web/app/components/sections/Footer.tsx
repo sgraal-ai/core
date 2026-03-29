@@ -2,23 +2,17 @@ export function Footer() {
   return (
     <footer className="border-t border-surface-light mt-10">
       <div className="max-w-5xl mx-auto px-6 py-10">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 mb-8">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 mb-8">
           <div>
             <p className="font-mono text-gold text-lg font-bold mb-1">Sgraal</p>
             <p className="text-muted text-sm">Memory Governance Protocol</p>
           </div>
-
-          <div className="flex flex-col gap-2 text-sm text-muted">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted">
             <a href="https://api.sgraal.com/docs" className="hover:text-foreground transition">Docs</a>
             <a href="https://api.sgraal.com/docs" className="hover:text-foreground transition">API Reference</a>
             <a href="https://github.com/sgraal-ai/core" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition">GitHub</a>
+            <a href="https://x.com/sgraal_ai" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition">X</a>
             <a href="https://api.sgraal.com/health" className="hover:text-foreground transition">Status</a>
-          </div>
-
-          <div className="flex flex-col gap-2 text-sm text-muted">
-            <a href="https://x.com/sgraal_ai" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition">X @sgraal_ai</a>
-            <a href="https://api.sgraal.com" className="hover:text-foreground transition">api.sgraal.com</a>
-            <a href="https://app.sgraal.com" className="hover:text-foreground transition">app.sgraal.com</a>
           </div>
         </div>
 

@@ -21,17 +21,17 @@ const moments = [
   {
     title: "Action checkpoint",
     description: "Same memory, different risk. Read: 1.0\u00d7. Irreversible: 1.8\u00d7. Destructive: 2.5\u00d7.",
-    expanded: "Same memory entry, different risk multiplier. read: 0.5\u00d7 \u00b7 write: 1.0\u00d7 \u00b7 delete: 1.5\u00d7 \u00b7 financial: 2.0\u00d7 \u00b7 irreversible: 2.5\u00d7. The action context changes everything.",
+    expanded: "Same memory entry, different risk multiplier. Read: 0.5\u00d7 \u00b7 Write: 1.0\u00d7 \u00b7 Delete: 1.5\u00d7 \u00b7 Financial: 2.0\u00d7 \u00b7 Irreversible: 2.5\u00d7. The action context changes everything.",
   },
   {
     title: "Entry Shapley",
     description: "Pinpoints the exact memory entry causing the block. Not just \u201chigh risk\u201d \u2014 which entry and why.",
-    expanded: "Not just \u2018memory is risky\u2019 \u2014 but which exact entry, and by how much. omega_without_entry shows the counterfactual: remove entry #3, risk drops from 67 to 34.",
+    expanded: "Not just \u2018memory is risky\u2019 \u2014 but which exact entry, and by how much. Omega_without_entry shows the counterfactual: remove entry #3, risk drops from 67 to 34.",
   },
   {
     title: "Zero-friction entry",
     description: "pip install sgraal. 3 lines of code. No signup. Demo key works immediately.",
-    expanded: "pip install sgraal \u00b7 3 lines of code \u00b7 demo API key works immediately, no signup. SgraalClient handles retries, rate limits, and type safety out of the box.",
+    expanded: "Pip install sgraal \u00b7 3 lines of code \u00b7 demo API key works immediately, no signup. SgraalClient handles retries, rate limits, and type safety out of the box.",
   },
 ];
 
@@ -57,7 +57,7 @@ export function AhaMoments() {
             </div>
             <p className="text-muted text-sm leading-relaxed">{m.description}</p>
             {open === i && (
-              <p className="text-foreground/70 text-xs leading-relaxed mt-3 pt-3 border-t border-surface-light">
+              <p className="text-foreground/70 text-base leading-relaxed mt-3 pt-3 border-t border-surface-light">
                 {m.expanded}
               </p>
             )}
