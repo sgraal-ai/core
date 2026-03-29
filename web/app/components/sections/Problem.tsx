@@ -1,6 +1,6 @@
 export function Problem() {
   return (
-    <section className="bg-surface-container-low px-8 md:px-16 py-32 lg:py-40">
+    <section className="bg-surface-container-low px-8 md:px-16 py-24 lg:py-32">
       <div className="max-w-7xl mx-auto flex flex-col lg:flex-row gap-20 items-start">
         <div className="lg:w-1/2">
           <h2 className="font-headline text-4xl md:text-5xl font-bold tracking-tight text-on-background mb-8 leading-tight">

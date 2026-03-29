@@ -31,10 +31,10 @@ export function Pricing() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
           {tiers.map((t) => (
             <div key={t.name}
-              className={`p-10 rounded-xl flex flex-col ${
+              className={`p-10 rounded-xl flex flex-col justify-between ${
                 t.highlight
-                  ? "bg-surface-container border-2 border-primary-container scale-105 z-10 relative"
-                  : "bg-surface-container-lowest border border-outline-variant/10"
+                  ? "bg-surface-container border-2 border-primary-container scale-105 z-10 relative shadow-[0_12px_40px_rgba(11,15,20,0.08)]"
+                  : "bg-surface-container-lowest border border-outline-variant/20 shadow-[0_12px_40px_rgba(11,15,20,0.04)]"
               }`}>
               {t.highlight && (
                 <span className="absolute -top-4 left-1/2 -translate-x-1/2 bg-primary-container text-on-primary-container text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full">

@@ -1,7 +1,7 @@
 const stats = [
   { value: "1,834", label: "Tests passed" },
-  { value: "0", label: "Blockers" },
-  { value: "300+", label: "Agent steps" },
+  { value: "0", label: "Failures" },
+  { value: "300+", label: "Step regulated run" },
   { value: "Zero", label: "Memory drift" },
 ];
 

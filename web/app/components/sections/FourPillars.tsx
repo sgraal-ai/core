@@ -35,12 +35,12 @@ export function FourPillars() {
           {pillars.map((p) => (
             <a key={p.title} href={p.href}
               className="bg-surface-container-lowest p-8 rounded-xl shadow-[0_12px_40px_rgba(11,15,20,0.04)] border border-outline-variant/10 group hover:-translate-y-1 transition-transform flex flex-col">
-              <p className="text-primary-container mb-6 font-bold tracking-widest text-xs">{p.title}</p>
-              <p className="font-headline text-xl font-bold text-on-surface mb-4">{p.subtitle}</p>
-              <ul className="text-sm text-secondary space-y-3 mb-8 flex-1">
+              <p className="text-primary-container font-bold tracking-widest text-xs mb-4 block">{p.title}</p>
+              <p className="font-headline text-lg font-bold text-on-surface mb-4">{p.subtitle}</p>
+              <ul className="text-sm text-secondary leading-relaxed space-y-3 mb-8 flex-1">
                 {p.capabilities.map((c) => <li key={c}>· {c}</li>)}
               </ul>
-              <span className="text-primary font-semibold text-sm">Explore {p.title} →</span>
+              <span className="text-primary font-semibold text-sm mt-6 block">Explore {p.title} →</span>
             </a>
           ))}
         </div>
