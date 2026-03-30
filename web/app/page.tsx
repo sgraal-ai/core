@@ -7,7 +7,16 @@ const pillars = [
   { label: "SCALE", title: "High Availability", items: ["< 10ms latency", "Edge deployment", "Global sync"], href: "/scale" },
 ];
 
-const badges = ["LangChain", "CrewAI", "AutoGen", "LlamaIndex", "mem0", "MCP", "OpenAI", "Anthropic"];
+const badges = [
+  { name: "LangChain", url: "https://www.langchain.com" },
+  { name: "CrewAI", url: "https://www.crewai.com" },
+  { name: "AutoGen", url: "https://microsoft.github.io/autogen" },
+  { name: "LlamaIndex", url: "https://www.llamaindex.ai" },
+  { name: "mem0", url: "https://mem0.ai" },
+  { name: "MCP", url: "https://modelcontextprotocol.io" },
+  { name: "OpenAI", url: "https://openai.com" },
+  { name: "Anthropic", url: "https://anthropic.com" },
+];
 const GOLD = "#c9a962";
 const GOLD_GRADIENT = "linear-gradient(135deg, #745b1c, #c9a962)";
 const HEADLINE = { fontFamily: "'Manrope', sans-serif" } as const;
@@ -22,7 +31,7 @@ export default function Home() {
             <span style={{ width: "0.375rem", height: "0.375rem", borderRadius: "9999px", background: GOLD, display: "inline-block" }} />
             MEMORY GOVERNANCE PROTOCOL
           </div>
-          <h1 style={{ fontSize: "clamp(2.5rem, 5vw, 4.5rem)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, color: "#000000", marginBottom: "2rem", ...HEADLINE }}>
+          <h1 style={{ fontSize: "clamp(1.25rem, 2.5vw, 2.25rem)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, color: "#000000", marginBottom: "2rem", ...HEADLINE }}>
             AI agents act on memory. Sgraal decides if that memory is{" "}
             <span style={{ color: GOLD }}>safe to act on.</span>
           </h1>
@@ -161,12 +170,10 @@ export default function Home() {
       {/* SOCIAL PROOF */}
       <section style={{ background: "#ffffff", padding: "4rem 2rem", textAlign: "center" }}>
         <div style={{ maxWidth: "48rem", margin: "0 auto" }}>
-          <div style={{ fontSize: "3rem", fontWeight: 700, color: GOLD, opacity: 0.2, lineHeight: 1, marginBottom: "1rem", ...HEADLINE }}>&ldquo;</div>
           <blockquote style={{ fontSize: "1.5rem", fontWeight: 700, letterSpacing: "-0.02em", color: "#000000", marginBottom: "1.5rem", lineHeight: 1.3, ...HEADLINE }}>
             &ldquo;Ran 300+ step regulated test with zero drift.&rdquo;
           </blockquote>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem", marginBottom: "2rem" }}>
-            <div style={{ width: "2.5rem", height: "2.5rem", borderRadius: "9999px", background: "#000000", display: "flex", alignItems: "center", justifyContent: "center", color: "#ffffff", fontSize: "0.75rem", fontWeight: 700 }}>G</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "2rem" }}>
             <span style={{ fontWeight: 700, color: "#000000" }}>@grok</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "2rem", padding: "3rem 0", borderTop: "1px solid #f3f4f6", borderBottom: "1px solid #f3f4f6", marginBottom: "3rem" }}>
@@ -187,7 +194,7 @@ export default function Home() {
           <span style={{ fontSize: "0.625rem", fontWeight: 700, letterSpacing: "0.3em", color: "#9ca3af", display: "block", marginBottom: "3rem" }}>WORKS WITH</span>
           <div style={{ display: "flex", flexWrap: "wrap" as const, justifyContent: "center", gap: "1rem" }}>
             {badges.map((b) => (
-              <span key={b} style={{ padding: "0.625rem 1.5rem", background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "9999px", fontSize: "0.875rem", fontWeight: 500, color: "#4b5563" }}>{b}</span>
+              <a key={b.name} href={b.url} target="_blank" rel="noopener noreferrer" style={{ padding: "0.625rem 1.5rem", background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "9999px", fontSize: "0.875rem", fontWeight: 500, color: "#4b5563", textDecoration: "none" }}>{b.name}</a>
             ))}
           </div>
         </div>
@@ -246,7 +253,7 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
-              <a href="mailto:contact@sgraal.com" style={{ display: "block", textAlign: "center", padding: "0.75rem", fontWeight: 700, background: "#e5e7eb", color: "#000000", borderRadius: "0.375rem", textDecoration: "none" }}>Contact Sales</a>
+              <a href="mailto:contact@sgraal.com" style={{ display: "block", textAlign: "center", padding: "0.75rem", fontWeight: 700, border: "2px solid #c9a962", color: "#c9a962", background: "transparent", borderRadius: "0.375rem", textDecoration: "none" }}>Contact Sales</a>
             </div>
           </div>
         </div>
@@ -254,35 +261,15 @@ export default function Home() {
 
       {/* FOOTER */}
       <footer style={{ background: "#1a1c1a", borderTop: "1px solid rgba(208,197,180,0.1)" }}>
-        <div style={{ maxWidth: "80rem", margin: "0 auto", padding: "5rem 3rem 3rem", display: "flex", flexWrap: "wrap" as const, justifyContent: "space-between", gap: "3rem" }}>
+        <div style={{ maxWidth: "80rem", margin: "0 auto", display: "flex", flexDirection: "row" as const, justifyContent: "space-between", alignItems: "center", padding: "2rem 3rem", flexWrap: "nowrap" as const }}>
           <div>
-            <div style={{ fontWeight: 700, color: "#faf9f6", fontSize: "1.875rem", letterSpacing: "-0.05em", marginBottom: "1rem", ...HEADLINE }}>Sgraal</div>
-            <p style={{ fontSize: "0.75rem", textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#d0c5b4" }}>Memory Governance Protocol</p>
+            <div style={{ fontWeight: 700, color: "#faf9f6", fontSize: "1.5rem", letterSpacing: "-0.05em", ...HEADLINE }}>Sgraal</div>
+            <p style={{ fontSize: "0.625rem", textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#d0c5b4", marginTop: "0.25rem" }}>Memory Governance Protocol</p>
+            <p style={{ fontSize: "0.625rem", textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#6b6b6b", marginTop: "0.5rem" }}>© 2026 Sgraal Protocol · Apache 2.0</p>
           </div>
-          <div style={{ display: "flex", gap: "4rem", flexWrap: "wrap" as const }}>
-            <div>
-              <h5 style={{ color: "#faf9f6", fontSize: "0.875rem", fontWeight: 600, marginBottom: "1rem" }}>Developers</h5>
-              <nav style={{ display: "flex", flexDirection: "column" as const, gap: "0.75rem" }}>
-                {[["Docs", "https://docs.sgraal.com"], ["API Reference", "https://docs.sgraal.com/api"], ["GitHub", "https://github.com/sgraal-ai"]].map(([label, href]) => (
-                  <a key={label} href={href} style={{ fontSize: "0.75rem", textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#6b6b6b", textDecoration: "none" }}>{label}</a>
-                ))}
-              </nav>
-            </div>
-            <div>
-              <h5 style={{ color: "#faf9f6", fontSize: "0.875rem", fontWeight: 600, marginBottom: "1rem" }}>Protocol</h5>
-              <nav style={{ display: "flex", flexDirection: "column" as const, gap: "0.75rem" }}>
-                {[["X", "https://x.com/sgraal_ai"], ["Dashboard", "https://app.sgraal.com"], ["Security", "/security"]].map(([label, href]) => (
-                  <a key={label} href={href} style={{ fontSize: "0.75rem", textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#6b6b6b", textDecoration: "none" }}>{label}</a>
-                ))}
-              </nav>
-            </div>
-          </div>
-        </div>
-        <div style={{ maxWidth: "80rem", margin: "0 auto", padding: "2rem 3rem 3rem", borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", flexWrap: "wrap" as const, justifyContent: "space-between", gap: "1rem" }}>
-          <p style={{ fontSize: "0.75rem", textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#6b6b6b" }}>© 2026 Sgraal Protocol · Apache 2.0</p>
-          <div style={{ display: "flex", gap: "2rem" }}>
-            {[["Privacy", "/privacy"], ["Terms", "/terms"], ["Security", "/security"]].map(([label, href]) => (
-              <a key={label} href={href} style={{ fontSize: "0.75rem", textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#6b6b6b", textDecoration: "none" }}>{label}</a>
+          <div style={{ display: "flex", gap: "2rem", alignItems: "center" }}>
+            {[["Docs", "https://docs.sgraal.com"], ["API", "https://docs.sgraal.com/api"], ["GitHub", "https://github.com/sgraal-ai"], ["X", "https://x.com/sgraal_ai"], ["Dashboard", "https://app.sgraal.com"], ["Privacy", "/privacy"], ["Terms", "/terms"], ["Security", "/security"]].map(([label, href]) => (
+              <a key={label} href={href} style={{ fontSize: "0.6875rem", textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#6b6b6b", textDecoration: "none" }}>{label}</a>
             ))}
           </div>
         </div>

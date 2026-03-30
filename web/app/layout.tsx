@@ -20,7 +20,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-white text-black" style={{ fontFamily: "'Inter', sans-serif" }}>
         <header className="fixed top-0 w-full z-50 bg-[#faf9f6]/90 backdrop-blur-md shadow-[0_12px_40px_rgba(11,15,20,0.04)]">
-          <nav className="flex justify-between items-center px-8 md:px-16 max-w-[1440px] mx-auto h-20">
+          <nav style={{ maxWidth: "80rem", margin: "0 auto" }} className="flex justify-between items-center px-8 md:px-16 h-20">
             <div className="flex items-center gap-12">
               <a className="text-2xl font-bold tracking-tighter text-[#1a1c1a]" style={{ fontFamily: "'Manrope', sans-serif" }} href="/">Sgraal</a>
               <div className="hidden lg:flex items-center gap-8 tracking-tight text-sm font-medium">
