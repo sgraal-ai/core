@@ -4,4 +4,5 @@ pydantic
 supabase
 stripe
 requests
+resend
 # z3-solver — optional, install separately for formal verification (pip install z3-solver)

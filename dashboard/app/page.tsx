@@ -6,7 +6,6 @@ import { MOCK_AGENTS } from "./lib/mock-data";
 import { DEMO_FLEET } from "./lib/demo-fleet";
 import { fetchFleet } from "./lib/api-client";
 import { AgentCard } from "./components/AgentCard";
-import { SettingsPanel } from "./components/SettingsPanel";
 
 export default function DashboardHome() {
   const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
@@ -48,17 +47,12 @@ export default function DashboardHome() {
 
   return (
     <div>
-      <div className="flex items-start justify-between mb-1">
-        <div>
-          <h1 className="text-2xl font-bold">Decision Readiness Dashboard</h1>
-          <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
-        </div>
-        <SettingsPanel onSave={() => window.location.reload()} />
-      </div>
+      <h1 className="text-2xl font-bold mb-1">Decision Readiness Dashboard</h1>
+      <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
 
       {!isLive && !loading && (
         <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          Showing mock data. Enter your API key in Settings (gear icon) to see live data.
+          Showing mock data. <a href="/settings" className="underline hover:text-gold">Enter your API key</a> to see live data.
         </div>
       )}
 

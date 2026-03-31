@@ -1,10 +1,10 @@
-from fastapi import FastAPI, HTTPException, Depends, Response, Cookie, Query
+from fastapi import FastAPI, HTTPException, Depends, Response, Cookie, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Literal, Optional
-import sys, os, math
+import sys, os, math, re
 import secrets
 import hashlib
 import hmac as _hmac
@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import stripe
 import requests as http_requests
+import resend
 from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx
 
 
@@ -44,6 +45,8 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+resend.api_key = os.getenv("RESEND_API_KEY")
 
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
@@ -5234,6 +5237,97 @@ def signup(req: SignupRequest):
         "customer_id": customer.id,
         "tier": "free",
     }
+
+
+# --- Email-based registration (no Stripe required) ---
+
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+
+class RegisterRequest(BaseModel):
+    email: str
+
+def _rate_limit_register(email: str, client_ip: str) -> None:
+    """Enforce registration rate limits via Redis. Raises 429 if exceeded."""
+    now = datetime.now(timezone.utc)
+    day_key = now.strftime("%Y-%m-%d")
+
+    email_rl_key = f"reg_rl:email:{email}:{day_key}"
+    ip_rl_key = f"reg_rl:ip:{client_ip}:{day_key}"
+
+    email_count = _load_store(email_rl_key, 0)
+    if isinstance(email_count, str):
+        email_count = int(email_count)
+    if email_count >= 3:
+        raise HTTPException(status_code=429, detail="Too many registration attempts for this email. Try again tomorrow.")
+
+    ip_count = _load_store(ip_rl_key, 0)
+    if isinstance(ip_count, str):
+        ip_count = int(ip_count)
+    if ip_count >= 10:
+        raise HTTPException(status_code=429, detail="Too many registration attempts from this IP. Try again tomorrow.")
+
+    _persist_store(email_rl_key, email_count + 1, ttl=86400)
+    _persist_store(ip_rl_key, ip_count + 1, ttl=86400)
+
+
+def _send_api_key_email(email: str, api_key: str) -> None:
+    """Send API key via Resend. Fails silently if Resend not configured."""
+    if not resend.api_key:
+        return
+    resend.Emails.send({
+        "from": "Sgraal <hello@sgraal.com>",
+        "to": [email],
+        "subject": "Your Sgraal API key",
+        "text": (
+            f"Your Sgraal API key: {api_key}\n\n"
+            "Keep this safe — it won't be shown again.\n\n"
+            "Get started: https://sgraal.com/docs\n"
+            "Dashboard: https://app.sgraal.com\n\n"
+            "Free tier: 10,000 decisions/month.\n"
+            "Upgrade: https://sgraal.com/pricing"
+        ),
+    })
+
+
+@app.post("/v1/auth/register")
+def auth_register(req: RegisterRequest, request: Request):
+    # 1. Validate email
+    if not _EMAIL_RE.match(req.email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    if not supabase_service_client:
+        raise HTTPException(status_code=503, detail="Registration service unavailable")
+
+    # 2. Rate limiting
+    client_ip = request.client.host if request.client else "unknown"
+    _rate_limit_register(req.email, client_ip)
+
+    # 3. Check if email already registered
+    existing = supabase_service_client.table("api_keys").select("key_hash").eq("email", req.email).execute()
+    if existing.data and len(existing.data) > 0:
+        # Re-generate a new key, update the record, and send it
+        new_key = _generate_api_key()
+        new_hash = _hash_key(new_key)
+        supabase_service_client.table("api_keys").update({
+            "key_hash": new_hash,
+        }).eq("email", req.email).execute()
+        _send_api_key_email(req.email, new_key)
+        return {"success": True, "message": "API key sent to your email"}
+
+    # 4. Generate new key and store
+    api_key = _generate_api_key()
+    key_hash = _hash_key(api_key)
+    supabase_service_client.table("api_keys").insert({
+        "key_hash": key_hash,
+        "email": req.email,
+        "tier": "free",
+        "calls_this_month": 0,
+    }).execute()
+
+    # 5. Send email
+    _send_api_key_email(req.email, api_key)
+
+    return {"success": True, "message": "API key sent to your email"}
 
 
 # --- Metrics collector ---

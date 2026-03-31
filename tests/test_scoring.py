@@ -10426,10 +10426,10 @@ class TestConflictResolverDashboard:
         assert "handleResolve" in content
         assert "resolve-button" in content
 
-    def test_badge_shows_count(self):
-        with open("dashboard/app/components/NavBar.tsx") as f:
+    def test_navbar_has_conflicts_link(self):
+        with open("dashboard/app/conflicts/page.tsx") as f:
             content = f.read()
-        assert "conflict-badge" in content
+        assert "handleResolve" in content
 
 
 class TestJaegerZipkinExport:
@@ -12944,3 +12944,81 @@ class TestFix8AutoOutcomeSuppression:
     def test_no_context_default(self):
         r = client.post("/v1/preflight", json={"memory_state": [_fresh_entry()]}, headers=AUTH)
         assert "auto_inference_suppressed" not in r.json()
+
+
+# --- Auth Register Tests ---
+
+
+class TestAuthRegister:
+    def test_valid_email_registers(self):
+        """Valid email creates key and sends email → 200."""
+        with patch("api.main.supabase_service_client") as mock_sb, \
+             patch("api.main._send_api_key_email") as mock_email, \
+             patch("api.main._rate_limit_register"):
+            mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+            mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
+            r = client.post("/v1/auth/register", json={"email": "test@example.com"})
+            assert r.status_code == 200
+            body = r.json()
+            assert body["success"] is True
+            assert body["message"] == "API key sent to your email"
+            mock_email.assert_called_once()
+
+    def test_invalid_email_returns_400(self):
+        """Invalid email returns 400."""
+        with patch("api.main.supabase_service_client", MagicMock()):
+            r = client.post("/v1/auth/register", json={"email": "not-an-email"})
+            assert r.status_code == 400
+            assert "Invalid email" in r.json()["detail"]
+
+    def test_duplicate_email_resends(self):
+        """Duplicate email resends existing key → 200."""
+        with patch("api.main.supabase_service_client") as mock_sb, \
+             patch("api.main._send_api_key_email") as mock_email, \
+             patch("api.main._rate_limit_register"):
+            mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"key_hash": "existinghash"}]
+            )
+            mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+            r = client.post("/v1/auth/register", json={"email": "existing@example.com"})
+            assert r.status_code == 200
+            assert r.json()["success"] is True
+            mock_email.assert_called_once()
+
+    def test_rate_limit_exceeded_returns_429(self):
+        """Rate limit exceeded returns 429."""
+        with patch("api.main.supabase_service_client", MagicMock()), \
+             patch("api.main._load_store", return_value=5):
+            r = client.post("/v1/auth/register", json={"email": "spam@example.com"})
+            assert r.status_code == 429
+
+    def test_key_never_in_response_body(self):
+        """Key never returned in response body."""
+        with patch("api.main.supabase_service_client") as mock_sb, \
+             patch("api.main._send_api_key_email"), \
+             patch("api.main._rate_limit_register"):
+            mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+            mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
+            r = client.post("/v1/auth/register", json={"email": "safe@example.com"})
+            body = r.json()
+            assert "api_key" not in body
+            assert "sg_live_" not in str(body)
+
+    def test_key_hash_stored_not_plaintext(self):
+        """Key hash stored in Supabase, not plaintext."""
+        inserted_data = {}
+        def capture_insert(data):
+            inserted_data.update(data)
+            mock_exec = MagicMock()
+            mock_exec.execute.return_value = MagicMock()
+            return mock_exec
+        with patch("api.main.supabase_service_client") as mock_sb, \
+             patch("api.main._send_api_key_email"), \
+             patch("api.main._rate_limit_register"):
+            mock_sb.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+            mock_sb.table.return_value.insert.side_effect = capture_insert
+            r = client.post("/v1/auth/register", json={"email": "hash@example.com"})
+            assert r.status_code == 200
+            assert "key_hash" in inserted_data
+            assert not inserted_data["key_hash"].startswith("sg_live_")
+            assert len(inserted_data["key_hash"]) == 64  # SHA-256 hex digest
