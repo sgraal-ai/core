@@ -36,13 +36,14 @@ export function SettingsPanel({ onSave }: SettingsPanelProps) {
     <>
       <button
         onClick={() => setOpen(!open)}
-        className="text-muted hover:text-foreground transition"
+        className="text-muted hover:text-foreground transition flex items-center gap-1.5 text-sm"
         title="Settings"
       >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
           <circle cx="10" cy="10" r="3" />
           <path d="M10 1v2m0 14v2m-7-9H1m18 0h-2m-1.3-5.3l-1.4 1.4m-8.6 8.6l-1.4 1.4m0-11.4l1.4 1.4m8.6 8.6l1.4 1.4" />
         </svg>
+        Settings
       </button>
 
       {open && (

@@ -6,6 +6,7 @@ import { MOCK_AGENTS } from "./lib/mock-data";
 import { DEMO_FLEET } from "./lib/demo-fleet";
 import { fetchFleet } from "./lib/api-client";
 import { AgentCard } from "./components/AgentCard";
+import { SettingsPanel } from "./components/SettingsPanel";
 
 export default function DashboardHome() {
   const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
@@ -47,8 +48,13 @@ export default function DashboardHome() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-1">Decision Readiness Dashboard</h1>
-      <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
+      <div className="flex items-start justify-between mb-1">
+        <div>
+          <h1 className="text-2xl font-bold">Decision Readiness Dashboard</h1>
+          <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
+        </div>
+        <SettingsPanel onSave={() => window.location.reload()} />
+      </div>
 
       {!isLive && !loading && (
         <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
@@ -111,10 +117,16 @@ export default function DashboardHome() {
             <div className="bg-surface border border-surface-light rounded-xl p-5">
               <p className="text-xs text-muted mb-2">StabilityScore (fleet avg)</p>
               <p className={`text-4xl font-bold ${stabColor}`}>{(avgStability * 100).toFixed(0)}%</p>
-              <p className="text-xs text-muted mt-1">{avgStability > 0.7 ? "Stable" : avgStability >= 0.4 ? "Degrading" : "Critical"}</p>
+              <p className="text-xs text-muted mt-1">{avgStability > 0.7 ? "Stable" : avgStability >= 0.4 ? (isLive ? "Degrading" : "Demo mode") : "Critical"}</p>
             </div>
             <div className="bg-surface border border-surface-light rounded-xl p-5">
-              <p className="text-xs text-muted mb-2">R_total (fleet avg, 0-5 scale)</p>
+              <p className="text-xs text-muted mb-2 flex items-center gap-1">
+                R_total (fleet avg, 0-5 scale)
+                <span className="relative group cursor-help">
+                  <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-[9px] font-bold text-muted">?</span>
+                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-52 bg-surface-light text-foreground text-[11px] leading-tight rounded-md px-2.5 py-2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity shadow-lg z-10">Reliability score across all memory entries. Scale: 0 (unreliable) to 5 (fully reliable).</span>
+                </span>
+              </p>
               <p className="text-2xl font-bold font-mono mb-2">{avgRTotal.toFixed(2)}</p>
               <div className="w-full h-2 bg-surface-light rounded-full overflow-hidden">
                 <div className={`h-full ${rColor} rounded-full transition-all`} style={{ width: `${Math.min(100, avgRTotal / 5 * 100)}%` }} />
