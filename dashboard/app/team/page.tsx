@@ -49,7 +49,7 @@ export default function TeamPage() {
     try {
       const [mRes, kRes] = await Promise.all([
         fetch(`${apiUrl()}/v1/team/members`, { headers: apiHeaders() }),
-        fetch(`${apiUrl()}/v1/auth/keys`, { headers: apiHeaders() }),
+        fetch(`${apiUrl()}/v1/api-keys`, { headers: apiHeaders() }),
       ]);
       if (mRes.ok) { const d = await mRes.json(); setMembers(Array.isArray(d) ? d : d.members ?? []); }
       if (kRes.ok) { const d = await kRes.json(); setKeys(Array.isArray(d) ? d : d.keys ?? []); }
@@ -80,7 +80,7 @@ export default function TeamPage() {
 
   async function generateKey() {
     try {
-      const res = await fetch(`${apiUrl()}/v1/auth/keys/generate`, {
+      const res = await fetch(`${apiUrl()}/v1/api-keys/generate`, {
         method: "POST", headers: apiHeaders(),
         body: JSON.stringify({ name: "New Key" }),
       });
@@ -102,7 +102,7 @@ export default function TeamPage() {
   async function revokeKey(keyId: string) {
     if (!confirm("Are you sure? This cannot be undone.")) return;
     try {
-      const res = await fetch(`${apiUrl()}/v1/auth/keys/${keyId}`, {
+      const res = await fetch(`${apiUrl()}/v1/api-keys/${keyId}`, {
         method: "DELETE", headers: apiHeaders(),
       });
       if (res.ok) {

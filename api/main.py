@@ -1335,7 +1335,35 @@ def create_dev_key(name: str = "default", key_record: dict = Depends(verify_api_
 
 @app.get("/v1/api-keys")
 def list_dev_keys(key_record: dict = Depends(verify_api_key)):
-    return {"keys": [{"id": v["hash"][:16], "name": v["name"], "active": v["active"], "created_at": v["created_at"]} for v in _dev_keys.values()]}
+    return {"keys": [{"id": v["hash"][:16], "name": v.get("name", "Key"), "key_truncated": f"sg_live_...{v['hash'][-4:]}", "active": v.get("active", True), "created": v.get("created_at", ""), "last_used": v.get("last_used", "Unknown")} for v in _dev_keys.values()]}
+
+class GenerateKeyRequest(BaseModel):
+    name: str = "New Key"
+
+@app.post("/v1/api-keys/generate")
+def generate_api_key(req: GenerateKeyRequest, key_record: dict = Depends(verify_api_key)):
+    """Generate a new API key. Returns the plaintext key once."""
+    _check_rate_limit(key_record)
+    new_key = _generate_api_key()
+    key_hash = _hash_key(new_key)
+    now = datetime.now(timezone.utc).isoformat()
+    _dev_keys[key_hash] = {"name": req.name, "hash": key_hash, "active": True, "created_at": now}
+    # Store in Supabase if available
+    if supabase_service_client:
+        try:
+            email = key_record.get("email", "")
+            customer_id = key_record.get("customer_id", f"gen_{key_hash[:12]}")
+            supabase_service_client.table("api_keys").insert({
+                "key_hash": key_hash,
+                "customer_id": customer_id,
+                "email": email,
+                "tier": key_record.get("tier", "free"),
+                "calls_this_month": 0,
+            }).execute()
+        except Exception:
+            pass
+    trunc = new_key[:12] + "..." + new_key[-4:]
+    return {"api_key": new_key, "key_truncated": trunc, "name": req.name, "id": key_hash[:16], "created": now}
 
 @app.delete("/v1/api-keys/{key_id}")
 def revoke_dev_key(key_id: str, key_record: dict = Depends(verify_api_key)):

@@ -12667,22 +12667,23 @@ class TestConsciousnessDashboard:
         import os
         assert os.path.exists("dashboard/app/consciousness/page.tsx")
 
-    def test_canvas_element(self):
+    def test_svg_graph(self):
         with open("dashboard/app/consciousness/page.tsx") as f:
             content = f.read()
-        assert "consciousness-canvas" in content
+        assert "svgRef" in content
+        assert "d3.forceSimulation" in content
 
     def test_colored_by_omega(self):
         with open("dashboard/app/consciousness/page.tsx") as f:
             content = f.read()
-        assert "getColor" in content
-        assert "#22c55e" in content  # green
-        assert "#ef4444" in content  # red
+        assert "nodeColor" in content
+        assert "#16a34a" in content  # green
+        assert "#dc2626" in content  # red
 
     def test_snapshot_button(self):
         with open("dashboard/app/consciousness/page.tsx") as f:
             content = f.read()
-        assert "snapshot-btn" in content
+        assert "handleSnapshot" in content
 
     def test_migration_exists(self):
         import os
