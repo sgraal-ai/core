@@ -5271,22 +5271,25 @@ def _rate_limit_register(email: str, client_ip: str) -> None:
 
 
 def _send_api_key_email(email: str, api_key: str) -> None:
-    """Send API key via Resend. Fails silently if Resend not configured."""
+    """Send API key via Resend. Fails silently if Resend not configured or errors."""
     if not resend.api_key:
         return
-    resend.Emails.send({
-        "from": "Sgraal <hello@sgraal.com>",
-        "to": [email],
-        "subject": "Your Sgraal API key",
-        "text": (
-            f"Your Sgraal API key: {api_key}\n\n"
-            "Keep this safe — it won't be shown again.\n\n"
-            "Get started: https://sgraal.com/docs\n"
-            "Dashboard: https://app.sgraal.com\n\n"
-            "Free tier: 10,000 decisions/month.\n"
-            "Upgrade: https://sgraal.com/pricing"
-        ),
-    })
+    try:
+        resend.Emails.send({
+            "from": "Sgraal <hello@sgraal.com>",
+            "to": [email],
+            "subject": "Your Sgraal API key",
+            "text": (
+                f"Your Sgraal API key: {api_key}\n\n"
+                "Keep this safe — it won't be shown again.\n\n"
+                "Get started: https://sgraal.com/docs\n"
+                "Dashboard: https://app.sgraal.com\n\n"
+                "Free tier: 10,000 decisions/month.\n"
+                "Upgrade: https://sgraal.com/pricing"
+            ),
+        })
+    except Exception:
+        pass
 
 
 @app.post("/v1/auth/register")
@@ -5319,6 +5322,7 @@ def auth_register(req: RegisterRequest, request: Request):
     key_hash = _hash_key(api_key)
     supabase_service_client.table("api_keys").insert({
         "key_hash": key_hash,
+        "customer_id": f"email_reg_{hashlib.sha256(req.email.encode()).hexdigest()[:12]}",
         "email": req.email,
         "tier": "free",
         "calls_this_month": 0,
