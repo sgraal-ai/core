@@ -5270,10 +5270,35 @@ def _rate_limit_register(email: str, client_ip: str) -> None:
     _persist_store(ip_rl_key, ip_count + 1, ttl=86400)
 
 
+RESEND_AUDIENCE_ID = os.getenv("RESEND_AUDIENCE_ID")
+_UNSUB_SECRET = os.getenv("UNSUB_HMAC_SECRET", "sgraal-unsub-default-secret")
+
+
+def _generate_unsubscribe_token(email: str) -> str:
+    return _hmac.new(_UNSUB_SECRET.encode(), email.lower().encode(), hashlib.sha256).hexdigest()
+
+
+def _add_resend_contact(email: str) -> None:
+    """Add email to Resend audience. Fire-and-forget."""
+    if not resend.api_key or not RESEND_AUDIENCE_ID:
+        return
+    try:
+        http_requests.post(
+            "https://api.resend.com/contacts",
+            headers={"Authorization": f"Bearer {resend.api_key}", "Content-Type": "application/json"},
+            json={"email": email, "unsubscribed": False, "audience_id": RESEND_AUDIENCE_ID},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _send_api_key_email(email: str, api_key: str) -> None:
     """Send API key via Resend. Fails silently if Resend not configured or errors."""
     if not resend.api_key:
         return
+    token = _generate_unsubscribe_token(email)
+    unsub_url = f"https://api.sgraal.com/unsubscribe?email={email}&token={token}"
     try:
         resend.Emails.send({
             "from": "Sgraal <hello@sgraal.com>",
@@ -5285,7 +5310,10 @@ def _send_api_key_email(email: str, api_key: str) -> None:
                 "Get started: https://sgraal.com/docs\n"
                 "Dashboard: https://app.sgraal.com\n\n"
                 "Free tier: 10,000 decisions/month.\n"
-                "Upgrade: https://sgraal.com/pricing"
+                "Upgrade: https://sgraal.com/pricing\n\n"
+                "---\n"
+                "You can unsubscribe from product updates at any time:\n"
+                f"{unsub_url}"
             ),
         })
     except Exception:
@@ -5328,10 +5356,55 @@ def auth_register(req: RegisterRequest, request: Request):
         "calls_this_month": 0,
     }).execute()
 
-    # 5. Send email
+    # 5. Add to Resend audience + send email
+    _add_resend_contact(req.email)
     _send_api_key_email(req.email, api_key)
 
     return {"success": True, "message": "API key sent to your email"}
+
+
+# --- Unsubscribe endpoint ---
+
+from fastapi.responses import HTMLResponse
+
+@app.get("/unsubscribe", response_class=HTMLResponse)
+def unsubscribe(email: str = Query(...), token: str = Query(...)):
+    expected = _generate_unsubscribe_token(email)
+    if not _hmac.compare_digest(token, expected):
+        return HTMLResponse("<html><body><h2>Invalid unsubscribe link.</h2></body></html>", status_code=400)
+
+    # Set unsubscribed in Resend
+    if resend.api_key and RESEND_AUDIENCE_ID:
+        try:
+            # Find contact by email, then update
+            r = http_requests.get(
+                f"https://api.resend.com/audiences/{RESEND_AUDIENCE_ID}/contacts",
+                headers={"Authorization": f"Bearer {resend.api_key}"},
+                params={"email": email},
+                timeout=5,
+            )
+            if r.ok:
+                contacts = r.json().get("data", [])
+                for c in contacts:
+                    if c.get("email", "").lower() == email.lower():
+                        http_requests.patch(
+                            f"https://api.resend.com/audiences/{RESEND_AUDIENCE_ID}/contacts/{c['id']}",
+                            headers={"Authorization": f"Bearer {resend.api_key}", "Content-Type": "application/json"},
+                            json={"unsubscribed": True},
+                            timeout=5,
+                        )
+                        break
+        except Exception:
+            pass
+
+    return HTMLResponse(
+        "<html><head><title>Unsubscribed</title></head>"
+        "<body style=\"font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#faf9f6\">"
+        "<div style=\"text-align:center\">"
+        "<h2 style=\"font-family:'Manrope',sans-serif;color:#0B0F14\">You have been unsubscribed.</h2>"
+        "<p style=\"color:#6b7280\">You will no longer receive product updates from Sgraal.</p>"
+        "</div></body></html>"
+    )
 
 
 # --- Metrics collector ---
