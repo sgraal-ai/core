@@ -4612,14 +4612,15 @@ def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, d
     if key_record.get("demo"):
         raise HTTPException(status_code=403, detail="Demo key cannot access audit logs")
     entries = []
-    if supabase_client:
+    _sb = supabase_service_client or supabase_client
+    if _sb:
         try:
-            q = supabase_client.table("audit_log").select("*").order("created_at", desc=True).limit(limit)
+            q = _sb.table("audit_log").select("*").order("timestamp", desc=True).limit(limit)
             if decision:
                 q = q.eq("decision", decision)
             entries = q.execute().data or []
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"AUDIT_LOG_READ_ERROR: {e}", flush=True)
     return {"entries": entries, "count": len(entries)}
 
 @app.get("/v1/audit-log/export")
@@ -4628,14 +4629,15 @@ def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_a
     if key_record.get("demo"):
         raise HTTPException(status_code=403, detail="Demo key cannot export audit logs")
     entries = []
-    if supabase_client:
+    _sb = supabase_service_client or supabase_client
+    if _sb:
         try:
-            q = supabase_client.table("audit_log").select("*").order("created_at", desc=True).limit(limit)
+            q = _sb.table("audit_log").select("*").order("timestamp", desc=True).limit(limit)
             if firewall_bypassed is True:
                 q = q.eq("event_type", "firewall_bypass")
             entries = q.execute().data or []
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"AUDIT_LOG_EXPORT_ERROR: {e}", flush=True)
     # In-memory fallback filter for firewall_bypassed
     if firewall_bypassed is True and not entries:
         entries = [e for e in entries if e.get("event_type") == "firewall_bypass"]
@@ -5601,8 +5603,9 @@ def _dispatch_webhooks(decision: str, request_id: str, omega: float, entry_ids: 
 
 
 def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str, omega: float, extra: dict = None):
-    """Log audit event to Supabase."""
-    if not supabase_client:
+    """Log audit event to Supabase (requires service role for RLS)."""
+    _sb = supabase_service_client or supabase_client
+    if not _sb:
         return
     try:
         record = {
@@ -5611,11 +5614,10 @@ def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str
             "api_key_id": key_record.get("key_hash", "in_memory"),
             "decision": decision,
             "omega_mem_final": omega,
-            "created_at": datetime.now(timezone.utc).isoformat(),
         }
         if extra:
             record.update(extra)
-        supabase_client.table("audit_log").insert(record).execute()
+        _sb.table("audit_log").insert(record).execute()
     except Exception as e:
         print(f"AUDIT_LOG_ERROR: {e}", flush=True)
 
