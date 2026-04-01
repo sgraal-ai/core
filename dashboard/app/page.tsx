@@ -6,6 +6,7 @@ import { MOCK_AGENTS } from "./lib/mock-data";
 import { DEMO_FLEET } from "./lib/demo-fleet";
 import { fetchFleet } from "./lib/api-client";
 import { AgentCard } from "./components/AgentCard";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "./lib/storage";
 
 export default function DashboardHome() {
   const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
@@ -14,8 +15,8 @@ export default function DashboardHome() {
   const [errors, setErrors] = useState<string[]>([]);
 
   useEffect(() => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiKey = getApiKey();
+    const apiUrl = getApiUrl();
 
     if (!apiKey) {
       setAgents(MOCK_AGENTS);

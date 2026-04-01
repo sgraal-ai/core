@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface SlaData {
   uptime: number;
@@ -42,10 +43,10 @@ export default function SlaPage() {
   const [timeAgo, setTimeAgo] = useState("just now");
 
   const load = useCallback(async () => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     setHasKey(!!apiKey);
     if (!apiKey) { setData(MOCK); setLastUpdated(new Date()); return; }
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/sla/report`, { headers: { "X-API-Key": apiKey } });
       if (res.ok) { const d = await res.json(); setData({ ...MOCK, ...d }); }

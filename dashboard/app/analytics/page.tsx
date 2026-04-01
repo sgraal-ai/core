@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface Summary {
   total_calls: number;
@@ -41,10 +42,10 @@ export default function AnalyticsPage() {
   const [timeAgo, setTimeAgo] = useState("just now");
 
   const load = useCallback(async () => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     setHasKey(!!apiKey);
     if (!apiKey) { setSummary(MOCK_SUMMARY); setWaste(MOCK_WASTE); setLastUpdated(new Date()); return; }
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiUrl = getApiUrl();
     const h = { "X-API-Key": apiKey };
     try {
       const [sR, wR] = await Promise.all([

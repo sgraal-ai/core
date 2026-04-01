@@ -1,5 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 const FRAMEWORKS = ["Python (requests)", "Python (sgraal)", "Node.js", "LangChain", "LangGraph", "CrewAI", "AutoGen", "Vercel AI", "Claude MCP", "Vanilla JS"] as const;
 type Framework = typeof FRAMEWORKS[number];
@@ -49,7 +50,7 @@ export default function CodeGeneratorPage() {
 
   const code = useMemo(() => gen(fw, domain, action, entries, heal, batch), [fw, domain, action, entries, heal, batch]);
 
-  const apiKey = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_key") || "" : "";
+  const apiKey = getApiKey();
 
   const copyCode = () => {
     // Insert real key only into clipboard, never in DOM

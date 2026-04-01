@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl } from "../lib/storage";
 
 interface SettingsPanelProps {
   onSave: (apiKey: string, apiUrl: string) => void;
@@ -12,20 +13,20 @@ export function SettingsPanel({ onSave }: SettingsPanelProps) {
   const [apiUrl, setApiUrl] = useState("https://api.sgraal.com");
 
   useEffect(() => {
-    setApiKey(localStorage.getItem("sgraal_api_key") ?? "");
-    setApiUrl(localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com");
+    setApiKey(getApiKey());
+    setApiUrl(getApiUrl());
   }, []);
 
   function handleSave() {
-    localStorage.setItem("sgraal_api_key", apiKey);
-    localStorage.setItem("sgraal_api_url", apiUrl);
+    saveApiKey(apiKey);
+    saveApiUrl(apiUrl);
     onSave(apiKey, apiUrl);
     setOpen(false);
   }
 
   function handleClear() {
-    localStorage.removeItem("sgraal_api_key");
-    localStorage.removeItem("sgraal_api_url");
+    removeApiKey();
+    removeApiUrl();
     setApiKey("");
     setApiUrl("https://api.sgraal.com");
     onSave("", "https://api.sgraal.com");

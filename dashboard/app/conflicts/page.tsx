@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface Conflict {
   id: string;
@@ -18,8 +19,8 @@ export default function ConflictsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const apiUrl = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_url") || "" : "";
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_key") || "" : "";
+    const apiUrl = getApiUrl();
+    const apiKey = getApiKey();
     if (!apiUrl || !apiKey) {
       setConflicts([
         { id: "c1", entry_a: "mem_001", entry_b: "mem_042", similarity: 0.92, status: "pending" },

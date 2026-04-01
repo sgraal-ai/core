@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Script from "next/script";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface MemNode {
   id: string;
@@ -73,7 +74,7 @@ export default function ConsciousnessPage() {
   }, [toast]);
 
   const load = useCallback(async () => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     setHasKey(!!apiKey);
     if (!apiKey) {
       const mock = randomMock();
@@ -81,7 +82,7 @@ export default function ConsciousnessPage() {
       setEdges(mock.edges);
       return;
     }
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/store/memories?limit=500`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (res.ok) {
@@ -203,8 +204,8 @@ export default function ConsciousnessPage() {
   }, [d3Ready, nodes, edges]);
 
   async function handleScan() {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiKey = getApiKey();
+    const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/memory/scan`, {
         method: "POST",
@@ -224,8 +225,8 @@ export default function ConsciousnessPage() {
   }
 
   async function handleSnapshot() {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiKey = getApiKey();
+    const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/memory/snapshot`, {
         method: "POST",
@@ -243,9 +244,9 @@ export default function ConsciousnessPage() {
   }
 
   async function handleHeal(entryId: string) {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     if (!apiKey) return;
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/heal`, {
         method: "POST",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface Member { email: string; role: string; joined: string; status: string; isYou?: boolean; }
 const ROLES = [
@@ -29,16 +30,16 @@ export default function TeamPage() {
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
   function apiHeaders(): Record<string, string> {
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_key") ?? "" : "";
+    const apiKey = getApiKey();
     return { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
   }
 
   function apiUrl(): string {
-    return typeof window !== "undefined" ? localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com" : "https://api.sgraal.com";
+    return getApiUrl();
   }
 
   const load = useCallback(async () => {
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_key") ?? "" : "";
+    const apiKey = getApiKey();
     setHasKey(!!apiKey);
     setStoredKey(apiKey);
     if (!apiKey) { setMembers([]); return; }

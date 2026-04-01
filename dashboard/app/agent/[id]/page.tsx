@@ -12,6 +12,7 @@ import { RepairPlanList } from "../../components/RepairPlanList";
 import { AtRiskWarnings } from "../../components/AtRiskWarnings";
 import { AdvancedAnalytics } from "../../components/AdvancedAnalytics";
 import { DeepAnalytics } from "../../components/DeepAnalytics";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../../lib/storage";
 
 const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
   USE_MEMORY: { bg: "bg-green-400/10", text: "text-green-400" },
@@ -29,8 +30,8 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     setMounted(true);
     setAgent(getAgent(id) ?? null);
-    const apiKey = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_key") ?? "" : "";
-    const apiUrl = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com" : "https://api.sgraal.com";
+    const apiKey = getApiKey();
+    const apiUrl = getApiUrl();
 
     if (!apiKey) return;
 

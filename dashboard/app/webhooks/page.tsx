@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface Webhook { id: string; url: string; events: string[]; active: boolean; last_triggered: string; }
 interface Delivery { timestamp: string; event: string; status: number; response_time: string; }
@@ -39,10 +40,10 @@ export default function WebhooksPage() {
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
   const load = useCallback(async () => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     setHasKey(!!apiKey);
     if (!apiKey) return;
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/webhooks`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (res.ok) { const d = await res.json(); if (Array.isArray(d)) setHooks(d); else if (d.webhooks) setHooks(d.webhooks); }
@@ -57,9 +58,9 @@ export default function WebhooksPage() {
 
   async function saveWebhook() {
     if (!newUrl.startsWith("https://")) { setToast({ message: "URL must start with https://", type: "error" }); return; }
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     if (apiKey) {
-      const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+      const apiUrl = getApiUrl();
       try {
         await fetch(`${apiUrl}/v1/webhooks`, {
           method: "POST",
@@ -77,9 +78,9 @@ export default function WebhooksPage() {
   }
 
   async function deleteWebhook(id: string) {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     if (apiKey) {
-      const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+      const apiUrl = getApiUrl();
       try { await fetch(`${apiUrl}/v1/webhooks/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${apiKey}` } }); } catch {}
     }
     setHooks((prev) => prev.filter((h) => h.id !== id));

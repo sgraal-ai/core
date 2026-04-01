@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface Profile {
   id: string;
@@ -29,10 +30,10 @@ export default function ProfilesPage() {
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
   const load = useCallback(async () => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     setHasKey(!!apiKey);
     if (!apiKey) { setProfiles(MOCK_PROFILES); return; }
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/compliance/profiles`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (res.ok) { const d = await res.json(); if (Array.isArray(d)) setProfiles(d); else if (d.profiles) setProfiles(d.profiles); }

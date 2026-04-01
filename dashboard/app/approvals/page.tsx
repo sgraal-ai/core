@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface Approval {
   id: string;
@@ -75,7 +76,7 @@ export default function ApprovalsPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const loadApprovals = useCallback(async () => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     setHasKey(!!apiKey);
 
     if (!apiKey) {
@@ -86,7 +87,7 @@ export default function ApprovalsPage() {
     }
 
     try {
-      const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+      const apiUrl = getApiUrl();
       const res = await fetch(`${apiUrl}/v1/approvals/pending`, {
         headers: { "X-API-Key": apiKey },
       });
@@ -131,8 +132,8 @@ export default function ApprovalsPage() {
   }
 
   async function approveDecision(id: string) {
-    const apiKey = localStorage.getItem("sgraal_api_key") || "sg_demo_playground";
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiKey = getApiKey() || "sg_demo_playground";
+    const apiUrl = getApiUrl();
     try {
       await fetch(`${apiUrl}/v1/approvals/${id}/approve`, {
         method: "POST",
@@ -146,8 +147,8 @@ export default function ApprovalsPage() {
   }
 
   async function rejectDecision(id: string) {
-    const apiKey = localStorage.getItem("sgraal_api_key") || "sg_demo_playground";
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiKey = getApiKey() || "sg_demo_playground";
+    const apiUrl = getApiUrl();
     try {
       await fetch(`${apiUrl}/v1/approvals/${id}/reject`, {
         method: "POST",

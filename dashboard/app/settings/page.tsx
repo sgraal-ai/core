@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");
@@ -8,7 +9,7 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem("sgraal_api_key") ?? "";
+    const stored = getApiKey();
     if (stored) {
       setSavedKey(stored);
       setApiKey(stored);
@@ -18,12 +19,12 @@ export default function SettingsPage() {
   function handleSave() {
     const trimmed = apiKey.trim();
     if (!trimmed) return;
-    localStorage.setItem("sgraal_api_key", trimmed);
+    saveApiKey(trimmed);
     setSavedKey(trimmed);
   }
 
   function handleRemove() {
-    localStorage.removeItem("sgraal_api_key");
+    removeApiKey();
     setApiKey("");
     setSavedKey("");
   }

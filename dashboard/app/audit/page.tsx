@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, Fragment } from "react";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface AuditEntry {
   timestamp: string;
@@ -54,10 +55,10 @@ export default function AuditPage() {
   const perPage = 50;
 
   const load = useCallback(async () => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     setHasKey(!!apiKey);
     if (!apiKey) { setEntries(MOCK); return; }
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiUrl = getApiUrl();
     try {
       const params = new URLSearchParams({ limit: String(perPage), offset: String(page * perPage) });
       if (agentFilter) params.set("agent_id", agentFilter);
@@ -91,9 +92,9 @@ export default function AuditPage() {
   const totalEntries = hasKey ? 1247 : sorted.length;
 
   function exportCsv() {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = getApiKey();
     if (!apiKey) return;
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    const apiUrl = getApiUrl();
     window.open(`${apiUrl}/v1/audit-log/export?format=csv`, "_blank");
   }
 

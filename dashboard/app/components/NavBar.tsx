@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
+import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 
 interface DropdownItem {
   label: string;
@@ -92,11 +93,11 @@ export function NavBar() {
   const navRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    setApiKey(localStorage.getItem("sgraal_api_key") ?? "");
+    setApiKey(getApiKey());
 
     // Check for pending ASK_USER approvals
     try {
-      const stored = localStorage.getItem("sgraal_pending_approvals");
+      const stored = getItem("sgraal_pending_approvals");
       if (stored) setPendingApprovals(parseInt(stored, 10) || 0);
     } catch {}
   }, []);

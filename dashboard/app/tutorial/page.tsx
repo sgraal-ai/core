@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import { getItem, setItem } from "../lib/storage";
 
 const API_URL = "https://api.sgraal.com";
 const DEMO_KEY = "sg_demo_playground";
@@ -25,14 +26,14 @@ export default function TutorialPage() {
   const [completed, setCompleted] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("sgraal_tutorial_step");
+    const saved = getItem("sgraal_tutorial_step");
     if (saved) setStep(parseInt(saved, 10));
-    const cc = localStorage.getItem("sgraal_tutorial_calls");
+    const cc = getItem("sgraal_tutorial_calls");
     if (cc) setCallCount(parseInt(cc, 10));
-    if (localStorage.getItem("sgraal_tutorial_done") === "true") setCompleted(true);
+    if (getItem("sgraal_tutorial_done") === "true") setCompleted(true);
   }, []);
 
-  useEffect(() => { localStorage.setItem("sgraal_tutorial_step", String(step)); }, [step]);
+  useEffect(() => { setItem("sgraal_tutorial_step", String(step)); }, [step]);
 
   const rateLimited = callCount >= MAX_CALLS;
 
@@ -49,7 +50,7 @@ export default function TutorialPage() {
       setResult(data);
       const nc = callCount + 1;
       setCallCount(nc);
-      localStorage.setItem("sgraal_tutorial_calls", String(nc));
+      setItem("sgraal_tutorial_calls", String(nc));
     } catch { /* ignore */ }
     setLoading(false);
   };
@@ -67,14 +68,14 @@ export default function TutorialPage() {
       setHealResult(await r.json());
       const nc = callCount + 1;
       setCallCount(nc);
-      localStorage.setItem("sgraal_tutorial_calls", String(nc));
+      setItem("sgraal_tutorial_calls", String(nc));
     } catch { /* ignore */ }
     setLoading(false);
   };
 
   const finish = () => {
     setCompleted(true);
-    localStorage.setItem("sgraal_tutorial_done", "true");
+    setItem("sgraal_tutorial_done", "true");
   };
 
   return (
