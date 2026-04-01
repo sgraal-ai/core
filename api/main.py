@@ -35,7 +35,7 @@ def _load_store(key: str, default=None):
 
 def _redis_is_available() -> bool:
     """Check if Redis is reachable."""
-    return bool(os.getenv("UPSTASH_REDIS_URL") and os.getenv("UPSTASH_REDIS_TOKEN"))
+    return bool((os.getenv("UPSTASH_REDIS_URL") or os.getenv("UPSTASH_REDIS_REST_URL")) and (os.getenv("UPSTASH_REDIS_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN")))
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -50,8 +50,8 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
-UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_URL")
-UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN")
+UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_URL") or os.getenv("UPSTASH_REDIS_REST_URL")
+UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
 supabase_client = None
 if SUPABASE_URL and SUPABASE_KEY:

@@ -6,8 +6,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_URL")
-UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN")
+UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_URL") or os.getenv("UPSTASH_REDIS_REST_URL")
+UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
 def _headers():
     return {"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}
