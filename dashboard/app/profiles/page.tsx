@@ -1,62 +1,114 @@
 "use client";
-import { useState } from "react";
+
+import { useState, useEffect, useCallback } from "react";
+
+interface Profile {
+  id: string;
+  title: string;
+  description: string;
+  active: boolean;
+  rules: Record<string, string>;
+}
+
+const MOCK_PROFILES: Profile[] = [
+  { id: "EU_AI_ACT", title: "EU AI Act", description: "Article 9, 12, 13, 14, 17 compliance. Auto conformity declaration. Blocks non-compliant decisions.", active: true, rules: { freshness_threshold: "30 days", source_trust_min: "0.7" } },
+  { id: "HIPAA", title: "HIPAA", description: "§164.312 safeguards. PHI isolation. Medical memory older than 30 days flagged automatically.", active: true, rules: { max_age_days: "30", require_provenance: "true" } },
+  { id: "MIFID2", title: "MiFID2", description: "Financial decision validation. Unverified counterparty data blocked. Full audit trail.", active: false, rules: { financial_memory_max_age: "5 years", require_source_trust: "true" } },
+  { id: "GENERAL", title: "General", description: "Default risk assessment. No domain-specific rules.", active: true, rules: {} },
+];
+
+const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
+const BTN_GOLD: React.CSSProperties = { background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "8px 20px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: "pointer" };
+const BTN_OUTLINE: React.CSSProperties = { background: "transparent", color: "#6b7280", fontWeight: 500, padding: "8px 16px", borderRadius: "6px", fontSize: "13px", border: "1px solid #e5e7eb", cursor: "pointer" };
 
 export default function ProfilesPage() {
-  const [name, setName] = useState("");
-  const [domain, setDomain] = useState("general");
-  const [warn, setWarn] = useState(40);
-  const [block, setBlock] = useState(80);
-  const [profiles, setProfiles] = useState<Array<{ name: string; domain: string; warn: number; block: number }>>([]);
-  const [msg, setMsg] = useState("");
+  const [profiles, setProfiles] = useState<Profile[]>(MOCK_PROFILES);
+  const [hasKey, setHasKey] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
-  const create = () => {
-    if (!name) return;
-    setProfiles([...profiles, { name, domain, warn, block }]);
-    setMsg(`Profile "${name}" created`);
-    setName("");
-  };
+  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
+
+  const load = useCallback(async () => {
+    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    setHasKey(!!apiKey);
+    if (!apiKey) { setProfiles(MOCK_PROFILES); return; }
+    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    try {
+      const res = await fetch(`${apiUrl}/v1/compliance/profiles`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (res.ok) { const d = await res.json(); if (Array.isArray(d)) setProfiles(d); else if (d.profiles) setProfiles(d.profiles); }
+    } catch {}
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  function toggleProfile(id: string) {
+    setProfiles((prev) => prev.map((p) => p.id === id ? { ...p, active: !p.active } : p));
+    const p = profiles.find((p) => p.id === id);
+    setToast({ message: p?.active ? `${p.title} deactivated` : `${p?.title} activated`, type: "success" });
+  }
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-1">Domain Profiles</h1>
-      <p className="text-muted text-sm mb-6">Create custom scoring profiles per domain with tunable thresholds.</p>
+      <h1 className="text-2xl font-bold mb-1">Compliance Profiles</h1>
+      <p className="text-muted text-sm mb-6">Configure memory governance rules per domain.</p>
 
-      <div className="bg-surface border border-surface-light rounded-xl p-5 mb-6">
-        <h2 className="text-sm font-semibold mb-3">New Profile</h2>
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="Profile name" className="bg-background border border-surface-light rounded px-3 py-2 text-sm" />
-          <select value={domain} onChange={e => setDomain(e.target.value)} className="bg-background border border-surface-light rounded px-3 py-2 text-sm">
-            {["general", "fintech", "medical", "legal"].map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
+      {!hasKey && (
+        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
+          Showing mock data. <a href="/settings" className="underline">Enter your API key</a> to manage live profiles.
         </div>
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <label className="text-xs text-muted">WARN threshold: {warn}</label>
-            <input type="range" min={10} max={90} value={warn} onChange={e => setWarn(+e.target.value)} className="w-full accent-yellow-400" />
-          </div>
-          <div>
-            <label className="text-xs text-muted">BLOCK threshold: {block}</label>
-            <input type="range" min={20} max={100} value={block} onChange={e => setBlock(+e.target.value)} className="w-full accent-red-400" />
-          </div>
-        </div>
-        <button onClick={create} className="bg-gold text-background font-semibold px-4 py-2 rounded text-sm">Create Profile</button>
-        {msg && <p className="text-xs text-green-400 mt-2">{msg}</p>}
-      </div>
+      )}
 
-      <div className="bg-surface border border-surface-light rounded-xl p-5">
-        <h2 className="text-sm font-semibold mb-3">Your Profiles ({profiles.length})</h2>
-        {profiles.map((p, i) => (
-          <div key={i} className="flex justify-between items-center py-2 border-b border-surface-light last:border-0">
-            <span className="text-sm font-semibold">{p.name}</span>
-            <div className="flex gap-3 text-xs text-muted">
-              <span>{p.domain}</span>
-              <span className="text-yellow-400">W:{p.warn}</span>
-              <span className="text-red-400">B:{p.block}</span>
+      {/* Active Profiles Grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "40px" }}>
+        {profiles.map((p) => (
+          <div key={p.id} style={{ ...CARD, borderLeft: `4px solid ${p.active ? "#c9a962" : "#d1d5db"}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <h3 style={{ fontSize: "18px", fontWeight: 700, color: "#0B0F14" }}>{p.title}</h3>
+              <span style={{
+                background: p.active ? "#dcfce7" : "#f3f4f6",
+                color: p.active ? "#16a34a" : "#6b7280",
+                borderRadius: "20px", padding: "2px 10px", fontSize: "12px", fontWeight: 600,
+              }}>
+                {p.active ? "ACTIVE" : "INACTIVE"}
+              </span>
+            </div>
+            <p style={{ fontSize: "14px", color: "#6b7280", lineHeight: 1.6, marginBottom: "12px" }}>{p.description}</p>
+            {Object.keys(p.rules).length > 0 && (
+              <div style={{ marginBottom: "16px" }}>
+                {Object.entries(p.rules).map(([k, v]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", padding: "4px 0", borderBottom: "1px solid #f5f4f0" }}>
+                    <span style={{ color: "#6b7280", fontFamily: "monospace" }}>{k}</span>
+                    <span style={{ color: "#0B0F14", fontWeight: 600 }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: "8px" }}>
+              {p.active ? (
+                <>
+                  <button style={BTN_OUTLINE}>Configure</button>
+                  <button onClick={() => toggleProfile(p.id)} style={{ ...BTN_OUTLINE, color: "#dc2626", borderColor: "#fca5a5" }}>Deactivate</button>
+                </>
+              ) : (
+                <button onClick={() => toggleProfile(p.id)} style={BTN_GOLD}>Activate</button>
+              )}
             </div>
           </div>
         ))}
-        {profiles.length === 0 && <p className="text-xs text-muted">No profiles yet. Create one above to customize scoring.</p>}
       </div>
+
+      {/* Custom Profiles */}
+      <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#0B0F14", marginBottom: "16px" }}>Custom Profiles</h2>
+      <div style={{ ...CARD, textAlign: "center", padding: "40px" }}>
+        <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "16px" }}>No custom profiles yet. Create one to define your own memory governance rules.</p>
+        <button style={BTN_GOLD}>+ Create Profile</button>
+      </div>
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: "24px", right: "24px", background: toast.type === "success" ? "#16a34a" : "#dc2626", color: "white", padding: "12px 24px", borderRadius: "8px", fontSize: "14px", fontWeight: 600, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100 }}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }

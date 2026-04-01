@@ -1,52 +1,232 @@
 "use client";
-import { useState } from "react";
 
-const ROLES = ["admin", "developer", "viewer", "auditor"] as const;
+import { useState, useEffect, useCallback } from "react";
+
+interface Member { email: string; role: string; joined: string; status: string; isYou?: boolean; }
+interface ApiKey { name: string; key_truncated: string; created: string; last_used: string; }
+
+const MOCK_MEMBERS: Member[] = [
+  { email: "zsobpeter@gmail.com", role: "Admin", joined: "Apr 1, 2026", status: "Active", isYou: true },
+  { email: "developer@company.com", role: "Developer", joined: "Mar 15, 2026", status: "Active" },
+  { email: "auditor@company.com", role: "Auditor", joined: "Mar 20, 2026", status: "Active" },
+];
+
+const MOCK_KEYS: ApiKey[] = [
+  { name: "Default", key_truncated: "sg_live_f3CY...RlAw", created: "Apr 1, 2026", last_used: "Just now" },
+];
+
+const ROLES = [
+  { id: "admin", label: "Admin", desc: "Full access including billing and team management" },
+  { id: "developer", label: "Developer", desc: "API access, dashboard, no billing" },
+  { id: "viewer", label: "Viewer", desc: "Read-only dashboard access" },
+  { id: "auditor", label: "Auditor", desc: "Audit log access only" },
+];
+
+const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
+const TH: React.CSSProperties = { fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "8px 16px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em" };
+const TD: React.CSSProperties = { fontSize: "14px", color: "#0B0F14", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" };
+const BTN_GOLD: React.CSSProperties = { background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "8px 20px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: "pointer" };
+const INPUT: React.CSSProperties = { width: "100%", background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "10px 14px", fontSize: "14px", color: "#0B0F14" };
 
 export default function TeamPage() {
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<typeof ROLES[number]>("developer");
-  const [members, setMembers] = useState<Array<{ email: string; role: string; status: string }>>([]);
-  const [msg, setMsg] = useState("");
+  const [members, setMembers] = useState<Member[]>(MOCK_MEMBERS);
+  const [keys, setKeys] = useState<ApiKey[]>(MOCK_KEYS);
+  const [hasKey, setHasKey] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("developer");
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
-  const invite = () => {
-    if (!email) return;
-    setMembers([...members, { email, role, status: "pending" }]);
-    setMsg(`Invited ${email} as ${role}`);
-    setEmail("");
-  };
+  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
+
+  const load = useCallback(async () => {
+    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    setHasKey(!!apiKey);
+    if (!apiKey) return;
+    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    try {
+      const res = await fetch(`${apiUrl}/v1/team/members`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (res.ok) { const d = await res.json(); if (Array.isArray(d)) setMembers(d); else if (d.members) setMembers(d.members); }
+    } catch {}
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function sendInvite() {
+    if (!inviteEmail) return;
+    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    if (apiKey) {
+      const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+      try {
+        await fetch(`${apiUrl}/v1/team/invite`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        });
+      } catch {}
+    }
+    setMembers((prev) => [...prev, { email: inviteEmail, role: ROLES.find((r) => r.id === inviteRole)?.label ?? inviteRole, joined: "Just now", status: "Pending" }]);
+    setShowModal(false);
+    setInviteEmail("");
+    setInviteRole("developer");
+    setToast({ message: `Invite sent to ${inviteEmail}`, type: "success" });
+  }
+
+  function removeMember(email: string) {
+    setMembers((prev) => prev.filter((m) => m.email !== email));
+    setToast({ message: `Removed ${email}`, type: "success" });
+  }
+
+  function copyKey(key: string) {
+    const full = localStorage.getItem("sgraal_api_key") ?? key;
+    navigator.clipboard.writeText(full);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  }
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-1">Team Management</h1>
-      <p className="text-muted text-sm mb-6">Manage team members and RBAC roles.</p>
-
-      <div className="bg-surface border border-surface-light rounded-xl p-5 mb-6">
-        <h2 className="text-sm font-semibold mb-3">Invite Member</h2>
-        <div className="flex gap-3">
-          <input value={email} onChange={e => setEmail(e.target.value)} placeholder="email@company.com" className="bg-background border border-surface-light rounded px-3 py-2 text-sm flex-1" />
-          <select value={role} onChange={e => setRole(e.target.value as typeof ROLES[number])} className="bg-background border border-surface-light rounded px-3 py-2 text-sm">
-            {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-          <button onClick={invite} className="bg-gold text-background font-semibold px-4 py-2 rounded text-sm">Invite</button>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">Team</h1>
+          <p className="text-muted text-sm">Manage access to your Sgraal workspace.</p>
         </div>
-        {msg && <p className="text-xs text-green-400 mt-2">{msg}</p>}
+        <button onClick={() => setShowModal(true)} style={BTN_GOLD}>+ Invite Member</button>
       </div>
 
-      <div className="bg-surface border border-surface-light rounded-xl p-5">
-        <h2 className="text-sm font-semibold mb-3">Members ({members.length})</h2>
-        <div className="text-xs text-muted mb-2">admin: all | developer: preflight+heal | viewer: read-only | auditor: audit logs</div>
-        {members.map((m, i) => (
-          <div key={i} className="flex justify-between items-center py-2 border-b border-surface-light last:border-0">
-            <span className="text-sm font-mono">{m.email}</span>
-            <div className="flex gap-2 items-center">
-              <span className="text-xs text-muted">{m.role}</span>
-              <span className={`text-xs px-2 py-0.5 rounded ${m.status === "active" ? "bg-green-400/10 text-green-400" : "bg-yellow-400/10 text-yellow-400"}`}>{m.status}</span>
+      {!hasKey && (
+        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
+          Showing mock data. <a href="/settings" className="underline">Enter your API key</a> to manage your team.
+        </div>
+      )}
+
+      {/* Members Table */}
+      <div style={{ ...CARD, padding: 0, overflow: "hidden", marginBottom: "24px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              {["Member", "Role", "Joined", "Status", "Actions"].map((h) => <th key={h} style={TH}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((m) => (
+              <tr key={m.email}>
+                <td style={{ ...TD, fontFamily: "monospace", fontWeight: 600 }}>{m.email}</td>
+                <td style={TD}>{m.role}</td>
+                <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{m.joined}</td>
+                <td style={TD}>
+                  <span style={{
+                    background: m.status === "Active" ? "#dcfce7" : "#fef9c3",
+                    color: m.status === "Active" ? "#16a34a" : "#a16207",
+                    borderRadius: "20px", padding: "2px 10px", fontSize: "12px", fontWeight: 600,
+                  }}>
+                    {m.status}
+                  </span>
+                </td>
+                <td style={TD}>
+                  {m.isYou ? (
+                    <span style={{ fontSize: "13px", color: "#6b7280" }}>(you)</span>
+                  ) : (
+                    <button onClick={() => removeMember(m.email)} style={{ fontSize: "13px", color: "#dc2626", cursor: "pointer", background: "none", border: "none" }}>Remove</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Roles Info Box */}
+      <div style={{ ...CARD, marginBottom: "32px", background: "#faf9f6" }}>
+        <h3 style={{ fontSize: "14px", fontWeight: 700, marginBottom: "12px" }}>Role Permissions</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+          {ROLES.map((r) => (
+            <div key={r.id} style={{ fontSize: "13px" }}>
+              <span style={{ fontWeight: 600, color: "#0B0F14" }}>{r.label}: </span>
+              <span style={{ color: "#6b7280" }}>{r.desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Pending Invites */}
+      {members.some((m) => m.status === "Pending") ? (
+        <div style={{ ...CARD, marginBottom: "32px" }}>
+          <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px" }}>Pending Invites</h2>
+          {members.filter((m) => m.status === "Pending").map((m) => (
+            <div key={m.email} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f5f4f0", fontSize: "14px" }}>
+              <span style={{ fontFamily: "monospace" }}>{m.email}</span>
+              <span style={{ color: "#6b7280" }}>{m.role} — Pending</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ ...CARD, marginBottom: "32px" }}>
+          <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "8px" }}>Pending Invites</h2>
+          <p style={{ fontSize: "13px", color: "#6b7280" }}>No pending invites.</p>
+        </div>
+      )}
+
+      {/* API Keys */}
+      <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "16px" }}>API Keys</h2>
+      <div style={{ ...CARD, padding: 0, overflow: "hidden", marginBottom: "16px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              {["Name", "Key", "Created", "Last Used", "Actions"].map((h) => <th key={h} style={TH}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {keys.map((k) => (
+              <tr key={k.name}>
+                <td style={{ ...TD, fontWeight: 600 }}>{k.name}</td>
+                <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px", color: "#c9a962" }}>{k.key_truncated}</td>
+                <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{k.created}</td>
+                <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{k.last_used}</td>
+                <td style={TD}>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button onClick={() => copyKey(k.key_truncated)} style={{ fontSize: "13px", color: "#6b7280", cursor: "pointer", background: "none", border: "none" }}>
+                      {copied === k.key_truncated ? "Copied!" : "Copy"}
+                    </button>
+                    <button style={{ fontSize: "13px", color: "#dc2626", cursor: "pointer", background: "none", border: "none" }}>Revoke</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button style={BTN_GOLD}>+ Generate New Key</button>
+
+      {/* Invite Modal */}
+      {showModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }} onClick={() => setShowModal(false)}>
+          <div style={{ background: "#ffffff", borderRadius: "12px", padding: "32px", width: "440px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "24px" }}>Invite team member</h3>
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Email Address</label>
+              <input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="name@company.com" style={INPUT} />
+            </div>
+            <div style={{ marginBottom: "24px" }}>
+              <label style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Role</label>
+              <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ ...INPUT, cursor: "pointer" }}>
+                {ROLES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+              <button onClick={() => setShowModal(false)} style={{ padding: "8px 20px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "14px", cursor: "pointer", background: "#ffffff" }}>Cancel</button>
+              <button onClick={sendInvite} style={BTN_GOLD}>Send Invite</button>
             </div>
           </div>
-        ))}
-        {members.length === 0 && <p className="text-xs text-muted">No members yet. Invite your team above.</p>}
-      </div>
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: "24px", right: "24px", background: toast.type === "success" ? "#16a34a" : "#dc2626", color: "white", padding: "12px 24px", borderRadius: "8px", fontSize: "14px", fontWeight: 600, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100 }}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }
