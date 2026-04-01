@@ -48,16 +48,29 @@ function randomMock(): { nodes: MemNode[]; edges: MemEdge[] } {
 }
 
 const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
+const BTN: React.CSSProperties = { padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: "pointer", background: "#ffffff" };
+const ZOOM_BTN: React.CSSProperties = { width: "32px", height: "32px", borderRadius: "6px", border: "1px solid #e5e7eb", background: "#ffffff", fontSize: "16px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
 
 export default function ConsciousnessPage() {
   const svgRef = useRef<SVGSVGElement>(null);
+  const zoomRef = useRef<{ zoomIn: () => void; zoomOut: () => void; reset: () => void } | null>(null);
   const [d3Ready, setD3Ready] = useState(false);
   const [nodes, setNodes] = useState<MemNode[]>([]);
   const [edges, setEdges] = useState<MemEdge[]>([]);
   const [selected, setSelected] = useState<MemNode | null>(null);
   const [hasKey, setHasKey] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
-  const simulationRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  function showToast(message: string, type: "success" | "error") {
+    setToast({ message, type });
+  }
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const load = useCallback(async () => {
     const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
@@ -81,7 +94,6 @@ export default function ConsciousnessPage() {
             type: String(e.type || "unknown"),
             contribution: Number(e.shapley ?? Math.random() * 8 + 2),
           })));
-          // Build edges from conflicts/links
           const edgeList: MemEdge[] = [];
           for (let i = 0; i < Math.min(entries.length, 500); i++) {
             if (i + 1 < entries.length) edgeList.push({ source: String(entries[i].id || `entry_${i}`), target: String(entries[i + 1].id || `entry_${i + 1}`) });
@@ -98,7 +110,7 @@ export default function ConsciousnessPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // D3 force simulation
+  // D3 force simulation with zoom
   useEffect(() => {
     if (!d3Ready || !svgRef.current || nodes.length === 0) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,29 +123,48 @@ export default function ConsciousnessPage() {
 
     svg.selectAll("*").remove();
 
+    // Container group for zoom/pan
+    const g = svg.append("g");
+
+    // Zoom behavior
+    const zoom = d3.zoom()
+      .scaleExtent([0.1, 4])
+      .on("zoom", (event: { transform: unknown }) => {
+        g.attr("transform", event.transform);
+      });
+
+    svg.call(zoom);
+
+    // Expose zoom controls
+    zoomRef.current = {
+      zoomIn: () => svg.transition().duration(300).call(zoom.scaleBy, 1.5),
+      zoomOut: () => svg.transition().duration(300).call(zoom.scaleBy, 0.67),
+      reset: () => svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity),
+    };
+
     const d3Nodes: D3Node[] = nodes.map((n) => ({ ...n }));
     const d3Edges = edges.map((e) => ({ source: e.source, target: e.target }));
 
     const simulation = d3.forceSimulation(d3Nodes as unknown[])
-      .force("charge", d3.forceManyBody().strength(-200))
-      .force("link", d3.forceLink(d3Edges).id((d: unknown) => (d as D3Node).id).distance(80))
+      .force("charge", d3.forceManyBody().strength(-400))
+      .force("link", d3.forceLink(d3Edges).id((d: unknown) => (d as D3Node).id).distance(120))
       .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius((d: unknown) => (d as D3Node).contribution + 6));
+      .force("collision", d3.forceCollide().radius(30));
 
-    const link = svg.append("g").selectAll("line").data(d3Edges).join("line")
+    const link = g.append("g").selectAll("line").data(d3Edges).join("line")
       .attr("stroke", "rgba(201,169,98,0.15)").attr("stroke-width", 1);
 
-    const node = svg.append("g").selectAll("circle").data(d3Nodes).join("circle")
+    const node = g.append("g").selectAll("circle").data(d3Nodes).join("circle")
       .attr("r", (d: D3Node) => 4 + d.contribution)
       .attr("fill", (d: D3Node) => nodeColor(d.omega))
       .attr("stroke", "#ffffff").attr("stroke-width", 1.5)
       .style("cursor", "pointer");
 
-    const label = svg.append("g").selectAll("text").data(d3Nodes).join("text")
+    const label = g.append("g").selectAll("text").data(d3Nodes).join("text")
       .text((d: D3Node) => d.id.slice(0, 10))
       .attr("font-size", "9px").attr("fill", "#6b7280").attr("text-anchor", "middle").attr("dy", (d: D3Node) => -(d.contribution + 8));
 
-    // Tooltip on hover
+    // Tooltip
     const tooltip = d3.select("body").append("div")
       .style("position", "absolute").style("background", "#ffffff").style("border", "1px solid #e5e7eb")
       .style("border-radius", "6px").style("padding", "8px 12px").style("font-size", "12px")
@@ -173,16 +204,42 @@ export default function ConsciousnessPage() {
 
   async function handleScan() {
     const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
-    if (!apiKey) return;
     const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
-    try { await fetch(`${apiUrl}/v1/memory/scan`, { method: "POST", headers: { "X-API-Key": apiKey } }); } catch {}
+    try {
+      const res = await fetch(`${apiUrl}/v1/memory/scan`, {
+        method: "POST",
+        headers: { "X-API-Key": apiKey || "sg_demo_playground", "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "consciousness", scan_depth: "quick" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const count = data.sleepers_found ?? data.count ?? 0;
+        showToast(`Scan complete — ${count} sleepers found`, "success");
+      } else {
+        showToast("Scan failed", "error");
+      }
+    } catch {
+      showToast("Scan failed", "error");
+    }
   }
 
   async function handleSnapshot() {
     const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
-    if (!apiKey) return;
     const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
-    try { await fetch(`${apiUrl}/v1/memory/snapshot`, { method: "POST", headers: { "X-API-Key": apiKey, "Content-Type": "application/json" }, body: JSON.stringify({ agent_id: "consciousness" }) }); } catch {}
+    try {
+      const res = await fetch(`${apiUrl}/v1/memory/snapshot`, {
+        method: "POST",
+        headers: { "X-API-Key": apiKey || "sg_demo_playground", "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "consciousness", label: "manual snapshot" }),
+      });
+      if (res.ok) {
+        showToast("Snapshot created \u2713", "success");
+      } else {
+        showToast("Snapshot failed", "error");
+      }
+    } catch {
+      showToast("Snapshot failed", "error");
+    }
   }
 
   async function handleHeal(entryId: string) {
@@ -190,12 +247,16 @@ export default function ConsciousnessPage() {
     if (!apiKey) return;
     const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
     try {
-      await fetch(`${apiUrl}/v1/heal`, {
+      const res = await fetch(`${apiUrl}/v1/heal`, {
         method: "POST",
         headers: { "X-API-Key": apiKey, "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({ entry_id: entryId, action: "REFETCH" }),
       });
-    } catch {}
+      if (res.ok) showToast(`Healed ${entryId}`, "success");
+      else showToast("Heal failed", "error");
+    } catch {
+      showToast("Heal failed", "error");
+    }
   }
 
   return (
@@ -208,8 +269,8 @@ export default function ConsciousnessPage() {
           <p className="text-muted text-sm">Force-directed visualization of memory entries and their relationships.</p>
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={handleScan} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: "pointer", background: "#ffffff" }}>Scan for sleepers</button>
-          <button onClick={handleSnapshot} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: "pointer", background: "#ffffff" }}>Take snapshot</button>
+          <button onClick={handleScan} style={BTN}>Scan for sleepers</button>
+          <button onClick={handleSnapshot} style={BTN}>Take snapshot</button>
         </div>
       </div>
 
@@ -233,6 +294,12 @@ export default function ConsciousnessPage() {
       {/* Graph */}
       <div style={{ ...CARD, padding: "0", overflow: "hidden", position: "relative" }}>
         <svg ref={svgRef} width="100%" height="500" style={{ display: "block", background: "#faf9f6" }} />
+        {/* Zoom controls */}
+        <div style={{ position: "absolute", top: "12px", right: "12px", display: "flex", flexDirection: "column", gap: "4px" }}>
+          <button style={ZOOM_BTN} onClick={() => zoomRef.current?.zoomIn()} title="Zoom in">+</button>
+          <button style={ZOOM_BTN} onClick={() => zoomRef.current?.zoomOut()} title="Zoom out">−</button>
+          <button style={ZOOM_BTN} onClick={() => zoomRef.current?.reset()} title="Reset zoom">⊡</button>
+        </div>
       </div>
 
       {/* Side Panel */}
@@ -299,6 +366,21 @@ export default function ConsciousnessPage() {
           >
             Heal this entry
           </button>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed", bottom: "24px", right: "24px",
+            background: toast.type === "success" ? "#16a34a" : "#dc2626",
+            color: "white", padding: "12px 24px", borderRadius: "8px",
+            fontSize: "14px", fontWeight: 600,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100,
+          }}
+        >
+          {toast.message}
         </div>
       )}
     </div>
