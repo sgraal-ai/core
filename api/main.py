@@ -5280,17 +5280,22 @@ def _generate_unsubscribe_token(email: str) -> str:
 
 def _add_resend_contact(email: str) -> None:
     """Add email to Resend audience. Fire-and-forget."""
+    print(f"[RESEND] Adding contact: {email}")
+    print(f"[RESEND] Audience ID: {RESEND_AUDIENCE_ID}")
     if not resend.api_key or not RESEND_AUDIENCE_ID:
+        print("[RESEND] Skipping — missing api_key or audience_id")
         return
     try:
-        http_requests.post(
+        r = http_requests.post(
             "https://api.resend.com/contacts",
             headers={"Authorization": f"Bearer {resend.api_key}", "Content-Type": "application/json"},
             json={"email": email, "unsubscribed": False, "audience_id": RESEND_AUDIENCE_ID},
             timeout=5,
         )
-    except Exception:
-        pass
+        print(f"[RESEND] Response status: {r.status_code}")
+        print(f"[RESEND] Response body: {r.text}")
+    except Exception as e:
+        print(f"[RESEND] Error: {e}")
 
 
 def _send_api_key_email(email: str, api_key: str) -> None:
