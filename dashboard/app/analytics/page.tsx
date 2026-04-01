@@ -70,7 +70,9 @@ export default function AnalyticsPage() {
     </div>
   );
 
-  const maxDaily = Math.max(...summary.daily.map((d) => d.value));
+  const dailyData = summary.daily ?? [];
+  const domainData = summary.domain_breakdown ?? [];
+  const maxDaily = dailyData.length > 0 ? Math.max(...dailyData.map((d) => d.value)) : 1;
   const fmt = (n: number) => n.toLocaleString();
 
   return (
@@ -154,7 +156,7 @@ export default function AnalyticsPage() {
             </tr>
           </thead>
           <tbody>
-            {summary.domain_breakdown.map((row) => (
+            {domainData.map((row) => (
               <tr key={row.domain}>
                 <td style={{ padding: "12px 16px", fontSize: "14px", fontWeight: 600, borderBottom: "1px solid #f5f4f0" }}>{row.domain}</td>
                 <td style={{ padding: "12px 16px", fontSize: "14px", borderBottom: "1px solid #f5f4f0" }}>{fmt(row.decisions)}</td>
@@ -170,7 +172,7 @@ export default function AnalyticsPage() {
       <div style={CARD}>
         <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Daily Decisions (Last 7 Days)</h2>
         <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: "160px" }}>
-          {summary.daily.map((d) => (
+          {dailyData.map((d) => (
             <div key={d.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
               <span style={{ fontSize: "11px", fontWeight: 600, color: "#0B0F14", marginBottom: "4px" }}>{fmt(d.value)}</span>
               <div style={{ width: "100%", height: `${(d.value / maxDaily) * 120}px`, background: "linear-gradient(180deg, #c9a962, #745b1c)", borderRadius: "4px 4px 0 0", transition: "height 0.6s ease" }} />
