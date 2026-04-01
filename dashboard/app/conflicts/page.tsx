@@ -70,7 +70,14 @@ export default function ConflictsPage() {
       {loading ? (
         <p className="text-muted">Loading conflicts...</p>
       ) : conflicts.length === 0 ? (
-        <p className="text-green-400">No conflicts detected.</p>
+        <div style={{ textAlign: "center", padding: "80px 0" }}>
+          <p style={{ fontSize: "48px", color: "#16a34a" }}>✓</p>
+          <h3 style={{ fontSize: "20px", color: "#0B0F14", fontWeight: 700, marginTop: "8px" }}>No memory conflicts detected</h3>
+          <p style={{ fontSize: "14px", color: "#6b7280", marginTop: "8px", maxWidth: "360px", marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
+            When agents store conflicting information, it will appear here for resolution.
+          </p>
+          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "12px" }}>Last checked: just now</p>
+        </div>
       ) : (
         <div className="space-y-4">
           {conflicts.map((c) => (
