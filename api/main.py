@@ -8467,7 +8467,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["response_profile_used"] = _profile
     if _profile == "compact":
         _compact_keys = {"omega_mem_final", "omega_adjusted", "recommended_action", "assurance_score",
-                         "explainability_note", "repair_plan", "confidence_intervals",
+                         "explainability_note", "repair_plan", "component_breakdown", "confidence_intervals",
                          "auto_route_warning", "action_override_chain", "preflight_delta",
                          "dry_run", "scored_entry_count", "total_entry_count",
                          "omega_sanitized", "memcube_version", "scoring_architecture",

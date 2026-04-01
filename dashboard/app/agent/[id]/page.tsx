@@ -3,7 +3,6 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import type { Agent } from "../../lib/mock-data";
-import { getAgent } from "../../lib/mock-data";
 import { DEMO_FLEET } from "../../lib/demo-fleet";
 import { fetchPreflight } from "../../lib/api-client";
 import { OmegaMeter } from "../../components/OmegaMeter";
@@ -12,7 +11,8 @@ import { RepairPlanList } from "../../components/RepairPlanList";
 import { AtRiskWarnings } from "../../components/AtRiskWarnings";
 import { AdvancedAnalytics } from "../../components/AdvancedAnalytics";
 import { DeepAnalytics } from "../../components/DeepAnalytics";
-import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../../components/LoadingSkeleton";
+import { getApiKey, getApiUrl } from "../../lib/storage";
 
 const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
   USE_MEMORY: { bg: "bg-green-400/10", text: "text-green-400" },
@@ -24,38 +24,57 @@ const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
 export default function AgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [agent, setAgent] = useState<Agent | null>(null);
-  const [isLive, setIsLive] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setMounted(true);
-    setAgent(getAgent(id) ?? null);
     const apiKey = getApiKey();
     const apiUrl = getApiUrl();
 
-    if (!apiKey) return;
+    if (!apiKey) {
+      setLoading(false);
+      return;
+    }
 
     const demo = DEMO_FLEET.find((d) => d.id === id);
-    if (!demo) return;
+    if (!demo) {
+      setLoading(false);
+      return;
+    }
 
     fetchPreflight(demo, apiKey, apiUrl)
-      .then((liveAgent) => {
-        setAgent(liveAgent);
-        setIsLive(true);
-      })
-      .catch(() => {});
+      .then((liveAgent) => setAgent(liveAgent))
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, [id]);
 
-  if (!mounted) {
-    return <div className="text-muted text-sm">Loading...</div>;
+  if (!mounted) return null;
+
+  const hasKey = !!getApiKey();
+
+  if (!hasKey) {
+    return (
+      <div>
+        <Link href="/" className="text-sm text-muted hover:text-foreground transition mb-6 inline-block">&larr; Back to fleet</Link>
+        <ConnectKeyState />
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div>
+        <Link href="/" className="text-sm text-muted hover:text-foreground transition mb-6 inline-block">&larr; Back to fleet</Link>
+        <LoadingSkeleton rows={5} />
+      </div>
+    );
   }
 
   if (!agent) {
     return (
       <div>
-        <Link href="/" className="text-sm text-muted hover:text-foreground transition mb-6 inline-block">
-          &larr; Back to fleet
-        </Link>
+        <Link href="/" className="text-sm text-muted hover:text-foreground transition mb-6 inline-block">&larr; Back to fleet</Link>
         <p className="text-muted">Agent not found.</p>
       </div>
     );
@@ -68,13 +87,6 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       <Link href="/" className="text-sm text-muted hover:text-foreground transition mb-6 inline-block">
         &larr; Back to fleet
       </Link>
-
-      {isLive && (
-        <div className="bg-green-400/10 border border-green-400/30 rounded-lg px-4 py-3 mb-6 text-sm text-green-400 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
-          Live data from Sgraal API
-        </div>
-      )}
 
       <div className="flex flex-col sm:flex-row gap-8 mb-10">
         <OmegaMeter value={agent.omega_mem_final} size={140} />

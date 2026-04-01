@@ -1,10 +1,16 @@
 export function ComponentBreakdown({ breakdown }: { breakdown: Record<string, number> }) {
   const safe = breakdown ?? {};
-  const maxVal = Math.max(...Object.values(safe), 1);
+  const entries = Object.entries(safe).filter(([, v]) => typeof v === "number");
+
+  if (entries.length === 0) {
+    return <p className="text-xs text-muted">No component data available.</p>;
+  }
+
+  const maxVal = Math.max(...entries.map(([, v]) => v), 1);
 
   return (
     <div className="space-y-2">
-      {Object.entries(safe).map(([key, value]) => {
+      {entries.map(([key, value]) => {
         const pct = (value / maxVal) * 100;
         const color =
           value < 25 ? "bg-green-400" : value < 50 ? "bg-yellow-400" : value < 75 ? "bg-orange-400" : "bg-red-400";
@@ -15,7 +21,7 @@ export function ComponentBreakdown({ breakdown }: { breakdown: Record<string, nu
             <div className="flex-1 bg-surface-light rounded-full h-3 overflow-hidden">
               <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
             </div>
-            <span className="text-xs font-mono w-10 text-right">{value}</span>
+            <span className="text-xs font-mono w-10 text-right">{Math.round(value)}</span>
           </div>
         );
       })}
