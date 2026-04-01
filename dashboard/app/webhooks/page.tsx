@@ -2,22 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface Webhook { id: string; url: string; events: string[]; active: boolean; last_triggered: string; }
 interface Delivery { timestamp: string; event: string; status: number; response_time: string; }
-
-const MOCK_HOOKS: Webhook[] = [
-  { id: "wh_001", url: "https://api.example.com/sgraal-events", events: ["decision.block", "decision.warn"], active: true, last_triggered: "2 min ago" },
-];
-
-const MOCK_DELIVERIES: Delivery[] = [
-  { timestamp: "12:44:02", event: "decision.block", status: 200, response_time: "142ms" },
-  { timestamp: "12:39:18", event: "decision.warn", status: 200, response_time: "89ms" },
-  { timestamp: "12:31:05", event: "decision.block", status: 200, response_time: "112ms" },
-  { timestamp: "12:28:41", event: "decision.warn", status: 200, response_time: "95ms" },
-  { timestamp: "12:15:33", event: "decision.block", status: 0, response_time: "timeout" },
-  { timestamp: "12:05:12", event: "decision.warn", status: 200, response_time: "78ms" },
-];
 
 const ALL_EVENTS = ["decision.block", "decision.warn", "decision.ask_user", "memory.healed", "sleeper.detected", "poisoning.suspected", "atc.conflict"];
 const DEFAULT_CHECKED = ["decision.block", "decision.warn"];
@@ -28,9 +16,11 @@ const TD: React.CSSProperties = { fontSize: "14px", color: "#0B0F14", padding: "
 const BTN_GOLD: React.CSSProperties = { background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "8px 20px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: "pointer" };
 
 export default function WebhooksPage() {
-  const [hooks, setHooks] = useState<Webhook[]>(MOCK_HOOKS);
-  const [deliveries] = useState<Delivery[]>(MOCK_DELIVERIES);
+  const [mounted, setMounted] = useState(false);
+  const [hooks, setHooks] = useState<Webhook[]>([]);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [hasKey, setHasKey] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [newUrl, setNewUrl] = useState("");
   const [newEvents, setNewEvents] = useState<string[]>(DEFAULT_CHECKED);
@@ -40,14 +30,16 @@ export default function WebhooksPage() {
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
   const load = useCallback(async () => {
+    setMounted(true);
     const apiKey = getApiKey();
     setHasKey(!!apiKey);
-    if (!apiKey) return;
+    if (!apiKey) { setLoading(false); return; }
     const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/webhooks`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (res.ok) { const d = await res.json(); if (Array.isArray(d)) setHooks(d); else if (d.webhooks) setHooks(d.webhooks); }
     } catch {}
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -89,6 +81,24 @@ export default function WebhooksPage() {
 
   const INPUT: React.CSSProperties = { width: "100%", background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "10px 14px", fontSize: "14px", color: "#0B0F14" };
 
+  if (!mounted) return null;
+
+  if (!hasKey) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Webhooks</h1>
+      <p className="text-muted text-sm mb-6">Receive real-time events when Sgraal makes decisions.</p>
+      <ConnectKeyState />
+    </div>
+  );
+
+  if (loading) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Webhooks</h1>
+      <p className="text-muted text-sm mb-6">Receive real-time events when Sgraal makes decisions.</p>
+      <LoadingSkeleton rows={3} />
+    </div>
+  );
+
   return (
     <div>
       <div className="flex items-start justify-between mb-6">
@@ -98,12 +108,6 @@ export default function WebhooksPage() {
         </div>
         <button onClick={() => setShowModal(true)} style={BTN_GOLD}>+ Add Webhook</button>
       </div>
-
-      {!hasKey && (
-        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          Showing mock data. <a href="/settings" className="underline">Enter your API key</a> to manage live webhooks.
-        </div>
-      )}
 
       {/* Active Webhooks */}
       <div style={{ ...CARD, marginBottom: "32px", padding: 0, overflow: "hidden" }}>

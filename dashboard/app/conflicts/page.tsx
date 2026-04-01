@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface Conflict {
   id: string;
@@ -14,19 +15,18 @@ interface Conflict {
 const STRATEGIES = ["keep_newer", "keep_trusted", "merge", "manual"];
 
 export default function ConflictsPage() {
+  const [mounted, setMounted] = useState(false);
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [strategy, setStrategy] = useState("keep_newer");
   const [loading, setLoading] = useState(true);
+  const [hasKey, setHasKey] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const apiUrl = getApiUrl();
     const apiKey = getApiKey();
+    setHasKey(!!apiKey);
     if (!apiUrl || !apiKey) {
-      setConflicts([
-        { id: "c1", entry_a: "mem_001", entry_b: "mem_042", similarity: 0.92, status: "pending" },
-        { id: "c2", entry_a: "mem_015", entry_b: "mem_089", similarity: 0.87, status: "pending" },
-        { id: "c3", entry_a: "mem_033", entry_b: "mem_077", similarity: 0.95, status: "resolved" },
-      ]);
       setLoading(false);
       return;
     }
@@ -42,6 +42,22 @@ export default function ConflictsPage() {
   function handleResolve(id: string) {
     setConflicts((prev) => prev.map((c) => (c.id === id ? { ...c, status: "resolved" as const } : c)));
   }
+
+  if (!mounted) return null;
+
+  if (!hasKey) return (
+    <div>
+      <h1 className="text-2xl font-bold text-foreground mb-6">Memory Conflicts</h1>
+      <ConnectKeyState />
+    </div>
+  );
+
+  if (loading) return (
+    <div>
+      <h1 className="text-2xl font-bold text-foreground mb-6">Memory Conflicts</h1>
+      <LoadingSkeleton rows={4} />
+    </div>
+  );
 
   return (
     <div>
@@ -68,9 +84,7 @@ export default function ConflictsPage() {
         </select>
       </div>
 
-      {loading ? (
-        <p className="text-muted">Loading conflicts...</p>
-      ) : conflicts.length === 0 ? (
+      {conflicts.length === 0 ? (
         <div style={{ textAlign: "center", padding: "80px 0" }}>
           <p style={{ fontSize: "48px", color: "#16a34a" }}>✓</p>
           <h3 style={{ fontSize: "20px", color: "#0B0F14", fontWeight: 700, marginTop: "8px" }}>No memory conflicts detected</h3>

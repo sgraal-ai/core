@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface AuditEntry {
   timestamp: string;
@@ -23,27 +24,16 @@ const DECISION_BADGE: Record<string, { bg: string; color: string }> = {
   USE_MEMORY: { bg: "#dcfce7", color: "#16a34a" },
 };
 
-const MOCK: AuditEntry[] = [
-  { timestamp: "2026-04-01 12:44", agent_id: "agent-legal-review", domain: "legal", action_type: "irreversible", omega: 82.1, decision: "BLOCK", request_id: "req_abc123", component_breakdown: { s_freshness: 78, s_drift: 45, s_provenance: 62, s_interference: 38, s_propagation: 55, r_recall: 30, r_encode: 42, r_belief: 28, s_relevance: 35, r_recovery: 50 }, repair_plan: ["REFETCH stale entries", "VERIFY_WITH_SOURCE on conflicting data"], explainability_note: "Memory staleness (78) exceeded domain threshold for legal irreversible actions." },
-  { timestamp: "2026-04-01 12:39", agent_id: "agent-fintech-trade", domain: "fintech", action_type: "financial", omega: 58.3, decision: "WARN", request_id: "req_def456", component_breakdown: { s_freshness: 52, s_drift: 38, s_provenance: 44, s_interference: 22, s_propagation: 30, r_recall: 18, r_encode: 25, r_belief: 20, s_relevance: 28, r_recovery: 35 }, repair_plan: ["VERIFY_WITH_SOURCE on exchange rate data"], explainability_note: "Source conflict (0.4) on financial data exceeds fintech threshold." },
-  { timestamp: "2026-04-01 12:31", agent_id: "agent-medical-triage", domain: "healthcare", action_type: "irreversible", omega: 61.2, decision: "ASK_USER", request_id: "req_ghi789" },
-  { timestamp: "2026-04-01 12:28", agent_id: "agent-code-assistant", domain: "coding", action_type: "read", omega: 12.4, decision: "USE_MEMORY", request_id: "req_jkl012" },
-  { timestamp: "2026-04-01 12:15", agent_id: "agent-onboarding-eu", domain: "customer_support", action_type: "write", omega: 28.7, decision: "USE_MEMORY", request_id: "req_mno345" },
-  { timestamp: "2026-04-01 11:58", agent_id: "agent-fintech-trade", domain: "fintech", action_type: "financial", omega: 44.1, decision: "WARN", request_id: "req_pqr678" },
-  { timestamp: "2026-04-01 11:42", agent_id: "agent-legal-review", domain: "legal", action_type: "write", omega: 35.8, decision: "USE_MEMORY", request_id: "req_stu901" },
-  { timestamp: "2026-04-01 11:30", agent_id: "agent-medical-triage", domain: "healthcare", action_type: "irreversible", omega: 72.4, decision: "BLOCK", request_id: "req_vwx234" },
-  { timestamp: "2026-04-01 11:18", agent_id: "agent-code-assistant", domain: "coding", action_type: "read", omega: 8.2, decision: "USE_MEMORY", request_id: "req_yza567" },
-  { timestamp: "2026-04-01 11:05", agent_id: "agent-onboarding-eu", domain: "customer_support", action_type: "write", omega: 51.3, decision: "ASK_USER", request_id: "req_bcd890" },
-];
-
 type SortKey = "timestamp" | "agent_id" | "domain" | "omega" | "decision";
 const TH: React.CSSProperties = { fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "8px 16px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em", cursor: "pointer", userSelect: "none" };
 const TD: React.CSSProperties = { fontSize: "14px", color: "#0B0F14", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" };
 const SEL: React.CSSProperties = { background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "8px 12px", fontSize: "14px", color: "#0B0F14" };
 
 export default function AuditPage() {
-  const [entries, setEntries] = useState<AuditEntry[]>(MOCK);
+  const [mounted, setMounted] = useState(false);
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [hasKey, setHasKey] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState("7d");
   const [agentFilter, setAgentFilter] = useState("");
   const [decisionFilter, setDecisionFilter] = useState("");
@@ -55,9 +45,10 @@ export default function AuditPage() {
   const perPage = 50;
 
   const load = useCallback(async () => {
+    setMounted(true);
     const apiKey = getApiKey();
     setHasKey(!!apiKey);
-    if (!apiKey) { setEntries(MOCK); return; }
+    if (!apiKey) { setLoading(false); return; }
     const apiUrl = getApiUrl();
     try {
       const params = new URLSearchParams({ limit: String(perPage), offset: String(page * perPage) });
@@ -66,8 +57,9 @@ export default function AuditPage() {
       if (domainFilter) params.set("domain", domainFilter);
       if (dateRange) params.set("range", dateRange);
       const res = await fetch(`${apiUrl}/v1/audit-log?${params}`, { headers: { "X-API-Key": apiKey } });
-      if (res.ok) { const d = await res.json(); setEntries(Array.isArray(d) ? d : d.entries ?? MOCK); }
+      if (res.ok) { const d = await res.json(); setEntries(Array.isArray(d) ? d : d.entries ?? []); }
     } catch {}
+    setLoading(false);
   }, [agentFilter, decisionFilter, domainFilter, page, dateRange]);
 
   useEffect(() => { load(); }, [load]);
@@ -89,7 +81,7 @@ export default function AuditPage() {
     return sortAsc ? cmp : -cmp;
   });
 
-  const totalEntries = hasKey ? 1247 : sorted.length;
+  const totalEntries = sorted.length;
 
   function exportCsv() {
     const apiKey = getApiKey();
@@ -97,6 +89,24 @@ export default function AuditPage() {
     const apiUrl = getApiUrl();
     window.open(`${apiUrl}/v1/audit-log/export?format=csv`, "_blank");
   }
+
+  if (!mounted) return null;
+
+  if (!hasKey) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Audit Log</h1>
+      <p className="text-muted text-sm mb-6">View, search, and export preflight decision history.</p>
+      <ConnectKeyState />
+    </div>
+  );
+
+  if (loading) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Audit Log</h1>
+      <p className="text-muted text-sm mb-6">View, search, and export preflight decision history.</p>
+      <LoadingSkeleton rows={6} />
+    </div>
+  );
 
   const HEADERS: [string, string][] = [["timestamp", "Timestamp"], ["agent_id", "Agent ID"], ["domain", "Domain"], ["action_type", "Action Type"], ["omega", "Omega"], ["decision", "Decision"], ["request_id", "Request ID"]];
 
@@ -108,12 +118,6 @@ export default function AuditPage() {
           <p className="text-muted text-sm">View, search, and export preflight decision history.</p>
         </div>
       </div>
-
-      {!hasKey && (
-        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          Showing mock data. <a href="/settings" className="underline">Enter your API key</a> to see live audit log.
-        </div>
-      )}
 
       {/* Filters */}
       <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap", alignItems: "center" }}>

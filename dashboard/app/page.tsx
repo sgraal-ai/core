@@ -2,29 +2,29 @@
 
 import { useState, useEffect } from "react";
 import type { Agent } from "./lib/mock-data";
-import { MOCK_AGENTS } from "./lib/mock-data";
 import { DEMO_FLEET } from "./lib/demo-fleet";
 import { fetchFleet } from "./lib/api-client";
 import { AgentCard } from "./components/AgentCard";
-import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "./lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "./components/LoadingSkeleton";
+import { getApiKey, getApiUrl } from "./lib/storage";
 
 export default function DashboardHome() {
-  const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [isLive, setIsLive] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
 
   useEffect(() => {
+    setMounted(true);
     const apiKey = getApiKey();
     const apiUrl = getApiUrl();
 
     if (!apiKey) {
-      setAgents(MOCK_AGENTS);
-      setIsLive(false);
+      setLoading(false);
       return;
     }
 
-    setLoading(true);
     fetchFleet(DEMO_FLEET, apiKey, apiUrl)
       .then(({ agents: liveAgents, errors: errs }) => {
         if (liveAgents.length > 0) {
@@ -33,12 +33,33 @@ export default function DashboardHome() {
         }
         setErrors(errs);
       })
-      .catch(() => {
-        setAgents(MOCK_AGENTS);
-        setIsLive(false);
-      })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  if (!mounted) return null;
+
+  const hasKey = !!getApiKey();
+
+  if (!hasKey && !loading) {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-1">Decision Readiness Dashboard</h1>
+        <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
+        <ConnectKeyState />
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-1">Decision Readiness Dashboard</h1>
+        <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
+        <LoadingSkeleton rows={4} />
+      </div>
+    );
+  }
 
   const total = agents.length;
   const blocked = agents.filter((a) => a.recommended_action === "BLOCK").length;
@@ -51,22 +72,10 @@ export default function DashboardHome() {
       <h1 className="text-2xl font-bold mb-1">Decision Readiness Dashboard</h1>
       <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
 
-      {!isLive && !loading && (
-        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          Showing mock data. <a href="/settings" className="underline hover:text-gold">Enter your API key</a> to see live data.
-        </div>
-      )}
-
       {isLive && (
         <div className="bg-green-400/10 border border-green-400/30 rounded-lg px-4 py-3 mb-6 text-sm text-green-400 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
           Live — connected to Sgraal API
-        </div>
-      )}
-
-      {loading && (
-        <div className="bg-surface border border-surface-light rounded-lg px-4 py-3 mb-6 text-sm text-muted">
-          Loading live fleet data...
         </div>
       )}
 
@@ -95,13 +104,11 @@ export default function DashboardHome() {
         </div>
       </div>
 
-      {/* Quick Actions */}
       <div className="flex gap-3 mb-6">
         <a href="/tutorial" className="bg-gold text-background text-sm font-semibold px-4 py-2 rounded hover:bg-gold-dim transition">Start Tutorial</a>
         <a href="/code-generator" className="bg-surface border border-surface-light text-sm px-4 py-2 rounded hover:bg-surface-light transition">Code Generator</a>
       </div>
 
-      {/* Stability Overview */}
       {(() => {
         const avgStability = total > 0 ? agents.reduce((s, a) => s + (a.stability_score?.score ?? 0), 0) / total : 0;
         const avgRTotal = total > 0 ? agents.reduce((s, a) => s + (a.r_total_normalized ?? 0), 0) / total : 0;
@@ -112,7 +119,7 @@ export default function DashboardHome() {
             <div className="bg-surface border border-surface-light rounded-xl p-5">
               <p className="text-xs text-muted mb-2">StabilityScore (fleet avg)</p>
               <p className={`text-4xl font-bold ${stabColor}`}>{(avgStability * 100).toFixed(0)}%</p>
-              <p className="text-xs text-muted mt-1">{avgStability > 0.7 ? "Stable" : avgStability >= 0.4 ? (isLive ? "Degrading" : "Demo mode") : "Critical"}</p>
+              <p className="text-xs text-muted mt-1">{avgStability > 0.7 ? "Stable" : avgStability >= 0.4 ? "Degrading" : "Critical"}</p>
             </div>
             <div className="bg-surface border border-surface-light rounded-xl p-5">
               <p className="text-xs text-muted mb-2 flex items-center gap-1">
@@ -136,11 +143,15 @@ export default function DashboardHome() {
         <span className="text-xs text-muted font-mono">Avg Ω_MEM: {avgOmega}</span>
       </div>
 
-      <div className="grid gap-4">
-        {agents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} />
-        ))}
-      </div>
+      {agents.length === 0 ? (
+        <p className="text-muted text-sm">No agents found. Send your first preflight call to see agents here.</p>
+      ) : (
+        <div className="grid gap-4">
+          {agents.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

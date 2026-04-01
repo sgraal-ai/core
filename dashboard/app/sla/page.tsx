@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface SlaData {
   uptime: number;
@@ -14,43 +15,29 @@ interface SlaData {
   latency_buckets: { label: string; pct: number }[];
 }
 
-const MOCK: SlaData = {
-  uptime: 99.97,
-  days_since_incident: 32,
-  p50: 12,
-  p95: 23,
-  p99: 41,
-  error_rate: 0.03,
-  block_rate: 8.3,
-  latency_buckets: [
-    { label: "<10ms", pct: 34 },
-    { label: "10-20ms", pct: 42 },
-    { label: "20-50ms", pct: 18 },
-    { label: "50-100ms", pct: 4 },
-    { label: "100-200ms", pct: 1.5 },
-    { label: ">200ms", pct: 0.5 },
-  ],
-};
-
 const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
 const TH: React.CSSProperties = { fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "8px 16px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em" };
 const TD: React.CSSProperties = { fontSize: "14px", color: "#0B0F14", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" };
 
 export default function SlaPage() {
-  const [data, setData] = useState<SlaData>(MOCK);
+  const [mounted, setMounted] = useState(false);
+  const [data, setData] = useState<SlaData | null>(null);
   const [hasKey, setHasKey] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [timeAgo, setTimeAgo] = useState("just now");
 
   const load = useCallback(async () => {
+    setMounted(true);
     const apiKey = getApiKey();
     setHasKey(!!apiKey);
-    if (!apiKey) { setData(MOCK); setLastUpdated(new Date()); return; }
+    if (!apiKey) { setLoading(false); return; }
     const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/sla/report`, { headers: { "X-API-Key": apiKey } });
-      if (res.ok) { const d = await res.json(); setData({ ...MOCK, ...d }); }
+      if (res.ok) { const d = await res.json(); setData(d); }
     } catch {}
+    setLoading(false);
     setLastUpdated(new Date());
   }, []);
 
@@ -59,6 +46,24 @@ export default function SlaPage() {
     function tick() { const s = Math.floor((Date.now() - lastUpdated.getTime()) / 1000); setTimeAgo(s < 5 ? "just now" : s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`); }
     tick(); const i = setInterval(tick, 1000); return () => clearInterval(i);
   }, [lastUpdated]);
+
+  if (!mounted) return null;
+
+  if (!hasKey) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">SLA Dashboard</h1>
+      <p className="text-muted text-sm mb-6">Service level agreement monitoring and compliance.</p>
+      <ConnectKeyState />
+    </div>
+  );
+
+  if (loading || !data) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">SLA Dashboard</h1>
+      <p className="text-muted text-sm mb-6">Service level agreement monitoring and compliance.</p>
+      <LoadingSkeleton rows={5} />
+    </div>
+  );
 
   const targets: { metric: string; target: string; current: string; met: boolean; info?: boolean }[] = [
     { metric: "Uptime", target: "99.9%", current: `${data.uptime}%`, met: data.uptime >= 99.9 },
@@ -80,12 +85,6 @@ export default function SlaPage() {
         </div>
         <p style={{ fontSize: "12px", color: "#6b7280" }}>Updated {timeAgo}</p>
       </div>
-
-      {!hasKey && (
-        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          Showing mock data. <a href="/settings" className="underline">Enter your API key</a> to see live SLA metrics.
-        </div>
-      )}
 
       {/* Overview Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "32px" }}>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface Summary {
   total_calls: number;
@@ -14,37 +15,23 @@ interface Summary {
 
 interface TokenWaste { wasted: number; saved: number; roi: number; }
 
-const MOCK_SUMMARY: Summary = {
-  total_calls: 24847, block_rate: 8.3, avg_omega: 34.2,
-  decisions: { USE_MEMORY: 68, WARN: 18, ASK_USER: 8, BLOCK: 6 },
-  domain_breakdown: [
-    { domain: "fintech", decisions: 8421, avg_omega: 41.3, block_rate: 12.4 },
-    { domain: "healthcare", decisions: 3892, avg_omega: 38.7, block_rate: 9.8 },
-    { domain: "legal", decisions: 2104, avg_omega: 35.1, block_rate: 7.2 },
-    { domain: "general", decisions: 10430, avg_omega: 22.8, block_rate: 4.1 },
-  ],
-  daily: [
-    { label: "Mon", value: 2840 }, { label: "Tue", value: 3120 }, { label: "Wed", value: 2980 },
-    { label: "Thu", value: 3540 }, { label: "Fri", value: 3210 }, { label: "Sat", value: 3890 },
-    { label: "Sun", value: 3267 },
-  ],
-};
-const MOCK_WASTE: TokenWaste = { wasted: 847, saved: 719, roi: 8.4 };
-
 const DECISION_COLORS: Record<string, string> = { USE_MEMORY: "#16a34a", WARN: "#eab308", ASK_USER: "#f97316", BLOCK: "#dc2626" };
 const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "20px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
 
 export default function AnalyticsPage() {
-  const [summary, setSummary] = useState<Summary>(MOCK_SUMMARY);
-  const [waste, setWaste] = useState<TokenWaste>(MOCK_WASTE);
+  const [mounted, setMounted] = useState(false);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [waste, setWaste] = useState<TokenWaste | null>(null);
   const [hasKey, setHasKey] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [timeAgo, setTimeAgo] = useState("just now");
 
   const load = useCallback(async () => {
+    setMounted(true);
     const apiKey = getApiKey();
     setHasKey(!!apiKey);
-    if (!apiKey) { setSummary(MOCK_SUMMARY); setWaste(MOCK_WASTE); setLastUpdated(new Date()); return; }
+    if (!apiKey) { setLoading(false); return; }
     const apiUrl = getApiUrl();
     const h = { "X-API-Key": apiKey };
     try {
@@ -52,9 +39,10 @@ export default function AnalyticsPage() {
         fetch(`${apiUrl}/v1/analytics/summary`, { headers: h }),
         fetch(`${apiUrl}/v1/analytics/token-waste`, { headers: h }),
       ]);
-      if (sR.ok) { const d = await sR.json(); setSummary({ ...MOCK_SUMMARY, ...d }); }
-      if (wR.ok) { const d = await wR.json(); setWaste({ ...MOCK_WASTE, ...d }); }
+      if (sR.ok) { const d = await sR.json(); setSummary(d); }
+      if (wR.ok) { const d = await wR.json(); setWaste(d); }
     } catch {}
+    setLoading(false);
     setLastUpdated(new Date());
   }, []);
 
@@ -63,6 +51,24 @@ export default function AnalyticsPage() {
     function tick() { const s = Math.floor((Date.now() - lastUpdated.getTime()) / 1000); setTimeAgo(s < 5 ? "just now" : s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`); }
     tick(); const i = setInterval(tick, 1000); return () => clearInterval(i);
   }, [lastUpdated]);
+
+  if (!mounted) return null;
+
+  if (!hasKey) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Analytics</h1>
+      <p className="text-muted text-sm mb-6">Fleet-wide decision analytics and token waste tracking.</p>
+      <ConnectKeyState />
+    </div>
+  );
+
+  if (loading || !summary || !waste) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Analytics</h1>
+      <p className="text-muted text-sm mb-6">Fleet-wide decision analytics and token waste tracking.</p>
+      <LoadingSkeleton rows={5} />
+    </div>
+  );
 
   const maxDaily = Math.max(...summary.daily.map((d) => d.value));
   const fmt = (n: number) => n.toLocaleString();
@@ -76,12 +82,6 @@ export default function AnalyticsPage() {
         </div>
         <p style={{ fontSize: "12px", color: "#6b7280" }}>Updated {timeAgo}</p>
       </div>
-
-      {!hasKey && (
-        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          Showing mock data. <a href="/settings" className="underline">Enter your API key</a> to see live analytics.
-        </div>
-      )}
 
       {/* KPI Row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px", marginBottom: "24px" }}>

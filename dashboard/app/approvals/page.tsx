@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface Approval {
   id: string;
@@ -22,37 +23,6 @@ interface HistoryRow {
   timestamp: string;
 }
 
-const MOCK_PENDING: Approval[] = [
-  {
-    id: "mock-001",
-    agent_id: "agent-fintech-trade",
-    action_type: "financial",
-    domain: "fintech",
-    omega: 58.3,
-    explanation:
-      "Agent wants to execute a $12,500 wire transfer based on market data memory that is 8 days old and conflicts with a newer source.",
-    memory_summary: "EUR/USD exchange rate: 1.0821 (stored 8 days ago)",
-    timestamp: "2 minutes ago",
-  },
-  {
-    id: "mock-002",
-    agent_id: "agent-medical-triage",
-    action_type: "irreversible",
-    domain: "healthcare",
-    omega: 61.2,
-    explanation:
-      "Agent wants to update patient medication record based on a source with trust score 0.41 — below the HIPAA profile threshold.",
-    memory_summary: "Medication: Metformin 500mg (source: unverified)",
-    timestamp: "7 minutes ago",
-  },
-];
-
-const MOCK_HISTORY: HistoryRow[] = [
-  { agent_id: "agent-legal-review", action_type: "irreversible", omega: 82.1, decision: "Rejected", timestamp: "1 hour ago" },
-  { agent_id: "agent-fintech-trade", action_type: "financial", omega: 45.2, decision: "Approved", timestamp: "3 hours ago" },
-  { agent_id: "agent-code-assistant", action_type: "write", omega: 18.4, decision: "Approved", timestamp: "5 hours ago" },
-];
-
 function omegaBadgeStyle(omega: number): React.CSSProperties {
   const bg = omega <= 45 ? "rgba(22,163,74,0.1)" : omega <= 65 ? "rgba(234,136,0,0.1)" : "rgba(220,38,38,0.1)";
   const color = omega <= 45 ? "#16a34a" : omega <= 65 ? "#ea8800" : "#dc2626";
@@ -68,21 +38,22 @@ const TAG_STYLE: React.CSSProperties = {
 };
 
 export default function ApprovalsPage() {
+  const [mounted, setMounted] = useState(false);
   const [pending, setPending] = useState<Approval[]>([]);
-  const [history, setHistory] = useState<HistoryRow[]>(MOCK_HISTORY);
+  const [history, setHistory] = useState<HistoryRow[]>([]);
   const [hasKey, setHasKey] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [timeAgo, setTimeAgo] = useState("just now");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const loadApprovals = useCallback(async () => {
+    setMounted(true);
     const apiKey = getApiKey();
     setHasKey(!!apiKey);
 
     if (!apiKey) {
-      setPending(MOCK_PENDING);
-      setHistory(MOCK_HISTORY);
-      setLastUpdated(new Date());
+      setLoading(false);
       return;
     }
 
@@ -100,6 +71,7 @@ export default function ApprovalsPage() {
     } catch {
       setPending([]);
     }
+    setLoading(false);
     setLastUpdated(new Date());
   }, []);
 
@@ -161,6 +133,24 @@ export default function ApprovalsPage() {
     }
   }
 
+  if (!mounted) return null;
+
+  if (!hasKey) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Approval Queue</h1>
+      <p className="text-muted text-sm mb-6">Pending ASK_USER decisions waiting for human review.</p>
+      <ConnectKeyState />
+    </div>
+  );
+
+  if (loading) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Approval Queue</h1>
+      <p className="text-muted text-sm mb-6">Pending ASK_USER decisions waiting for human review.</p>
+      <LoadingSkeleton rows={4} />
+    </div>
+  );
+
   const showEmpty = hasKey && pending.length === 0;
 
   return (
@@ -176,12 +166,6 @@ export default function ApprovalsPage() {
           <p style={{ fontSize: "12px", color: "#6b7280" }}>Updated {timeAgo}</p>
         </div>
       </div>
-
-      {!hasKey && (
-        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          Showing mock data. <a href="/settings" className="underline hover:text-gold">Enter your API key</a> to see live approvals.
-        </div>
-      )}
 
       {/* Empty state */}
       {showEmpty && (

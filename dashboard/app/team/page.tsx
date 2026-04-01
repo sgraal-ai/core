@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface Member { email: string; role: string; joined: string; status: string; isYou?: boolean; }
 const ROLES = [
@@ -18,6 +19,7 @@ const BTN_GOLD: React.CSSProperties = { background: "#c9a962", color: "#0B0F14",
 const INPUT: React.CSSProperties = { width: "100%", background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "10px 14px", fontSize: "14px", color: "#0B0F14" };
 
 export default function TeamPage() {
+  const [mounted, setMounted] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [hasKey, setHasKey] = useState(false);
   const [storedKey, setStoredKey] = useState("");
@@ -39,10 +41,11 @@ export default function TeamPage() {
   }
 
   const load = useCallback(async () => {
+    setMounted(true);
     const apiKey = getApiKey();
     setHasKey(!!apiKey);
     setStoredKey(apiKey);
-    if (!apiKey) { setMembers([]); return; }
+    if (!apiKey) { return; }
     try {
       const mRes = await fetch(`${apiUrl()}/v1/team/members`, { headers: apiHeaders() });
       if (mRes.ok) { const d = await mRes.json(); setMembers(Array.isArray(d) ? d : d.members ?? []); }
@@ -71,7 +74,15 @@ export default function TeamPage() {
     setToast({ message: `Removed ${email}`, type: "success" });
   }
 
-  const empty = !hasKey;
+  if (!mounted) return null;
+
+  if (!hasKey) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Team</h1>
+      <p className="text-muted text-sm mb-6">Manage access to your Sgraal workspace.</p>
+      <ConnectKeyState />
+    </div>
+  );
 
   return (
     <div>
@@ -82,12 +93,6 @@ export default function TeamPage() {
         </div>
         <button onClick={() => setShowInviteModal(true)} style={BTN_GOLD}>+ Invite Member</button>
       </div>
-
-      {empty && (
-        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          <a href="/settings" className="underline">Enter your API key</a> to manage your team.
-        </div>
-      )}
 
       {/* Members Table */}
       <div style={{ ...CARD, padding: 0, overflow: "hidden", marginBottom: "24px" }}>

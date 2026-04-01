@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Script from "next/script";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface MemNode {
   id: string;
@@ -30,24 +31,6 @@ function nodeColor(omega: number): string {
   return "#dc2626";
 }
 
-function randomMock(): { nodes: MemNode[]; edges: MemEdge[] } {
-  const types = ["semantic", "preference", "tool_state", "episodic", "policy", "identity"];
-  const nodes: MemNode[] = Array.from({ length: 20 }, (_, i) => ({
-    id: `mem_${String(i).padStart(3, "0")}`,
-    omega: Math.round(Math.random() * 90 + 5),
-    type: types[i % types.length],
-    contribution: Math.round(Math.random() * 8 + 2),
-  }));
-  const edges: MemEdge[] = [];
-  for (let i = 0; i < 15; i++) {
-    const a = Math.floor(Math.random() * 20);
-    let b = Math.floor(Math.random() * 20);
-    if (b === a) b = (a + 1) % 20;
-    edges.push({ source: nodes[a].id, target: nodes[b].id });
-  }
-  return { nodes, edges };
-}
-
 const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
 const BTN: React.CSSProperties = { padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: "pointer", background: "#ffffff" };
 const ZOOM_BTN: React.CSSProperties = { width: "32px", height: "32px", borderRadius: "6px", border: "1px solid #e5e7eb", background: "#ffffff", fontSize: "16px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
@@ -55,11 +38,13 @@ const ZOOM_BTN: React.CSSProperties = { width: "32px", height: "32px", borderRad
 export default function ConsciousnessPage() {
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomRef = useRef<{ zoomIn: () => void; zoomOut: () => void; reset: () => void } | null>(null);
+  const [mounted, setMounted] = useState(false);
   const [d3Ready, setD3Ready] = useState(false);
   const [nodes, setNodes] = useState<MemNode[]>([]);
   const [edges, setEdges] = useState<MemEdge[]>([]);
   const [selected, setSelected] = useState<MemNode | null>(null);
   const [hasKey, setHasKey] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [showPanel, setShowPanel] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
@@ -74,12 +59,11 @@ export default function ConsciousnessPage() {
   }, [toast]);
 
   const load = useCallback(async () => {
+    setMounted(true);
     const apiKey = getApiKey();
     setHasKey(!!apiKey);
     if (!apiKey) {
-      const mock = randomMock();
-      setNodes(mock.nodes);
-      setEdges(mock.edges);
+      setLoading(false);
       return;
     }
     const apiUrl = getApiUrl();
@@ -91,22 +75,19 @@ export default function ConsciousnessPage() {
         if (entries.length > 0) {
           setNodes(entries.slice(0, 500).map((e: Record<string, unknown>, i: number) => ({
             id: String(e.id || `entry_${i}`),
-            omega: Number(e.omega ?? e.omega_mem_final ?? Math.random() * 80),
+            omega: Number(e.omega ?? e.omega_mem_final ?? 0),
             type: String(e.type || "unknown"),
-            contribution: Number(e.shapley ?? Math.random() * 8 + 2),
+            contribution: Number(e.shapley ?? 5),
           })));
           const edgeList: MemEdge[] = [];
           for (let i = 0; i < Math.min(entries.length, 500); i++) {
             if (i + 1 < entries.length) edgeList.push({ source: String(entries[i].id || `entry_${i}`), target: String(entries[i + 1].id || `entry_${i + 1}`) });
           }
           setEdges(edgeList);
-          return;
         }
       }
     } catch {}
-    const mock = randomMock();
-    setNodes(mock.nodes);
-    setEdges(mock.edges);
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -260,6 +241,24 @@ export default function ConsciousnessPage() {
     }
   }
 
+  if (!mounted) return null;
+
+  if (!hasKey) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Memory Graph</h1>
+      <p className="text-muted text-sm mb-6">Force-directed visualization of memory entries and their relationships.</p>
+      <ConnectKeyState />
+    </div>
+  );
+
+  if (loading) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Memory Graph</h1>
+      <p className="text-muted text-sm mb-6">Force-directed visualization of memory entries and their relationships.</p>
+      <LoadingSkeleton rows={5} />
+    </div>
+  );
+
   return (
     <div style={{ position: "relative" }}>
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" onLoad={() => setD3Ready(true)} />
@@ -274,12 +273,6 @@ export default function ConsciousnessPage() {
           <button onClick={handleSnapshot} style={BTN}>Take snapshot</button>
         </div>
       </div>
-
-      {!hasKey && (
-        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-4 text-sm text-gold">
-          Demo mode — connect API key for live data.
-        </div>
-      )}
 
       {/* Legend */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "12px", fontSize: "12px" }}>

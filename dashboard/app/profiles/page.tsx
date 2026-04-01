@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface Profile {
   id: string;
@@ -11,33 +12,30 @@ interface Profile {
   rules: Record<string, string>;
 }
 
-const MOCK_PROFILES: Profile[] = [
-  { id: "EU_AI_ACT", title: "EU AI Act", description: "Article 9, 12, 13, 14, 17 compliance. Auto conformity declaration. Blocks non-compliant decisions.", active: true, rules: { freshness_threshold: "30 days", source_trust_min: "0.7" } },
-  { id: "HIPAA", title: "HIPAA", description: "§164.312 safeguards. PHI isolation. Medical memory older than 30 days flagged automatically.", active: true, rules: { max_age_days: "30", require_provenance: "true" } },
-  { id: "MIFID2", title: "MiFID2", description: "Financial decision validation. Unverified counterparty data blocked. Full audit trail.", active: false, rules: { financial_memory_max_age: "5 years", require_source_trust: "true" } },
-  { id: "GENERAL", title: "General", description: "Default risk assessment. No domain-specific rules.", active: true, rules: {} },
-];
-
 const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
 const BTN_GOLD: React.CSSProperties = { background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "8px 20px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: "pointer" };
 const BTN_OUTLINE: React.CSSProperties = { background: "transparent", color: "#6b7280", fontWeight: 500, padding: "8px 16px", borderRadius: "6px", fontSize: "13px", border: "1px solid #e5e7eb", cursor: "pointer" };
 
 export default function ProfilesPage() {
-  const [profiles, setProfiles] = useState<Profile[]>(MOCK_PROFILES);
+  const [mounted, setMounted] = useState(false);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [hasKey, setHasKey] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
   const load = useCallback(async () => {
+    setMounted(true);
     const apiKey = getApiKey();
     setHasKey(!!apiKey);
-    if (!apiKey) { setProfiles(MOCK_PROFILES); return; }
+    if (!apiKey) { setLoading(false); return; }
     const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/compliance/profiles`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (res.ok) { const d = await res.json(); if (Array.isArray(d)) setProfiles(d); else if (d.profiles) setProfiles(d.profiles); }
     } catch {}
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -48,16 +46,28 @@ export default function ProfilesPage() {
     setToast({ message: p?.active ? `${p.title} deactivated` : `${p?.title} activated`, type: "success" });
   }
 
+  if (!mounted) return null;
+
+  if (!hasKey) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Compliance Profiles</h1>
+      <p className="text-muted text-sm mb-6">Configure memory governance rules per domain.</p>
+      <ConnectKeyState />
+    </div>
+  );
+
+  if (loading) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Compliance Profiles</h1>
+      <p className="text-muted text-sm mb-6">Configure memory governance rules per domain.</p>
+      <LoadingSkeleton rows={4} />
+    </div>
+  );
+
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Compliance Profiles</h1>
       <p className="text-muted text-sm mb-6">Configure memory governance rules per domain.</p>
-
-      {!hasKey && (
-        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          Showing mock data. <a href="/settings" className="underline">Enter your API key</a> to manage live profiles.
-        </div>
-      )}
 
       {/* Active Profiles Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "40px" }}>
