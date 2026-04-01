@@ -5608,7 +5608,7 @@ def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str
             "api_key_id": key_record.get("key_hash", "in_memory"),
             "decision": decision,
             "omega_mem_final": omega,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
         if extra:
             record.update(extra)
