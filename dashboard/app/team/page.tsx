@@ -19,6 +19,7 @@ const INPUT: React.CSSProperties = { width: "100%", background: "#ffffff", borde
 export default function TeamPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [hasKey, setHasKey] = useState(false);
+  const [storedKey, setStoredKey] = useState("");
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("developer");
@@ -28,17 +29,18 @@ export default function TeamPage() {
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
   function apiHeaders(): Record<string, string> {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_key") ?? "" : "";
     return { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
   }
 
   function apiUrl(): string {
-    return localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    return typeof window !== "undefined" ? localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com" : "https://api.sgraal.com";
   }
 
   const load = useCallback(async () => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    const apiKey = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_key") ?? "" : "";
     setHasKey(!!apiKey);
+    setStoredKey(apiKey);
     if (!apiKey) { setMembers([]); return; }
     try {
       const mRes = await fetch(`${apiUrl()}/v1/team/members`, { headers: apiHeaders() });
@@ -167,10 +169,10 @@ export default function TeamPage() {
             display: "flex", justifyContent: "space-between", alignItems: "center",
           }}>
             <span style={{ fontFamily: "monospace", fontSize: "15px", color: "#c9a962" }}>
-              {(() => { const k = localStorage.getItem("sgraal_api_key") ?? ""; return k.length > 16 ? k.slice(0, 12) + "..." + k.slice(-4) : k; })()}
+              {storedKey.length > 16 ? storedKey.slice(0, 12) + "..." + storedKey.slice(-4) : storedKey}
             </span>
             <button
-              onClick={() => { const k = localStorage.getItem("sgraal_api_key") ?? ""; navigator.clipboard.writeText(k); setCopied("apikey"); setTimeout(() => setCopied(null), 2000); }}
+              onClick={() => { navigator.clipboard.writeText(storedKey); setCopied("apikey"); setTimeout(() => setCopied(null), 2000); }}
               style={{ fontSize: "13px", color: copied === "apikey" ? "#c9a962" : "#6b7280", cursor: "pointer", background: "none", border: "none", fontWeight: 500 }}
             >
               {copied === "apikey" ? "Copied!" : "Copy"}

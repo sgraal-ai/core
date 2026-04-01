@@ -22,12 +22,15 @@ const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
 
 export default function AgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [agent, setAgent] = useState<Agent | null>(getAgent(id) ?? null);
+  const [agent, setAgent] = useState<Agent | null>(null);
   const [isLive, setIsLive] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    setMounted(true);
+    setAgent(getAgent(id) ?? null);
+    const apiKey = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_key") ?? "" : "";
+    const apiUrl = typeof window !== "undefined" ? localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com" : "https://api.sgraal.com";
 
     if (!apiKey) return;
 
@@ -41,6 +44,10 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       })
       .catch(() => {});
   }, [id]);
+
+  if (!mounted) {
+    return <div className="text-muted text-sm">Loading...</div>;
+  }
 
   if (!agent) {
     return (
