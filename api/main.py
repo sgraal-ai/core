@@ -92,7 +92,7 @@ app = FastAPI(
     servers=[{"url": "https://api.sgraal.com"}],
     description="Memory governance protocol for AI agents. Quickstart: /docs/quickstart | Compliance: /v1/compliance/docs | Batch scoring: up to 100 entries per call, <10ms p95.",
 )
-_ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://sgraal.com,https://app.sgraal.com,https://api.sgraal.com").split(",")
+_ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://sgraal.com,https://www.sgraal.com,https://app.sgraal.com,https://api.sgraal.com,http://localhost:3000").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 # In-memory API key store: api_key -> stripe_customer_id
