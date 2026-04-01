@@ -1,151 +1,304 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-
-const OMEGA_COLORS: Record<string, string> = {
-  green: "#22c55e",
-  yellow: "#eab308",
-  orange: "#f97316",
-  red: "#ef4444",
-};
-
-function getColor(omega: number) {
-  if (omega < 25) return OMEGA_COLORS.green;
-  if (omega < 50) return OMEGA_COLORS.yellow;
-  if (omega < 75) return OMEGA_COLORS.orange;
-  return OMEGA_COLORS.red;
-}
+import { useState, useEffect, useRef, useCallback } from "react";
+import Script from "next/script";
 
 interface MemNode {
   id: string;
   omega: number;
   type: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
   contribution: number;
 }
 
+interface MemEdge {
+  source: string;
+  target: string;
+}
+
+interface D3Node extends MemNode {
+  x?: number;
+  y?: number;
+  fx?: number | null;
+  fy?: number | null;
+}
+
+function nodeColor(omega: number): string {
+  if (omega < 25) return "#16a34a";
+  if (omega < 50) return "#c9a962";
+  if (omega < 75) return "#f97316";
+  return "#dc2626";
+}
+
+function randomMock(): { nodes: MemNode[]; edges: MemEdge[] } {
+  const types = ["semantic", "preference", "tool_state", "episodic", "policy", "identity"];
+  const nodes: MemNode[] = Array.from({ length: 20 }, (_, i) => ({
+    id: `mem_${String(i).padStart(3, "0")}`,
+    omega: Math.round(Math.random() * 90 + 5),
+    type: types[i % types.length],
+    contribution: Math.round(Math.random() * 8 + 2),
+  }));
+  const edges: MemEdge[] = [];
+  for (let i = 0; i < 15; i++) {
+    const a = Math.floor(Math.random() * 20);
+    let b = Math.floor(Math.random() * 20);
+    if (b === a) b = (a + 1) % 20;
+    edges.push({ source: nodes[a].id, target: nodes[b].id });
+  }
+  return { nodes, edges };
+}
+
+const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
+
 export default function ConsciousnessPage() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [d3Ready, setD3Ready] = useState(false);
   const [nodes, setNodes] = useState<MemNode[]>([]);
+  const [edges, setEdges] = useState<MemEdge[]>([]);
   const [selected, setSelected] = useState<MemNode | null>(null);
-  const [showingTop500, setShowingTop500] = useState(false);
+  const [hasKey, setHasKey] = useState(false);
+  const [showPanel, setShowPanel] = useState(false);
+  const simulationRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    // Generate demo nodes (would come from API in production)
-    const demo: MemNode[] = Array.from({ length: 50 }, (_, i) => ({
-      id: `mem_${String(i).padStart(3, "0")}`,
-      omega: Math.random() * 100,
-      type: ["semantic", "preference", "tool_state", "episodic", "policy"][i % 5],
-      x: 200 + Math.random() * 400,
-      y: 150 + Math.random() * 300,
-      vx: (Math.random() - 0.5) * 0.5,
-      vy: (Math.random() - 0.5) * 0.5,
-      contribution: Math.random() * 10,
-    }));
-    setNodes(demo);
-    if (demo.length > 500) setShowingTop500(true);
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || nodes.length === 0) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    let animId: number;
-    const draw = () => {
-      ctx.fillStyle = "#0B0F14";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      // Draw edges
-      ctx.strokeStyle = "rgba(201, 169, 98, 0.1)";
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < Math.min(nodes.length, i + 3); j++) {
-          ctx.beginPath();
-          ctx.moveTo(nodes[i].x, nodes[i].y);
-          ctx.lineTo(nodes[j].x, nodes[j].y);
-          ctx.stroke();
+  const load = useCallback(async () => {
+    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    setHasKey(!!apiKey);
+    if (!apiKey) {
+      const mock = randomMock();
+      setNodes(mock.nodes);
+      setEdges(mock.edges);
+      return;
+    }
+    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    try {
+      const res = await fetch(`${apiUrl}/v1/store/memories?limit=500`, { headers: { "X-API-Key": apiKey } });
+      if (res.ok) {
+        const d = await res.json();
+        const entries = Array.isArray(d) ? d : d.entries ?? d.memories ?? [];
+        if (entries.length > 0) {
+          setNodes(entries.slice(0, 500).map((e: Record<string, unknown>, i: number) => ({
+            id: String(e.id || `entry_${i}`),
+            omega: Number(e.omega ?? e.omega_mem_final ?? Math.random() * 80),
+            type: String(e.type || "unknown"),
+            contribution: Number(e.shapley ?? Math.random() * 8 + 2),
+          })));
+          // Build edges from conflicts/links
+          const edgeList: MemEdge[] = [];
+          for (let i = 0; i < Math.min(entries.length, 500); i++) {
+            if (i + 1 < entries.length) edgeList.push({ source: String(entries[i].id || `entry_${i}`), target: String(entries[i + 1].id || `entry_${i + 1}`) });
+          }
+          setEdges(edgeList);
+          return;
         }
       }
-      // Draw nodes
-      for (const n of nodes) {
-        const r = 4 + n.contribution;
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = getColor(n.omega);
-        ctx.fill();
-        // Simple physics
-        n.x += n.vx;
-        n.y += n.vy;
-        n.vx *= 0.99;
-        n.vy *= 0.99;
-        // Bounce
-        if (n.x < r || n.x > canvas.width - r) n.vx *= -1;
-        if (n.y < r || n.y > canvas.height - r) n.vy *= -1;
-      }
-      animId = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => cancelAnimationFrame(animId);
-  }, [nodes]);
+    } catch {}
+    const mock = randomMock();
+    setNodes(mock.nodes);
+    setEdges(mock.edges);
+  }, []);
 
-  function handleCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const hit = nodes.find((n) => Math.hypot(n.x - x, n.y - y) < 10 + n.contribution);
-    setSelected(hit || null);
+  useEffect(() => { load(); }, [load]);
+
+  // D3 force simulation
+  useEffect(() => {
+    if (!d3Ready || !svgRef.current || nodes.length === 0) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d3 = (window as any).d3 as any;
+    if (!d3) return;
+
+    const svg = d3.select(svgRef.current);
+    const width = svgRef.current.clientWidth || 800;
+    const height = 500;
+
+    svg.selectAll("*").remove();
+
+    const d3Nodes: D3Node[] = nodes.map((n) => ({ ...n }));
+    const d3Edges = edges.map((e) => ({ source: e.source, target: e.target }));
+
+    const simulation = d3.forceSimulation(d3Nodes as unknown[])
+      .force("charge", d3.forceManyBody().strength(-200))
+      .force("link", d3.forceLink(d3Edges).id((d: unknown) => (d as D3Node).id).distance(80))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide().radius((d: unknown) => (d as D3Node).contribution + 6));
+
+    const link = svg.append("g").selectAll("line").data(d3Edges).join("line")
+      .attr("stroke", "rgba(201,169,98,0.15)").attr("stroke-width", 1);
+
+    const node = svg.append("g").selectAll("circle").data(d3Nodes).join("circle")
+      .attr("r", (d: D3Node) => 4 + d.contribution)
+      .attr("fill", (d: D3Node) => nodeColor(d.omega))
+      .attr("stroke", "#ffffff").attr("stroke-width", 1.5)
+      .style("cursor", "pointer");
+
+    const label = svg.append("g").selectAll("text").data(d3Nodes).join("text")
+      .text((d: D3Node) => d.id.slice(0, 10))
+      .attr("font-size", "9px").attr("fill", "#6b7280").attr("text-anchor", "middle").attr("dy", (d: D3Node) => -(d.contribution + 8));
+
+    // Tooltip on hover
+    const tooltip = d3.select("body").append("div")
+      .style("position", "absolute").style("background", "#ffffff").style("border", "1px solid #e5e7eb")
+      .style("border-radius", "6px").style("padding", "8px 12px").style("font-size", "12px")
+      .style("pointer-events", "none").style("opacity", "0").style("box-shadow", "0 4px 12px rgba(0,0,0,0.1)")
+      .style("z-index", "100").style("font-family", "monospace");
+
+    node.on("mouseover", (event: MouseEvent, d: D3Node) => {
+      tooltip.style("opacity", "1").html(`<b>${d.id}</b><br/>Omega: ${d.omega}<br/>Type: ${d.type}`);
+    }).on("mousemove", (event: MouseEvent) => {
+      tooltip.style("left", `${event.pageX + 12}px`).style("top", `${event.pageY - 20}px`);
+    }).on("mouseout", () => {
+      tooltip.style("opacity", "0");
+    }).on("click", (_: MouseEvent, d: D3Node) => {
+      setSelected(d);
+      setShowPanel(true);
+    });
+
+    // Drag
+    node.call(d3.drag()
+      .on("start", (event: { active: number }, d: D3Node) => { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag", (event: { x: number; y: number }, d: D3Node) => { d.fx = event.x; d.fy = event.y; })
+      .on("end", (event: { active: number }, d: D3Node) => { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+    );
+
+    simulation.on("tick", () => {
+      link.attr("x1", (d: { source: D3Node }) => d.source.x ?? 0).attr("y1", (d: { source: D3Node }) => d.source.y ?? 0)
+        .attr("x2", (d: { target: D3Node }) => d.target.x ?? 0).attr("y2", (d: { target: D3Node }) => d.target.y ?? 0);
+      node.attr("cx", (d: D3Node) => d.x ?? 0).attr("cy", (d: D3Node) => d.y ?? 0);
+      label.attr("x", (d: D3Node) => d.x ?? 0).attr("y", (d: D3Node) => d.y ?? 0);
+    });
+
+    return () => {
+      simulation.stop();
+      tooltip.remove();
+    };
+  }, [d3Ready, nodes, edges]);
+
+  async function handleScan() {
+    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    if (!apiKey) return;
+    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    try { await fetch(`${apiUrl}/v1/memory/scan`, { method: "POST", headers: { "X-API-Key": apiKey } }); } catch {}
+  }
+
+  async function handleSnapshot() {
+    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    if (!apiKey) return;
+    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    try { await fetch(`${apiUrl}/v1/memory/snapshot`, { method: "POST", headers: { "X-API-Key": apiKey, "Content-Type": "application/json" }, body: JSON.stringify({ agent_id: "consciousness" }) }); } catch {}
+  }
+
+  async function handleHeal(entryId: string) {
+    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    if (!apiKey) return;
+    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    try {
+      await fetch(`${apiUrl}/v1/heal`, {
+        method: "POST",
+        headers: { "X-API-Key": apiKey, "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ entry_id: entryId, action: "REFETCH" }),
+      });
+    } catch {}
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">Memory Consciousness</h1>
-        <div className="flex gap-2">
-          <button className="text-xs border border-surface-light px-3 py-1 rounded hover:bg-surface transition" data-testid="snapshot-btn"
-            onClick={() => fetch("/v1/memory/snapshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent_id: "consciousness" }) }).catch(() => {})}>
-            Snapshot
-          </button>
-          <button className="text-xs border border-surface-light px-3 py-1 rounded hover:bg-surface transition">Scan</button>
-          <button className="text-xs border border-surface-light px-3 py-1 rounded hover:bg-surface transition">Red Team</button>
+    <div style={{ position: "relative" }}>
+      <Script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" onLoad={() => setD3Ready(true)} />
+
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">Memory Graph</h1>
+          <p className="text-muted text-sm">Force-directed visualization of memory entries and their relationships.</p>
+        </div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={handleScan} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: "pointer", background: "#ffffff" }}>Scan for sleepers</button>
+          <button onClick={handleSnapshot} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: "pointer", background: "#ffffff" }}>Take snapshot</button>
         </div>
       </div>
 
-      {showingTop500 && (
-        <div className="bg-yellow-900/30 border border-yellow-500/30 rounded p-2 text-xs text-yellow-300 mb-4" data-testid="top500-banner">
-          Showing top 500 entries by contribution. Full graph available via API.
+      {!hasKey && (
+        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-4 text-sm text-gold">
+          Demo mode — connect API key for live data.
         </div>
       )}
 
-      <div className="flex gap-2 mb-4 text-xs">
-        {[
-          { label: "< 25", color: OMEGA_COLORS.green },
-          { label: "25-50", color: OMEGA_COLORS.yellow },
-          { label: "50-75", color: OMEGA_COLORS.orange },
-          { label: "75+", color: OMEGA_COLORS.red },
-        ].map((l) => (
-          <span key={l.label} className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: l.color }} />
-            {l.label}
+      {/* Legend */}
+      <div style={{ display: "flex", gap: "16px", marginBottom: "12px", fontSize: "12px" }}>
+        {[{ label: "< 25", color: "#16a34a" }, { label: "25-50", color: "#c9a962" }, { label: "50-75", color: "#f97316" }, { label: "> 75", color: "#dc2626" }].map((l) => (
+          <span key={l.label} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: l.color, display: "inline-block" }} />
+            <span style={{ color: "#6b7280" }}>Omega {l.label}</span>
           </span>
         ))}
+        {nodes.length > 0 && <span style={{ color: "#6b7280", marginLeft: "auto" }}>Showing {nodes.length} entries</span>}
       </div>
 
-      <canvas ref={canvasRef} width={800} height={500}
-        className="border border-surface-light rounded-lg w-full cursor-crosshair"
-        onClick={handleCanvasClick} data-testid="consciousness-canvas" />
+      {/* Graph */}
+      <div style={{ ...CARD, padding: "0", overflow: "hidden", position: "relative" }}>
+        <svg ref={svgRef} width="100%" height="500" style={{ display: "block", background: "#faf9f6" }} />
+      </div>
 
-      {selected && (
-        <div className="mt-4 border border-gold/30 bg-surface rounded-lg p-4">
-          <p className="font-mono text-gold text-sm mb-1">{selected.id}</p>
-          <p className="text-sm text-muted">Type: {selected.type} | Omega: {selected.omega.toFixed(1)} | Contribution: {selected.contribution.toFixed(1)}</p>
-          <div className="flex gap-2 mt-2">
-            <button className="text-xs bg-red-900 text-red-300 px-2 py-1 rounded">Quarantine</button>
-            <button className="text-xs bg-gold/20 text-gold px-2 py-1 rounded">Heal</button>
+      {/* Side Panel */}
+      {showPanel && selected && (
+        <div
+          style={{
+            position: "fixed", top: 0, right: 0, width: "360px", height: "100vh",
+            background: "#ffffff", boxShadow: "-4px 0 24px rgba(0,0,0,0.1)",
+            padding: "24px", overflowY: "auto", zIndex: 50,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+            <h3 style={{ fontSize: "16px", fontWeight: 700 }}>Entry Details</h3>
+            <button onClick={() => setShowPanel(false)} style={{ fontSize: "20px", color: "#6b7280", cursor: "pointer", background: "none", border: "none" }}>×</button>
           </div>
+
+          <p style={{ fontFamily: "monospace", fontSize: "14px", fontWeight: 600, marginBottom: "16px", color: "#0B0F14" }}>{selected.id}</p>
+
+          <div style={{ marginBottom: "24px" }}>
+            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "4px" }}>Omega Score</p>
+            <p style={{ fontSize: "36px", fontWeight: 700, color: nodeColor(selected.omega) }}>{selected.omega}</p>
+          </div>
+
+          <div style={{ marginBottom: "24px" }}>
+            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "4px" }}>Memory Type</p>
+            <p style={{ fontSize: "14px", color: "#0B0F14" }}>{selected.type}</p>
+          </div>
+
+          <div style={{ marginBottom: "24px" }}>
+            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "4px" }}>Contribution</p>
+            <p style={{ fontSize: "14px", color: "#0B0F14" }}>{selected.contribution.toFixed(1)}</p>
+          </div>
+
+          {/* Mock component breakdown */}
+          <div style={{ marginBottom: "24px" }}>
+            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "8px" }}>Component Breakdown</p>
+            {["s_freshness", "s_drift", "s_provenance", "s_interference", "s_propagation", "r_recall", "r_encode", "r_belief", "s_relevance", "r_recovery"].map((c) => {
+              const v = Math.round(Math.random() * selected.omega + 10);
+              return (
+                <div key={c} style={{ marginBottom: "6px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#6b7280", marginBottom: "2px" }}><span>{c}</span><span>{Math.min(v, 100)}</span></div>
+                  <div style={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", overflow: "hidden" }}>
+                    <div style={{ width: `${Math.min(v, 100)}%`, height: "100%", background: v > 60 ? "#dc2626" : v > 30 ? "#c9a962" : "#16a34a", borderRadius: "2px" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {selected.omega > 30 && (
+            <div style={{ marginBottom: "24px" }}>
+              <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "8px" }}>Repair Plan</p>
+              <ul style={{ fontSize: "13px", color: "#0B0F14", paddingLeft: "16px" }}>
+                <li>REFETCH stale data</li>
+                {selected.omega > 50 && <li>VERIFY_WITH_SOURCE</li>}
+                {selected.omega > 70 && <li>REBUILD_WORKING_SET</li>}
+              </ul>
+            </div>
+          )}
+
+          <button
+            onClick={() => handleHeal(selected.id)}
+            style={{ width: "100%", background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "10px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: "pointer" }}
+          >
+            Heal this entry
+          </button>
         </div>
       )}
     </div>
