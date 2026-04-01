@@ -58,8 +58,11 @@ if SUPABASE_URL and SUPABASE_KEY:
     try:
         from supabase import create_client
         supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception:
-        pass
+        print(f"SUPABASE_INIT: OK", flush=True)
+    except Exception as e:
+        print(f"SUPABASE_INIT_ERROR: {e}", flush=True)
+else:
+    print(f"SUPABASE_INIT: missing env vars URL={bool(SUPABASE_URL)} KEY={bool(SUPABASE_KEY)}", flush=True)
 
 supabase_service_client = None
 if SUPABASE_URL and SUPABASE_SERVICE_KEY:
