@@ -83,7 +83,7 @@ export default function ConsciousnessPage() {
     }
     const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
     try {
-      const res = await fetch(`${apiUrl}/v1/store/memories?limit=500`, { headers: { "X-API-Key": apiKey } });
+      const res = await fetch(`${apiUrl}/v1/store/memories?limit=500`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (res.ok) {
         const d = await res.json();
         const entries = Array.isArray(d) ? d : d.entries ?? d.memories ?? [];
@@ -208,7 +208,7 @@ export default function ConsciousnessPage() {
     try {
       const res = await fetch(`${apiUrl}/v1/memory/scan`, {
         method: "POST",
-        headers: { "X-API-Key": apiKey || "sg_demo_playground", "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${apiKey || "sg_demo_playground"}`, "Content-Type": "application/json" },
         body: JSON.stringify({ agent_id: "consciousness", scan_depth: "quick" }),
       });
       if (res.ok) {
@@ -229,7 +229,7 @@ export default function ConsciousnessPage() {
     try {
       const res = await fetch(`${apiUrl}/v1/memory/snapshot`, {
         method: "POST",
-        headers: { "X-API-Key": apiKey || "sg_demo_playground", "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${apiKey || "sg_demo_playground"}`, "Content-Type": "application/json" },
         body: JSON.stringify({ agent_id: "consciousness", label: "manual snapshot" }),
       });
       if (res.ok) {
