@@ -57,11 +57,25 @@ export default function SlaPage() {
     </div>
   );
 
-  if (loading || !data) return (
+  if (loading) return (
     <div>
       <h1 className="text-2xl font-bold mb-1">SLA Dashboard</h1>
       <p className="text-muted text-sm mb-6">Service level agreement monitoring and compliance.</p>
       <LoadingSkeleton rows={5} />
+    </div>
+  );
+
+  if (!data) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">SLA Dashboard</h1>
+      <p className="text-muted text-sm mb-6">Service level agreement monitoring and compliance.</p>
+      <div style={{ textAlign: "center", padding: "80px 0" }}>
+        <p style={{ fontSize: "48px", color: "#16a34a" }}>&#x2713;</p>
+        <h3 style={{ fontSize: "20px", color: "#0B0F14", fontWeight: 700, marginTop: "8px" }}>No SLA data available yet</h3>
+        <p style={{ fontSize: "14px", color: "#6b7280", marginTop: "8px", maxWidth: "400px", margin: "8px auto 0" }}>
+          SLA metrics will appear here once enough preflight calls have been made to generate statistics.
+        </p>
+      </div>
     </div>
   );
 
@@ -74,7 +88,8 @@ export default function SlaPage() {
     { metric: "Block rate", target: "N/A", current: `${data.block_rate}%`, met: true, info: true },
   ];
 
-  const maxBucket = Math.max(...data.latency_buckets.map((b) => b.pct));
+  const buckets = data.latency_buckets ?? [];
+  const maxBucket = buckets.length > 0 ? Math.max(...buckets.map((b) => b.pct)) : 1;
 
   return (
     <div>
@@ -138,7 +153,7 @@ export default function SlaPage() {
       <div style={{ ...CARD, marginBottom: "32px" }}>
         <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Latency Distribution</h2>
         <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: "160px" }}>
-          {data.latency_buckets.map((b) => (
+          {buckets.map((b) => (
             <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
               <span style={{ fontSize: "12px", fontWeight: 600, color: "#0B0F14", marginBottom: "4px" }}>{b.pct}%</span>
               <div style={{ width: "100%", height: `${(b.pct / maxBucket) * 120}px`, background: b.pct > 10 ? "#16a34a" : b.pct > 3 ? "#c9a962" : "#e5e7eb", borderRadius: "4px 4px 0 0", transition: "height 0.6s ease" }} />

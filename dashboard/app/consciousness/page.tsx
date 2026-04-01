@@ -68,22 +68,22 @@ export default function ConsciousnessPage() {
     }
     const apiUrl = getApiUrl();
     try {
-      const res = await fetch(`${apiUrl}/v1/store/memories?limit=500`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      const res = await fetch(`${apiUrl}/v1/memory/graph`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (res.ok) {
         const d = await res.json();
-        const entries = Array.isArray(d) ? d : d.entries ?? d.memories ?? [];
-        if (entries.length > 0) {
-          setNodes(entries.slice(0, 500).map((e: Record<string, unknown>, i: number) => ({
-            id: String(e.id || `entry_${i}`),
-            omega: Number(e.omega ?? e.omega_mem_final ?? 0),
-            type: String(e.type || "unknown"),
-            contribution: Number(e.shapley ?? 5),
+        const rawNodes = d.nodes ?? [];
+        const rawEdges = d.edges ?? [];
+        if (rawNodes.length > 0) {
+          setNodes(rawNodes.slice(0, 500).map((n: Record<string, unknown>, i: number) => ({
+            id: String(n.id || `node_${i}`),
+            omega: Number(n.omega ?? n.omega_mem_final ?? n.score ?? 0),
+            type: String(n.type || n.memory_type || "unknown"),
+            contribution: Number(n.contribution ?? n.shapley ?? n.weight ?? 5),
           })));
-          const edgeList: MemEdge[] = [];
-          for (let i = 0; i < Math.min(entries.length, 500); i++) {
-            if (i + 1 < entries.length) edgeList.push({ source: String(entries[i].id || `entry_${i}`), target: String(entries[i + 1].id || `entry_${i + 1}`) });
-          }
-          setEdges(edgeList);
+          setEdges(rawEdges.slice(0, 1000).map((e: Record<string, unknown>) => ({
+            source: String(e.source ?? e.from ?? ""),
+            target: String(e.target ?? e.to ?? ""),
+          })).filter((e: MemEdge) => e.source && e.target));
         }
       }
     } catch {}
@@ -256,6 +256,20 @@ export default function ConsciousnessPage() {
       <h1 className="text-2xl font-bold mb-1">Memory Graph</h1>
       <p className="text-muted text-sm mb-6">Force-directed visualization of memory entries and their relationships.</p>
       <LoadingSkeleton rows={5} />
+    </div>
+  );
+
+  if (nodes.length === 0) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Memory Graph</h1>
+      <p className="text-muted text-sm mb-6">Force-directed visualization of memory entries and their relationships.</p>
+      <div style={{ textAlign: "center", padding: "80px 0" }}>
+        <p style={{ fontSize: "48px", color: "#c9a962" }}>&#x25CB;</p>
+        <h3 style={{ fontSize: "20px", color: "#0B0F14", fontWeight: 700, marginTop: "8px" }}>No memory entries yet</h3>
+        <p style={{ fontSize: "14px", color: "#6b7280", marginTop: "8px", maxWidth: "400px", margin: "8px auto 0" }}>
+          Store memories via <code style={{ color: "#c9a962" }}>POST /v1/store/memories</code> to see them visualized here.
+        </p>
+      </div>
     </div>
   );
 
