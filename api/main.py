@@ -4615,7 +4615,7 @@ def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, d
     _sb = supabase_service_client or supabase_client
     if _sb:
         try:
-            q = _sb.table("audit_log").select("*").order("timestamp", desc=True).limit(limit)
+            q = _sb.table("audit_log").select("*").order("created_at", desc=True).limit(limit)
             if decision:
                 q = q.eq("decision", decision)
             entries = q.execute().data or []
@@ -4632,7 +4632,7 @@ def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_a
     _sb = supabase_service_client or supabase_client
     if _sb:
         try:
-            q = _sb.table("audit_log").select("*").order("timestamp", desc=True).limit(limit)
+            q = _sb.table("audit_log").select("*").order("created_at", desc=True).limit(limit)
             if firewall_bypassed is True:
                 q = q.eq("event_type", "firewall_bypass")
             entries = q.execute().data or []
