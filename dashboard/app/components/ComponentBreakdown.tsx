@@ -1,9 +1,10 @@
 export function ComponentBreakdown({ breakdown }: { breakdown: Record<string, number> }) {
-  const maxVal = Math.max(...Object.values(breakdown), 1);
+  const safe = breakdown ?? {};
+  const maxVal = Math.max(...Object.values(safe), 1);
 
   return (
     <div className="space-y-2">
-      {Object.entries(breakdown).map(([key, value]) => {
+      {Object.entries(safe).map(([key, value]) => {
         const pct = (value / maxVal) * 100;
         const color =
           value < 25 ? "bg-green-400" : value < 50 ? "bg-yellow-400" : value < 75 ? "bg-orange-400" : "bg-red-400";

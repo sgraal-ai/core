@@ -141,7 +141,7 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
         </>}
         {data.shapley_values && <>
           <p className="text-xs text-muted mb-2 mt-3">Shapley Values (top 3)</p>
-          {Object.entries(data.shapley_values as Record<string, number>).sort(([,a],[,b]) => Math.abs(b) - Math.abs(a)).slice(0, 3).map(([k, v]) => (
+          {Object.entries((data.shapley_values ?? {}) as Record<string, number>).sort(([,a],[,b]) => Math.abs(b) - Math.abs(a)).slice(0, 3).map(([k, v]) => (
             <KV key={k} label={k} value={v} />
           ))}
         </>}

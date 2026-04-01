@@ -97,18 +97,18 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           </div>
           <div className="flex gap-6 text-sm text-muted">
             <span>Assurance: <strong className="text-foreground">{agent.assurance_score}%</strong></span>
-            <span>Profile: <strong className="text-foreground">{agent.compliance_result.profile_applied}</strong></span>
-            {agent.compliance_result.audit_required && (
+            <span>Profile: <strong className="text-foreground">{agent.compliance_result?.profile_applied ?? "N/A"}</strong></span>
+            {agent.compliance_result?.audit_required && (
               <span className="text-red-400 font-mono">AUDIT REQUIRED</span>
             )}
           </div>
         </div>
       </div>
 
-      {agent.compliance_result.violations.length > 0 && (
+      {(agent.compliance_result?.violations?.length ?? 0) > 0 && (
         <div className="border border-red-400/20 bg-red-400/5 rounded-xl p-5 mb-8">
           <h2 className="text-sm font-semibold text-red-400 mb-3">Compliance Violations</h2>
-          {agent.compliance_result.violations.map((v, i) => (
+          {(agent.compliance_result?.violations ?? []).map((v, i) => (
             <div key={i} className="mb-2">
               <span className="text-xs font-mono text-red-400 mr-2">[{v.severity.toUpperCase()}]</span>
               <span className="text-xs font-mono text-gold mr-2">{v.article}</span>
@@ -128,22 +128,22 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         <div>
           <h2 className="text-lg font-semibold mb-4">
             Repair Plan
-            {agent.repair_plan.length > 0 && (
+            {(agent.repair_plan?.length ?? 0) > 0 && (
               <span className="text-sm text-gold ml-2">({agent.repair_plan.length})</span>
             )}
           </h2>
-          <RepairPlanList plan={agent.repair_plan} />
+          <RepairPlanList plan={agent.repair_plan ?? []} />
         </div>
       </div>
 
       <div className="mb-10">
         <h2 className="text-lg font-semibold mb-4">
           At-Risk Warnings
-          {agent.at_risk_warnings.length > 0 && (
+          {(agent.at_risk_warnings?.length ?? 0) > 0 && (
             <span className="text-sm text-red-400 ml-2">({agent.at_risk_warnings.length})</span>
           )}
         </h2>
-        <AtRiskWarnings warnings={agent.at_risk_warnings} />
+        <AtRiskWarnings warnings={agent.at_risk_warnings ?? []} />
       </div>
 
       <div className="mb-10">
