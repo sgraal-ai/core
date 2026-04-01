@@ -580,7 +580,7 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
             raise HTTPException(status_code=403, detail="write_firewall: false requires enterprise tier")
         # Log bypass to audit
         _audit_log("firewall_bypass", str(uuid.uuid4()), key_record, "BYPASS", omega,
-                   {"entry_id": mem_id, "firewall_bypassed": True,
+                   {"entry_id": mem_id, "agent_id": req.agent_id, "firewall_bypassed": True,
                     "firewall_bypass_reason": req.firewall_bypass_reason or "not_provided"})
         _firewall_triggered = True
 
@@ -5683,7 +5683,8 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
     )
 
     heal_request_id = str(uuid.uuid4())
-    _audit_log("heal", heal_request_id, key_record, req.action, 0, {"entry_id": req.entry_id})
+    _audit_log("heal", heal_request_id, key_record, req.action, 0,
+               {"entry_id": req.entry_id, "agent_id": req.agent_id})
     _metrics.record_heal()
 
     heal_resp = {
@@ -8024,7 +8025,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _is_dry_run = req.dry_run or key_record.get("demo", False)
     if not _is_dry_run:
         # Audit log
-        _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out)
+        _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out,
+                   {"agent_id": req.agent_id, "domain": req.domain, "action_type": req.action_type})
 
     # Webhook dispatch (skip in dry_run)
     entry_ids = [e.id for e in entries]
