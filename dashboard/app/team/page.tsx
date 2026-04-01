@@ -3,17 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 
 interface Member { email: string; role: string; joined: string; status: string; isYou?: boolean; }
-interface ApiKey { name: string; key_truncated: string; created: string; last_used: string; }
-
-const MOCK_MEMBERS: Member[] = [
-  { email: "zsobpeter@gmail.com", role: "Admin", joined: "Apr 1, 2026", status: "Active", isYou: true },
-  { email: "developer@company.com", role: "Developer", joined: "Mar 15, 2026", status: "Active" },
-  { email: "auditor@company.com", role: "Auditor", joined: "Mar 20, 2026", status: "Active" },
-];
-
-const MOCK_KEYS: ApiKey[] = [
-  { name: "Default", key_truncated: "sg_live_f3CY...RlAw", created: "Apr 1, 2026", last_used: "Just now" },
-];
+interface ApiKey { id: string; name: string; key_truncated: string; created: string; last_used: string; }
 
 const ROLES = [
   { id: "admin", label: "Admin", desc: "Full access including billing and team management" },
@@ -29,10 +19,13 @@ const BTN_GOLD: React.CSSProperties = { background: "#c9a962", color: "#0B0F14",
 const INPUT: React.CSSProperties = { width: "100%", background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "10px 14px", fontSize: "14px", color: "#0B0F14" };
 
 export default function TeamPage() {
-  const [members, setMembers] = useState<Member[]>(MOCK_MEMBERS);
-  const [keys, setKeys] = useState<ApiKey[]>(MOCK_KEYS);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [keys, setKeys] = useState<ApiKey[]>([]);
   const [hasKey, setHasKey] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showNewKeyModal, setShowNewKeyModal] = useState(false);
+  const [newKeyValue, setNewKeyValue] = useState("");
+  const [newKeyCopied, setNewKeyCopied] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("developer");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -40,14 +33,26 @@ export default function TeamPage() {
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
+  function apiHeaders(): Record<string, string> {
+    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
+    return { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
+  }
+
+  function apiUrl(): string {
+    return localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+  }
+
   const load = useCallback(async () => {
     const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
     setHasKey(!!apiKey);
-    if (!apiKey) return;
-    const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+    if (!apiKey) { setMembers([]); setKeys([]); return; }
     try {
-      const res = await fetch(`${apiUrl}/v1/team/members`, { headers: { Authorization: `Bearer ${apiKey}` } });
-      if (res.ok) { const d = await res.json(); if (Array.isArray(d)) setMembers(d); else if (d.members) setMembers(d.members); }
+      const [mRes, kRes] = await Promise.all([
+        fetch(`${apiUrl()}/v1/team/members`, { headers: apiHeaders() }),
+        fetch(`${apiUrl()}/v1/auth/keys`, { headers: apiHeaders() }),
+      ]);
+      if (mRes.ok) { const d = await mRes.json(); setMembers(Array.isArray(d) ? d : d.members ?? []); }
+      if (kRes.ok) { const d = await kRes.json(); setKeys(Array.isArray(d) ? d : d.keys ?? []); }
     } catch {}
   }, []);
 
@@ -55,19 +60,14 @@ export default function TeamPage() {
 
   async function sendInvite() {
     if (!inviteEmail) return;
-    const apiKey = localStorage.getItem("sgraal_api_key") ?? "";
-    if (apiKey) {
-      const apiUrl = localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
-      try {
-        await fetch(`${apiUrl}/v1/team/invite`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
-        });
-      } catch {}
-    }
+    try {
+      await fetch(`${apiUrl()}/v1/team/invite`, {
+        method: "POST", headers: apiHeaders(),
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+      });
+    } catch {}
     setMembers((prev) => [...prev, { email: inviteEmail, role: ROLES.find((r) => r.id === inviteRole)?.label ?? inviteRole, joined: "Just now", status: "Pending" }]);
-    setShowModal(false);
+    setShowInviteModal(false);
     setInviteEmail("");
     setInviteRole("developer");
     setToast({ message: `Invite sent to ${inviteEmail}`, type: "success" });
@@ -78,12 +78,58 @@ export default function TeamPage() {
     setToast({ message: `Removed ${email}`, type: "success" });
   }
 
-  function copyKey(key: string) {
-    const full = localStorage.getItem("sgraal_api_key") ?? key;
+  async function generateKey() {
+    try {
+      const res = await fetch(`${apiUrl()}/v1/auth/keys/generate`, {
+        method: "POST", headers: apiHeaders(),
+        body: JSON.stringify({ name: "New Key" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const key = data.api_key ?? data.key ?? "";
+        setNewKeyValue(key);
+        setNewKeyCopied(false);
+        setShowNewKeyModal(true);
+        load();
+      } else {
+        setToast({ message: "Failed to generate key", type: "error" });
+      }
+    } catch {
+      setToast({ message: "Failed to generate key", type: "error" });
+    }
+  }
+
+  async function revokeKey(keyId: string) {
+    if (!confirm("Are you sure? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`${apiUrl()}/v1/auth/keys/${keyId}`, {
+        method: "DELETE", headers: apiHeaders(),
+      });
+      if (res.ok) {
+        setKeys((prev) => prev.filter((k) => k.id !== keyId));
+        setToast({ message: "Key revoked", type: "success" });
+      } else {
+        setToast({ message: "Failed to revoke key", type: "error" });
+      }
+    } catch {
+      setToast({ message: "Failed to revoke key", type: "error" });
+    }
+  }
+
+  function copyKey(keyTruncated: string) {
+    const full = localStorage.getItem("sgraal_api_key") ?? keyTruncated;
     navigator.clipboard.writeText(full);
-    setCopied(key);
+    setCopied(keyTruncated);
     setTimeout(() => setCopied(null), 2000);
   }
+
+  function copyNewKey() {
+    navigator.clipboard.writeText(newKeyValue);
+    setNewKeyCopied(true);
+    setTimeout(() => setNewKeyCopied(false), 2000);
+  }
+
+  const empty = !hasKey;
 
   return (
     <div>
@@ -92,12 +138,12 @@ export default function TeamPage() {
           <h1 className="text-2xl font-bold mb-1">Team</h1>
           <p className="text-muted text-sm">Manage access to your Sgraal workspace.</p>
         </div>
-        <button onClick={() => setShowModal(true)} style={BTN_GOLD}>+ Invite Member</button>
+        <button onClick={() => setShowInviteModal(true)} style={BTN_GOLD}>+ Invite Member</button>
       </div>
 
-      {!hasKey && (
+      {empty && (
         <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          Showing mock data. <a href="/settings" className="underline">Enter your API key</a> to manage your team.
+          <a href="/settings" className="underline">Enter your API key</a> to manage your team.
         </div>
       )}
 
@@ -110,6 +156,9 @@ export default function TeamPage() {
             </tr>
           </thead>
           <tbody>
+            {members.length === 0 && (
+              <tr><td colSpan={5} style={{ ...TD, textAlign: "center", color: "#6b7280" }}>No team members loaded. Connect your API key to see your team.</td></tr>
+            )}
             {members.map((m) => (
               <tr key={m.email}>
                 <td style={{ ...TD, fontFamily: "monospace", fontWeight: 600 }}>{m.email}</td>
@@ -178,8 +227,11 @@ export default function TeamPage() {
             </tr>
           </thead>
           <tbody>
+            {keys.length === 0 && (
+              <tr><td colSpan={5} style={{ ...TD, textAlign: "center", color: "#6b7280" }}>No API keys loaded. Connect your API key or generate a new one.</td></tr>
+            )}
             {keys.map((k) => (
-              <tr key={k.name}>
+              <tr key={k.id}>
                 <td style={{ ...TD, fontWeight: 600 }}>{k.name}</td>
                 <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px", color: "#c9a962" }}>{k.key_truncated}</td>
                 <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{k.created}</td>
@@ -189,7 +241,7 @@ export default function TeamPage() {
                     <button onClick={() => copyKey(k.key_truncated)} style={{ fontSize: "13px", color: "#6b7280", cursor: "pointer", background: "none", border: "none" }}>
                       {copied === k.key_truncated ? "Copied!" : "Copy"}
                     </button>
-                    <button style={{ fontSize: "13px", color: "#dc2626", cursor: "pointer", background: "none", border: "none" }}>Revoke</button>
+                    <button onClick={() => revokeKey(k.id)} style={{ fontSize: "13px", color: "#dc2626", cursor: "pointer", background: "none", border: "none" }}>Revoke</button>
                   </div>
                 </td>
               </tr>
@@ -197,11 +249,11 @@ export default function TeamPage() {
           </tbody>
         </table>
       </div>
-      <button style={BTN_GOLD}>+ Generate New Key</button>
+      <button onClick={generateKey} style={BTN_GOLD}>+ Generate New Key</button>
 
       {/* Invite Modal */}
-      {showModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }} onClick={() => setShowModal(false)}>
+      {showInviteModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }} onClick={() => setShowInviteModal(false)}>
           <div style={{ background: "#ffffff", borderRadius: "12px", padding: "32px", width: "440px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "24px" }}>Invite team member</h3>
             <div style={{ marginBottom: "16px" }}>
@@ -215,8 +267,31 @@ export default function TeamPage() {
               </select>
             </div>
             <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
-              <button onClick={() => setShowModal(false)} style={{ padding: "8px 20px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "14px", cursor: "pointer", background: "#ffffff" }}>Cancel</button>
+              <button onClick={() => setShowInviteModal(false)} style={{ padding: "8px 20px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "14px", cursor: "pointer", background: "#ffffff" }}>Cancel</button>
               <button onClick={sendInvite} style={BTN_GOLD}>Send Invite</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Key Modal */}
+      {showNewKeyModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+          <div style={{ background: "#ffffff", borderRadius: "12px", padding: "32px", width: "520px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }}>
+            <h3 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "8px" }}>Your new API key</h3>
+            <p style={{ fontSize: "14px", color: "#dc2626", fontWeight: 600, marginBottom: "20px" }}>Copy this key now — it won{"'"}t be shown again.</p>
+            <div style={{
+              background: "rgba(201,169,98,0.08)", border: "1px solid rgba(201,169,98,0.2)",
+              borderRadius: "8px", padding: "16px", fontFamily: "monospace", fontSize: "14px",
+              color: "#c9a962", wordBreak: "break-all", marginBottom: "20px",
+            }}>
+              {newKeyValue}
+            </div>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+              <button onClick={copyNewKey} style={{ ...BTN_GOLD, background: newKeyCopied ? "#16a34a" : "#c9a962", color: newKeyCopied ? "#ffffff" : "#0B0F14" }}>
+                {newKeyCopied ? "Copied!" : "Copy Key"}
+              </button>
+              <button onClick={() => { setShowNewKeyModal(false); setNewKeyValue(""); }} style={{ padding: "8px 20px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "14px", cursor: "pointer", background: "#ffffff" }}>Done</button>
             </div>
           </div>
         </div>
