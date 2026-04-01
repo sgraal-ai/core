@@ -1,21 +1,33 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { getApiKey, getApiUrl } from "../lib/storage";
 import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface Summary {
   total_calls: number;
   block_rate: number;
   avg_omega: number;
-  decisions: Record<string, number>;
-  domain_breakdown: { domain: string; decisions: number; avg_omega: number; block_rate: number }[];
-  daily: { label: string; value: number }[];
+  trend: string | null;
 }
 
-interface TokenWaste { wasted: number; saved: number; roi: number; }
+interface WastefulEntry {
+  entry_id: string;
+  estimated_tokens: number;
+  omega: number;
+}
 
-const DECISION_COLORS: Record<string, string> = { USE_MEMORY: "#16a34a", WARN: "#eab308", ASK_USER: "#f97316", BLOCK: "#dc2626" };
+interface TokenWaste {
+  blocked_retrievals: number;
+  warn_retrievals: number;
+  estimated_tokens_wasted: number;
+  estimated_cost_usd: number;
+  savings_if_filtered: number;
+  roi_multiple: number;
+  top_wasteful_entries: WastefulEntry[];
+  recommendation: string;
+}
+
 const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "20px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
 
 export default function AnalyticsPage() {
@@ -39,8 +51,8 @@ export default function AnalyticsPage() {
         fetch(`${apiUrl}/v1/analytics/summary`, { headers: h }),
         fetch(`${apiUrl}/v1/analytics/token-waste`, { headers: h }),
       ]);
-      if (sR.ok) { const d = await sR.json(); setSummary(d); }
-      if (wR.ok) { const d = await wR.json(); setWaste(d); }
+      if (sR.ok) setSummary(await sR.json());
+      if (wR.ok) setWaste(await wR.json());
     } catch {}
     setLoading(false);
     setLastUpdated(new Date());
@@ -70,10 +82,25 @@ export default function AnalyticsPage() {
     </div>
   );
 
-  const dailyData = summary.daily ?? [];
-  const domainData = summary.domain_breakdown ?? [];
-  const maxDaily = dailyData.length > 0 ? Math.max(...dailyData.map((d) => d.value)) : 1;
   const fmt = (n: number) => n.toLocaleString();
+  const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
+  const omegaLabel = summary.avg_omega < 30 ? "Low" : summary.avg_omega < 60 ? "Medium" : "High";
+  const omegaColor = summary.avg_omega < 30 ? "#16a34a" : summary.avg_omega < 60 ? "#c9a962" : "#dc2626";
+  const trendLabel = summary.trend ?? "stable";
+
+  // Derive decision breakdown from waste data
+  const totalDecisions = summary.total_calls || 1;
+  const blockPct = summary.block_rate ?? 0;
+  const warnPct = totalDecisions > 0 ? Math.round((waste.warn_retrievals / totalDecisions) * 100) : 0;
+  const usePct = Math.max(0, 100 - blockPct - warnPct);
+
+  const decisions = [
+    { key: "USE_MEMORY", pct: usePct, color: "#16a34a" },
+    { key: "WARN", pct: warnPct, color: "#eab308" },
+    { key: "BLOCK", pct: blockPct, color: "#dc2626" },
+  ];
+
+  const wastefulEntries = waste.top_wasteful_entries ?? [];
 
   return (
     <div>
@@ -90,22 +117,22 @@ export default function AnalyticsPage() {
         <div style={CARD}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Total Decisions</p>
           <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>{fmt(summary.total_calls)}</p>
-          <p style={{ fontSize: "12px", color: "#16a34a", marginTop: "4px" }}>+12% this week</p>
+          <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>Trend: {trendLabel}</p>
         </div>
         <div style={CARD}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Block Rate</p>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>{summary.block_rate}%</p>
-          <p style={{ fontSize: "12px", color: "#16a34a", marginTop: "4px" }}>-2.1% vs last week</p>
+          <p style={{ fontSize: "28px", fontWeight: 700, color: blockPct > 20 ? "#dc2626" : "#0B0F14", marginTop: "4px" }}>{blockPct}%</p>
+          <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>{waste.blocked_retrievals} blocked calls</p>
         </div>
         <div style={CARD}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Avg Omega Score</p>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: "#c9a962", marginTop: "4px" }}>{summary.avg_omega}</p>
-          <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>Fleet risk: Low</p>
+          <p style={{ fontSize: "28px", fontWeight: 700, color: omegaColor, marginTop: "4px" }}>{summary.avg_omega}</p>
+          <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>Fleet risk: {omegaLabel}</p>
         </div>
         <div style={CARD}>
-          <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Monthly Savings</p>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>${fmt(waste.saved)}</p>
-          <p style={{ fontSize: "12px", color: "#c9a962", marginTop: "4px" }}>{waste.roi}x ROI</p>
+          <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Savings Potential</p>
+          <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>{fmtUsd(waste.savings_if_filtered)}</p>
+          <p style={{ fontSize: "12px", color: "#c9a962", marginTop: "4px" }}>{waste.roi_multiple}x ROI</p>
         </div>
       </div>
 
@@ -113,11 +140,11 @@ export default function AnalyticsPage() {
       <div style={{ ...CARD, marginBottom: "24px" }}>
         <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Decision Breakdown</h2>
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          {Object.entries(summary.decisions).map(([key, pct]) => (
+          {decisions.map(({ key, pct, color }) => (
             <div key={key} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <span style={{ width: "100px", fontSize: "13px", fontFamily: "monospace", color: "#0B0F14" }}>{key}</span>
               <div style={{ flex: 1, height: "20px", background: "#f5f4f0", borderRadius: "4px", overflow: "hidden" }}>
-                <div style={{ width: `${pct}%`, height: "100%", background: DECISION_COLORS[key] || "#6b7280", borderRadius: "4px", transition: "width 0.8s ease" }} />
+                <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: "4px", transition: "width 0.8s ease" }} />
               </div>
               <span style={{ width: "40px", fontSize: "13px", fontWeight: 600, textAlign: "right" }}>{pct}%</span>
             </div>
@@ -128,59 +155,53 @@ export default function AnalyticsPage() {
       {/* Token Waste Widget */}
       <div style={{ ...CARD, marginBottom: "24px", background: "rgba(201,169,98,0.06)", border: "1px solid rgba(201,169,98,0.2)" }}>
         <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px" }}>Token Waste Analysis</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "16px" }}>
           <div>
-            <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Wasted</p>
-            <p style={{ fontSize: "24px", fontWeight: 700, color: "#dc2626" }}>${fmt(waste.wasted)}</p>
+            <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Tokens Wasted</p>
+            <p style={{ fontSize: "24px", fontWeight: 700, color: "#dc2626" }}>{fmt(waste.estimated_tokens_wasted)}</p>
           </div>
           <div>
-            <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Saved with Sgraal</p>
-            <p style={{ fontSize: "24px", fontWeight: 700, color: "#16a34a" }}>${fmt(waste.saved)}</p>
+            <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Cost</p>
+            <p style={{ fontSize: "24px", fontWeight: 700, color: "#dc2626" }}>{fmtUsd(waste.estimated_cost_usd)}</p>
+          </div>
+          <div>
+            <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Savings if Filtered</p>
+            <p style={{ fontSize: "24px", fontWeight: 700, color: "#16a34a" }}>{fmtUsd(waste.savings_if_filtered)}</p>
           </div>
           <div>
             <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>ROI</p>
-            <p style={{ fontSize: "24px", fontWeight: 700, color: "#c9a962" }}>{waste.roi}x</p>
+            <p style={{ fontSize: "24px", fontWeight: 700, color: "#c9a962" }}>{waste.roi_multiple}x</p>
           </div>
         </div>
+        {waste.recommendation && (
+          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "12px", fontStyle: "italic" }}>{waste.recommendation}</p>
+        )}
       </div>
 
-      {/* Domain Table */}
-      <div style={{ ...CARD, marginBottom: "24px" }}>
-        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px" }}>Domain Breakdown</h2>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              {["Domain", "Decisions", "Avg Omega", "Block Rate"].map((h) => (
-                <th key={h} style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "8px 16px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {domainData.map((row) => (
-              <tr key={row.domain}>
-                <td style={{ padding: "12px 16px", fontSize: "14px", fontWeight: 600, borderBottom: "1px solid #f5f4f0" }}>{row.domain}</td>
-                <td style={{ padding: "12px 16px", fontSize: "14px", borderBottom: "1px solid #f5f4f0" }}>{fmt(row.decisions)}</td>
-                <td style={{ padding: "12px 16px", fontSize: "14px", borderBottom: "1px solid #f5f4f0", color: row.avg_omega > 40 ? "#dc2626" : row.avg_omega > 25 ? "#c9a962" : "#16a34a" }}>{row.avg_omega}</td>
-                <td style={{ padding: "12px 16px", fontSize: "14px", borderBottom: "1px solid #f5f4f0" }}>{row.block_rate}%</td>
+      {/* Top Wasteful Entries */}
+      {wastefulEntries.length > 0 && (
+        <div style={{ ...CARD, marginBottom: "24px" }}>
+          <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px" }}>Top Wasteful Entries</h2>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                {["Entry ID", "Est. Tokens", "Omega"].map((h) => (
+                  <th key={h} style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "8px 16px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em" }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Daily Chart */}
-      <div style={CARD}>
-        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Daily Decisions (Last 7 Days)</h2>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: "160px" }}>
-          {dailyData.map((d) => (
-            <div key={d.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <span style={{ fontSize: "11px", fontWeight: 600, color: "#0B0F14", marginBottom: "4px" }}>{fmt(d.value)}</span>
-              <div style={{ width: "100%", height: `${(d.value / maxDaily) * 120}px`, background: "linear-gradient(180deg, #c9a962, #745b1c)", borderRadius: "4px 4px 0 0", transition: "height 0.6s ease" }} />
-              <span style={{ fontSize: "12px", color: "#6b7280", marginTop: "6px" }}>{d.label}</span>
-            </div>
-          ))}
+            </thead>
+            <tbody>
+              {wastefulEntries.map((e) => (
+                <tr key={e.entry_id}>
+                  <td style={{ padding: "12px 16px", fontSize: "14px", fontFamily: "monospace", fontWeight: 600, borderBottom: "1px solid #f5f4f0" }}>{e.entry_id}</td>
+                  <td style={{ padding: "12px 16px", fontSize: "14px", borderBottom: "1px solid #f5f4f0" }}>{fmt(e.estimated_tokens)}</td>
+                  <td style={{ padding: "12px 16px", fontSize: "14px", fontWeight: 600, borderBottom: "1px solid #f5f4f0", color: e.omega > 60 ? "#dc2626" : e.omega > 30 ? "#c9a962" : "#16a34a" }}>{e.omega}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
+      )}
     </div>
   );
 }
