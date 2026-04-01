@@ -231,7 +231,7 @@ export default function ConsciousnessPage() {
     try {
       const res = await fetch(`${apiUrl}/v1/heal`, {
         method: "POST",
-        headers: { "X-API-Key": apiKey, "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({ entry_id: entryId, action: "REFETCH" }),
       });
       if (res.ok) showToast(`Healed ${entryId}`, "success");

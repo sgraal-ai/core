@@ -56,7 +56,7 @@ export default function AuditPage() {
       if (decisionFilter) params.set("decision", decisionFilter);
       if (domainFilter) params.set("domain", domainFilter);
       if (dateRange) params.set("range", dateRange);
-      const res = await fetch(`${apiUrl}/v1/audit-log?${params}`, { headers: { "X-API-Key": apiKey } });
+      const res = await fetch(`${apiUrl}/v1/audit-log?${params}`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (res.ok) { const d = await res.json(); setEntries(Array.isArray(d) ? d : d.entries ?? []); }
     } catch {}
     setLoading(false);

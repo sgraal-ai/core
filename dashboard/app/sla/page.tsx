@@ -34,7 +34,7 @@ export default function SlaPage() {
     if (!apiKey) { setLoading(false); return; }
     const apiUrl = getApiUrl();
     try {
-      const res = await fetch(`${apiUrl}/v1/sla/report`, { headers: { "X-API-Key": apiKey } });
+      const res = await fetch(`${apiUrl}/v1/sla/report`, { headers: { Authorization: `Bearer ${apiKey}` } });
       if (res.ok) { const d = await res.json(); setData(d); }
     } catch {}
     setLoading(false);

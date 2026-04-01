@@ -33,7 +33,7 @@ export default function AnalyticsPage() {
     setHasKey(!!apiKey);
     if (!apiKey) { setLoading(false); return; }
     const apiUrl = getApiUrl();
-    const h = { "X-API-Key": apiKey };
+    const h = { Authorization: `Bearer ${apiKey}` };
     try {
       const [sR, wR] = await Promise.all([
         fetch(`${apiUrl}/v1/analytics/summary`, { headers: h }),

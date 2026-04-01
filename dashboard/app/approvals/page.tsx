@@ -60,7 +60,7 @@ export default function ApprovalsPage() {
     try {
       const apiUrl = getApiUrl();
       const res = await fetch(`${apiUrl}/v1/approvals/pending`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { Authorization: `Bearer ${apiKey}` },
       });
       if (res.ok) {
         const data = await res.json();
@@ -109,7 +109,7 @@ export default function ApprovalsPage() {
     try {
       await fetch(`${apiUrl}/v1/approvals/${id}/approve`, {
         method: "POST",
-        headers: { "X-API-Key": apiKey },
+        headers: { Authorization: `Bearer ${apiKey}` },
       });
       showToast("Decision approved", "success");
       loadApprovals();
@@ -124,7 +124,7 @@ export default function ApprovalsPage() {
     try {
       await fetch(`${apiUrl}/v1/approvals/${id}/reject`, {
         method: "POST",
-        headers: { "X-API-Key": apiKey },
+        headers: { Authorization: `Bearer ${apiKey}` },
       });
       showToast("Decision rejected", "success");
       loadApprovals();
