@@ -586,13 +586,15 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
 
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
-            http_requests.post(f"{SUPABASE_URL}/rest/v1/memory_store",
+            _store_r = http_requests.post(f"{SUPABASE_URL}/rest/v1/memory_store",
                 json={"id": mem_id, "api_key_hash": kh, "agent_id": req.agent_id, "content": req.content,
                       "memory_type": req.memory_type, "metadata": req.metadata or {}, "omega_score": omega, "blocked": blocked},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
-        except Exception:
-            pass
+            if not _store_r.ok:
+                print(f"MEMORY_STORE_INSERT_ERROR: {_store_r.status_code} {_store_r.text}", flush=True)
+        except Exception as e:
+            print(f"MEMORY_STORE_INSERT_EXCEPTION: {e}", flush=True)
 
     # FIX 5: Trigger consensus check on memory write
     try:
@@ -837,15 +839,19 @@ def memory_graph(agent_id: Optional[str] = None, key_record: dict = Depends(veri
     kh = key_record.get("key_hash", "default")
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
-            url = f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&select=id,content,memory_type,omega_score&limit=50"
+            url = f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&select=id,content,memory_type,omega_score&limit=500"
             if agent_id:
                 url += f"&agent_id=eq.{agent_id}"
             r = http_requests.get(url, headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
             if r.ok:
                 for m in r.json():
                     nodes.append({"id": m["id"], "type": m.get("memory_type"), "omega": m.get("omega_score", 0)})
-        except Exception:
-            pass
+            else:
+                print(f"MEMORY_GRAPH_READ_ERROR: {r.status_code} {r.text}", flush=True)
+        except Exception as e:
+            print(f"MEMORY_GRAPH_READ_EXCEPTION: {e}", flush=True)
+    else:
+        print(f"MEMORY_GRAPH: no supabase config URL={bool(SUPABASE_URL)} KEY={bool(SUPABASE_SERVICE_KEY)}", flush=True)
     return {"nodes": nodes, "edges": edges, "clusters": clusters, "layout_hint": "force-directed"}
 
 
