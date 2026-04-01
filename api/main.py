@@ -5613,8 +5613,8 @@ def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str
         if extra:
             record.update(extra)
         supabase_client.table("audit_log").insert(record).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"AUDIT_LOG_ERROR: {e}", flush=True)
 
 
 # In-memory healing counter store (per entry_id)
