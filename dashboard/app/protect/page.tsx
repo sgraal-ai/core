@@ -92,7 +92,7 @@ export default function ProtectPage() {
 
   function parseRedTeamResult(data: Record<string, unknown>) {
     const nested = (data.result as Record<string, unknown>) ?? {};
-    const results = (data.results ?? data.attacks ?? nested.results ?? []) as RedTeamResult[];
+    const results = (data.attack_results ?? data.results ?? data.attacks ?? nested.results ?? []) as RedTeamResult[];
     if (Array.isArray(results) && results.length > 0) {
       setRedTeamResults(results);
       const avgResilience = results.reduce((s, r) => s + (r.resilience ?? (r.total > 0 ? (r.blocked / r.total) * 100 : 0)), 0) / results.length;
@@ -100,7 +100,7 @@ export default function ProtectPage() {
     } else {
       // Flat response — show raw
       setRedTeamResults([]);
-      setRedTeamGrade(String(data.grade ?? data.immunity_score ?? ""));
+      setRedTeamGrade(String(data.memory_readiness_grade ?? data.grade ?? data.immunity_score ?? ""));
     }
   }
 
