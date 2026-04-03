@@ -210,11 +210,13 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
               const base = getApiUrl();
               try {
                 // Step 1: Start twin simulation
+                const memoryState = (agent as unknown as Record<string, unknown>).memory_state ?? [];
+                console.log("Twin memory_state:", JSON.stringify(memoryState));
                 const startRes = await fetch(`${base}/v1/simulate/twin`, {
                   method: "POST", headers,
                   body: JSON.stringify({
                     agent_id: agent.id,
-                    memory_state: (agent as unknown as Record<string, unknown>).memory_state ?? [],
+                    memory_state: memoryState,
                     action_type: (agent as unknown as Record<string, unknown>).action_type ?? "irreversible",
                   }),
                 });
