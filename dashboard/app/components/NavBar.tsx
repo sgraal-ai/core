@@ -25,6 +25,7 @@ const CONFIGURE_ITEMS: DropdownItem[] = [
 const TOOLS_ITEMS: DropdownItem[] = [
   { label: "Code Generator", href: "/code-generator" },
   { label: "Templates", href: "/templates" },
+  { label: "Protect", href: "/protect" },
   { label: "Migrate", href: "/migrate" },
   { label: "Tutorial", href: "/tutorial" },
 ];
