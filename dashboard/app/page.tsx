@@ -36,10 +36,11 @@ export default function DashboardHome() {
         if (auditRes.ok) {
           const auditData = await auditRes.json();
           const entries = auditData.entries ?? [];
+          const demoIds = new Set(DEMO_FLEET.map((d) => d.id));
           const agentIds = [...new Set(
             entries
               .map((e: Record<string, unknown>) => e.agent_id)
-              .filter((id: unknown): id is string => typeof id === "string" && id.length > 0)
+              .filter((id: unknown): id is string => typeof id === "string" && id.length > 0 && !demoIds.has(id))
           )] as string[];
 
           if (agentIds.length > 0) {
