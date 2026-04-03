@@ -71,7 +71,7 @@ export default function ProtectPage() {
       // Poll
       for (let i = 0; i < 15; i++) {
         await new Promise(r => setTimeout(r, 2000));
-        const pollRes = await fetch(`${base()}/v1/redteam/${jobId}`, { headers: headers() });
+        const pollRes = await fetch(`${base()}/v1/redteam/status/${jobId}`, { headers: headers() });
         if (!pollRes.ok) continue;
         const pollData = await pollRes.json();
         if (pollData.status === "complete" || pollData.status === "completed") {
