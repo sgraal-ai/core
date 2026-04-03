@@ -266,7 +266,8 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             </button>
             {twinOpen && (() => {
               const tr = twinResult as Record<string, unknown>;
-              const scenarios = Array.isArray(tr.scenarios) ? tr.scenarios as Array<Record<string, unknown>> : null;
+              const rawScenarios = (tr.result as Record<string, unknown>)?.scenarios ?? tr.scenarios;
+              const scenarios = Array.isArray(rawScenarios) ? rawScenarios as Array<Record<string, unknown>> : null;
               const omegaColor = (v: number) => v < 25 ? "#16a34a" : v < 50 ? "#eab308" : v < 75 ? "#f97316" : "#dc2626";
               const actionBadge: Record<string, { bg: string; color: string }> = {
                 USE_MEMORY: { bg: "#dcfce7", color: "#16a34a" },
@@ -274,7 +275,8 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                 ASK_USER: { bg: "#ffedd5", color: "#c2410c" },
                 BLOCK: { bg: "#fee2e2", color: "#dc2626" },
               };
-              const recommended = String(tr.recommended_path ?? tr.recommended ?? "");
+              const nested = (tr.result as Record<string, unknown>) ?? {};
+              const recommended = String(nested.recommended_path ?? tr.recommended_path ?? nested.recommended ?? tr.recommended ?? "");
               return (
                 <div className="px-5 pb-5">
                   {scenarios ? (
