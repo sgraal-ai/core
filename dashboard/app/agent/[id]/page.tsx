@@ -264,35 +264,70 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
               <span>Twin Result: {String((twinResult as Record<string, unknown>).recommended_action ?? (twinResult as Record<string, unknown>).decision ?? "—")}</span>
               <span className="text-muted">{twinOpen ? "▲" : "▼"}</span>
             </button>
-            {twinOpen && (
-              <div className="px-5 pb-4">
-                {Array.isArray((twinResult as Record<string, unknown>).scenarios) ? (
-                  <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr>
-                        {["Scenario", "Omega", "Action", "Risk Delta"].map((h) => (
-                          <th key={h} className="text-xs text-muted uppercase text-left pb-2 pr-4" style={{ borderBottom: "1px solid #e5e7eb" }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {((twinResult as Record<string, unknown>).scenarios as Array<Record<string, unknown>>).map((s, i) => (
-                        <tr key={i}>
-                          <td className="py-2 pr-4 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(s.name ?? s.scenario ?? `Scenario ${i + 1}`)}</td>
-                          <td className="py-2 pr-4 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0", color: Number(s.omega ?? 0) > 60 ? "#dc2626" : Number(s.omega ?? 0) > 30 ? "#c9a962" : "#16a34a" }}>{String(s.omega ?? s.omega_mem_final ?? "—")}</td>
-                          <td className="py-2 pr-4 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(s.action ?? s.recommended_action ?? "—")}</td>
-                          <td className="py-2 pr-4 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(s.risk_delta ?? s.delta ?? "—")}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <pre className="text-xs font-mono text-muted overflow-x-auto max-h-64 overflow-y-auto">
-                    {JSON.stringify(twinResult, null, 2)}
-                  </pre>
-                )}
-              </div>
-            )}
+            {twinOpen && (() => {
+              const tr = twinResult as Record<string, unknown>;
+              const scenarios = Array.isArray(tr.scenarios) ? tr.scenarios as Array<Record<string, unknown>> : null;
+              const omegaColor = (v: number) => v < 25 ? "#16a34a" : v < 50 ? "#eab308" : v < 75 ? "#f97316" : "#dc2626";
+              const actionBadge: Record<string, { bg: string; color: string }> = {
+                USE_MEMORY: { bg: "#dcfce7", color: "#16a34a" },
+                WARN: { bg: "#fef9c3", color: "#a16207" },
+                ASK_USER: { bg: "#ffedd5", color: "#c2410c" },
+                BLOCK: { bg: "#fee2e2", color: "#dc2626" },
+              };
+              const recommended = String(tr.recommended_path ?? tr.recommended ?? "");
+              return (
+                <div className="px-5 pb-5">
+                  {scenarios ? (
+                    <>
+                      <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr>
+                            {["Scenario", "Omega", "Action", "Risk Delta", "Summary"].map((h) => (
+                              <th key={h} className="text-xs text-muted uppercase text-left pb-2 pr-4" style={{ borderBottom: "1px solid #e5e7eb" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scenarios.map((s, i) => {
+                            const omega = Number(s.omega ?? s.omega_mem_final ?? 0);
+                            const action = String(s.action ?? s.recommended_action ?? "—");
+                            const badge = actionBadge[action];
+                            const delta = Number(s.risk_delta ?? s.delta ?? 0);
+                            return (
+                              <tr key={i}>
+                                <td className="py-3 pr-4 text-sm font-semibold" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(s.name ?? s.scenario ?? `Scenario ${i + 1}`)}</td>
+                                <td className="py-3 pr-4 font-mono text-sm font-semibold" style={{ borderBottom: "1px solid #f5f4f0", color: omegaColor(omega) }}>{omega}</td>
+                                <td className="py-3 pr-4" style={{ borderBottom: "1px solid #f5f4f0" }}>
+                                  {badge ? (
+                                    <span style={{ background: badge.bg, color: badge.color, borderRadius: "20px", padding: "2px 10px", fontSize: "12px", fontWeight: 600 }}>{action}</span>
+                                  ) : (
+                                    <span className="font-mono text-xs">{action}</span>
+                                  )}
+                                </td>
+                                <td className="py-3 pr-4 font-mono text-sm" style={{ borderBottom: "1px solid #f5f4f0", color: delta < 0 ? "#16a34a" : delta > 0 ? "#dc2626" : "#6b7280" }}>{delta > 0 ? `+${delta}` : String(delta)}</td>
+                                <td className="py-3 text-xs text-muted" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(s.summary ?? s.description ?? "")}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      {recommended && (
+                        <p className="mt-4 text-sm font-semibold" style={{ color: "#c9a962" }}>Recommended path: {recommended}</p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <pre className="text-xs font-mono text-muted overflow-x-auto max-h-64 overflow-y-auto">
+                        {JSON.stringify(twinResult, null, 2)}
+                      </pre>
+                      {recommended && (
+                        <p className="mt-4 text-sm font-semibold" style={{ color: "#c9a962" }}>Recommended path: {recommended}</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
