@@ -27,6 +27,23 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Explain
+  const [explainText, setExplainText] = useState<Record<string, string> | null>(null);
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [explainError, setExplainError] = useState("");
+
+  // Decision Twin
+  const [twinResult, setTwinResult] = useState<Record<string, unknown> | null>(null);
+  const [twinLoading, setTwinLoading] = useState(false);
+  const [twinError, setTwinError] = useState("");
+  const [twinOpen, setTwinOpen] = useState(false);
+
+  // Time Machine
+  const [snapshots, setSnapshots] = useState<Array<Record<string, unknown>>>([]);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [snapshotError, setSnapshotError] = useState("");
+  const [snapshotMsg, setSnapshotMsg] = useState("");
+
   useEffect(() => {
     setMounted(true);
     const apiKey = getApiKey();
@@ -129,6 +146,154 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           ))}
         </div>
       )}
+
+      {/* Explain Decision */}
+      <div className="mb-8">
+        <div className="flex items-center gap-4 mb-4">
+          <h2 className="text-lg font-semibold">Explain Decision</h2>
+          <button
+            onClick={async () => {
+              setExplainLoading(true);
+              setExplainError("");
+              try {
+                const res = await fetch(`${getApiUrl()}/v1/explain`, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({ preflight_result: agent, audience: "developer", language: "en" }),
+                });
+                if (res.ok) setExplainText(await res.json());
+                else setExplainError(`Error: ${res.status}`);
+              } catch (e) { setExplainError(e instanceof Error ? e.message : "Request failed"); }
+              setExplainLoading(false);
+            }}
+            disabled={explainLoading}
+            className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50"
+          >
+            {explainLoading ? "Explaining..." : "Explain this decision"}
+          </button>
+        </div>
+        {explainError && <p className="text-sm text-red-400 mb-2">{explainError}</p>}
+        {explainText && (
+          <div className="bg-surface border border-surface-light rounded-xl p-5 space-y-3">
+            {explainText.summary && (
+              <div>
+                <p className="text-xs text-muted uppercase mb-1">Summary</p>
+                <p className="text-sm">{explainText.summary}</p>
+              </div>
+            )}
+            {explainText.root_cause && (
+              <div>
+                <p className="text-xs text-muted uppercase mb-1">Root Cause</p>
+                <p className="text-sm font-mono">{explainText.root_cause}</p>
+              </div>
+            )}
+            {explainText.recommended_action_human && (
+              <div>
+                <p className="text-xs text-muted uppercase mb-1">Recommended Action</p>
+                <p className="text-sm">{explainText.recommended_action_human}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Decision Twin */}
+      <div className="mb-8">
+        <div className="flex items-center gap-4 mb-4">
+          <h2 className="text-lg font-semibold">Decision Twin</h2>
+          <button
+            onClick={async () => {
+              setTwinLoading(true);
+              setTwinError("");
+              try {
+                const res = await fetch(`${getApiUrl()}/v1/simulate/twin`, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({ agent_id: agent.id, memory_state: [], action_type: "informational" }),
+                });
+                if (res.ok) { setTwinResult(await res.json()); setTwinOpen(true); }
+                else setTwinError(`Error: ${res.status}`);
+              } catch (e) { setTwinError(e instanceof Error ? e.message : "Request failed"); }
+              setTwinLoading(false);
+            }}
+            disabled={twinLoading}
+            className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50"
+          >
+            {twinLoading ? "Simulating..." : "Run Decision Twin"}
+          </button>
+        </div>
+        {twinError && <p className="text-sm text-red-400 mb-2">{twinError}</p>}
+        {twinResult && (
+          <div className="bg-surface border border-surface-light rounded-xl overflow-hidden">
+            <button onClick={() => setTwinOpen(!twinOpen)} className="w-full text-left px-5 py-3 flex justify-between items-center text-sm font-semibold hover:bg-surface-light transition">
+              <span>Twin Result: {String((twinResult as Record<string, unknown>).recommended_action ?? (twinResult as Record<string, unknown>).decision ?? "—")}</span>
+              <span className="text-muted">{twinOpen ? "▲" : "▼"}</span>
+            </button>
+            {twinOpen && (
+              <pre className="px-5 pb-4 text-xs font-mono text-muted overflow-x-auto max-h-64 overflow-y-auto">
+                {JSON.stringify(twinResult, null, 2)}
+              </pre>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Time Machine */}
+      <div className="mb-10">
+        <div className="flex items-center gap-4 mb-4">
+          <h2 className="text-lg font-semibold">Time Machine</h2>
+          <button
+            onClick={async () => {
+              setSnapshotMsg("");
+              setSnapshotError("");
+              try {
+                const res = await fetch(`${getApiUrl()}/v1/memory/snapshot`, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({ agent_id: agent.id, label: "manual" }),
+                });
+                if (res.ok) setSnapshotMsg("Snapshot created");
+                else setSnapshotError(`Error: ${res.status}`);
+              } catch (e) { setSnapshotError(e instanceof Error ? e.message : "Request failed"); }
+            }}
+            className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition"
+          >
+            Take Snapshot
+          </button>
+          <button
+            onClick={async () => {
+              setSnapshotLoading(true);
+              setSnapshotError("");
+              try {
+                const res = await fetch(`${getApiUrl()}/v1/memory/snapshots?agent_id=${agent.id}`, {
+                  headers: { Authorization: `Bearer ${getApiKey()}` },
+                });
+                if (res.ok) { const d = await res.json(); setSnapshots(Array.isArray(d) ? d : d.snapshots ?? []); }
+                else setSnapshotError(`Error: ${res.status}`);
+              } catch (e) { setSnapshotError(e instanceof Error ? e.message : "Request failed"); }
+              setSnapshotLoading(false);
+            }}
+            disabled={snapshotLoading}
+            className="text-sm px-4 py-1.5 rounded border border-surface-light text-muted hover:text-foreground transition disabled:opacity-50"
+          >
+            {snapshotLoading ? "Loading..." : "View Snapshots"}
+          </button>
+        </div>
+        {snapshotMsg && <p className="text-sm text-green-400 mb-2">{snapshotMsg}</p>}
+        {snapshotError && <p className="text-sm text-red-400 mb-2">{snapshotError}</p>}
+        {snapshots.length > 0 && (
+          <div className="bg-surface border border-surface-light rounded-xl p-5">
+            <div className="space-y-2">
+              {snapshots.map((s, i) => (
+                <div key={i} className="flex justify-between items-center py-2 border-b border-surface-light last:border-0 text-sm">
+                  <span className="font-mono text-muted">{String(s.created_at ?? s.timestamp ?? "—")}</span>
+                  <span className="text-foreground">{String(s.label ?? s.name ?? `Snapshot ${i + 1}`)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="grid md:grid-cols-2 gap-8 mb-10">
         <div>
