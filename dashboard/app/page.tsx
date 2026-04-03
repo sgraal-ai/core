@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import type { Agent } from "./lib/mock-data";
+import type { DemoAgent } from "./lib/demo-fleet";
 import { DEMO_FLEET } from "./lib/demo-fleet";
-import { fetchFleet } from "./lib/api-client";
+import { fetchFleet, fetchPreflight } from "./lib/api-client";
 import { AgentCard } from "./components/AgentCard";
 import { LoadingSkeleton, ConnectKeyState } from "./components/LoadingSkeleton";
 import { getApiKey, getApiUrl } from "./lib/storage";
@@ -11,6 +12,7 @@ import { getApiKey, getApiUrl } from "./lib/storage";
 export default function DashboardHome() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLive, setIsLive] = useState(false);
+  const [isRealFleet, setIsRealFleet] = useState(false);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -25,16 +27,82 @@ export default function DashboardHome() {
       return;
     }
 
-    fetchFleet(DEMO_FLEET, apiKey, apiUrl)
-      .then(({ agents: liveAgents, errors: errs }) => {
-        if (liveAgents.length > 0) {
-          setAgents(liveAgents);
+    // Step 1: Check audit log for real agent_ids
+    (async () => {
+      try {
+        const auditRes = await fetch(`${apiUrl}/v1/audit-log?limit=50`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (auditRes.ok) {
+          const auditData = await auditRes.json();
+          const entries = auditData.entries ?? [];
+          const agentIds = [...new Set(
+            entries
+              .map((e: Record<string, unknown>) => e.agent_id)
+              .filter((id: unknown): id is string => typeof id === "string" && id.length > 0)
+          )] as string[];
+
+          if (agentIds.length > 0) {
+            // Build DemoAgent-like objects from audit log data
+            const auditAgents: DemoAgent[] = agentIds.map((agentId) => {
+              const entry = entries.find((e: Record<string, unknown>) => e.agent_id === agentId);
+              const domain = String(entry?.domain ?? "general");
+              const actionType = String(entry?.action_type ?? "reversible");
+              return {
+                id: agentId,
+                name: agentId.replace(/^agent-/, "").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+                domain,
+                action_type: actionType,
+                memory_state: [{
+                  id: `mem_${agentId}`,
+                  content: `Memory for ${agentId}`,
+                  type: "fact",
+                  timestamp_age_days: 1,
+                  source_trust: 0.8,
+                  source_conflict: 0.1,
+                  downstream_count: 2,
+                }],
+              };
+            });
+
+            // Fetch preflight for each real agent
+            const liveAgents: Agent[] = [];
+            const errs: string[] = [];
+            await Promise.all(
+              auditAgents.map(async (demo) => {
+                try {
+                  const agent = await fetchPreflight(demo, apiKey, apiUrl);
+                  liveAgents.push(agent);
+                } catch (err) {
+                  errs.push(err instanceof Error ? err.message : String(err));
+                }
+              })
+            );
+            liveAgents.sort((a, b) => b.omega_mem_final - a.omega_mem_final);
+
+            if (liveAgents.length > 0) {
+              setAgents(liveAgents);
+              setIsLive(true);
+              setIsRealFleet(true);
+              setErrors(errs);
+              setLoading(false);
+              return;
+            }
+          }
+        }
+      } catch {}
+
+      // Step 2: Fallback to DEMO_FLEET
+      try {
+        const { agents: demoAgents, errors: errs } = await fetchFleet(DEMO_FLEET, apiKey, apiUrl);
+        if (demoAgents.length > 0) {
+          setAgents(demoAgents);
           setIsLive(true);
         }
         setErrors(errs);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      } catch {}
+      setLoading(false);
+    })();
   }, []);
 
   if (!mounted) return null;
@@ -76,6 +144,12 @@ export default function DashboardHome() {
         <div className="bg-green-400/10 border border-green-400/30 rounded-lg px-4 py-3 mb-6 text-sm text-green-400 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
           Live — connected to Sgraal API
+        </div>
+      )}
+
+      {isLive && !isRealFleet && (
+        <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
+          This is a preview — connect your agents to see your real fleet.
         </div>
       )}
 
@@ -139,7 +213,7 @@ export default function DashboardHome() {
       })()}
 
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold">Agent Fleet</h2>
+        <h2 className="text-lg font-semibold">{isRealFleet ? "Your Fleet" : "Agent Fleet"}</h2>
         <span className="text-xs text-muted font-mono">Avg Ω_MEM: {avgOmega}</span>
       </div>
 
