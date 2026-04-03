@@ -31,7 +31,7 @@ export function AgentCard({ agent }: { agent: Agent }) {
           <span>Domain: {agent.domain}</span>
           <span>GSV: {agent.gsv}</span>
           {agent.repair_plan.length > 0 && (
-            <span className="text-gold">{agent.repair_plan.length} repairs</span>
+            <span className="text-gold">{agent.repair_plan.length} repair actions</span>
           )}
           {agent.at_risk_warnings.length > 0 && (
             <span className="text-red-400">{agent.at_risk_warnings.length} at risk</span>
