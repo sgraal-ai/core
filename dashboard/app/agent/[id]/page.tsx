@@ -61,7 +61,18 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
     }
 
     fetchPreflight(demo, apiKey, apiUrl)
-      .then((liveAgent) => setAgent(liveAgent))
+      .then(async (liveAgent) => {
+        setAgent(liveAgent);
+        // Auto-load explanation
+        try {
+          const explainRes = await fetch(`${apiUrl}/v1/explain`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ preflight_result: liveAgent, audience: "developer", language: "en" }),
+          });
+          if (explainRes.ok) setExplainText(await explainRes.json());
+        } catch {}
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
@@ -183,7 +194,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             disabled={explainLoading}
             className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50"
           >
-            {explainLoading ? "Explaining..." : "Explain this decision"}
+            {explainLoading ? "Explaining..." : explainText ? "Refresh explanation" : "Explain this decision"}
           </button>
         </div>
         {explainError && <p className="text-sm text-red-400 mb-2">{explainError}</p>}
@@ -412,18 +423,37 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
 
       <div className="grid md:grid-cols-2 gap-8 mb-10">
         <div>
-          <h2 className="text-lg font-semibold mb-4">Component Breakdown</h2>
+          <h2 className="text-lg font-semibold mb-2">Component Breakdown</h2>
+          {explainText?.root_cause && (
+            <p className="text-sm text-muted mb-4">Primary risk: <strong className="text-foreground">{explainText.root_cause}</strong></p>
+          )}
+          {!explainText?.root_cause && agent.component_breakdown && (() => {
+            const entries = Object.entries(agent.component_breakdown ?? {}).filter(([, v]) => typeof v === "number");
+            if (entries.length === 0) return null;
+            const [topKey, topVal] = entries.sort(([, a], [, b]) => (b as number) - (a as number))[0];
+            return <p className="text-sm text-muted mb-4">Highest component: <strong className="text-foreground">{topKey}</strong> at <strong className="text-foreground">{Math.round(topVal as number)}/100</strong></p>;
+          })()}
           <div className="bg-surface border border-surface-light rounded-xl p-5">
             <ComponentBreakdown breakdown={agent.component_breakdown} />
           </div>
         </div>
         <div>
-          <h2 className="text-lg font-semibold mb-4">
+          <h2 className="text-lg font-semibold mb-2">
             Repair Plan
             {(agent.repair_plan?.length ?? 0) > 0 && (
               <span className="text-sm text-gold ml-2">({agent.repair_plan.length})</span>
             )}
           </h2>
+          {(agent.repair_plan?.length ?? 0) > 0 && (() => {
+            const first = agent.repair_plan[0] as unknown as Record<string, unknown>;
+            const action = first?.action ?? first;
+            const improvement = Number(first?.projected_improvement ?? 0);
+            return improvement ? (
+              <p className="text-sm text-muted mb-4">Applying <strong className="text-foreground">{String(action)}</strong> is expected to reduce omega by <strong className="text-green-400">{Math.abs(improvement)}</strong> points.</p>
+            ) : (
+              <p className="text-sm text-muted mb-4">Recommended: apply <strong className="text-foreground">{String(action)}</strong> then re-run preflight.</p>
+            );
+          })()}
           <RepairPlanList plan={agent.repair_plan ?? []} />
         </div>
       </div>
@@ -439,7 +469,10 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <div className="mb-10">
-        <h2 className="text-lg font-semibold mb-4">Advanced Analytics</h2>
+        <h2 className="text-lg font-semibold mb-2">Advanced Analytics</h2>
+        {(agent.calibration || agent.hawkes_intensity || agent.copula_analysis || agent.mewma) && (
+          <p className="text-sm text-muted mb-4">Multiple risk signals detected simultaneously — review recommended.</p>
+        )}
         <AdvancedAnalytics
           calibration={agent.calibration}
           hawkes={agent.hawkes_intensity}
