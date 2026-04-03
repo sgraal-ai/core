@@ -424,9 +424,16 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       <div className="grid md:grid-cols-2 gap-8 mb-10">
         <div>
           <h2 className="text-lg font-semibold mb-2">Component Breakdown</h2>
-          {explainText?.root_cause && (
-            <p className="text-sm text-muted mb-4">Primary risk: <strong className="text-foreground">{explainText.root_cause}</strong></p>
-          )}
+          {explainText?.root_cause && (() => {
+            const rc = explainText.root_cause.toLowerCase();
+            const human = rc.includes("freshness") ? "The main risk is memory age — this data may be outdated."
+              : rc.includes("drift") ? "The main risk is semantic drift — this memory has changed meaning."
+              : rc.includes("provenance") ? "The main risk is source trust — this memory comes from an unreliable source."
+              : rc.includes("interference") ? "The main risk is conflicting sources — two memories contradict each other."
+              : rc.includes("recovery") ? "The main risk is recoverability — this memory is difficult to repair."
+              : explainText.root_cause;
+            return <p className="text-sm text-muted mb-4">{human}</p>;
+          })()}
           {!explainText?.root_cause && agent.component_breakdown && (() => {
             const entries = Object.entries(agent.component_breakdown ?? {}).filter(([, v]) => typeof v === "number");
             if (entries.length === 0) return null;
