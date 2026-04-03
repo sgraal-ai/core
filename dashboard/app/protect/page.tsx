@@ -26,8 +26,12 @@ export default function ProtectPage() {
   const [redTeamError, setRedTeamError] = useState("");
   const [redTeamGrade, setRedTeamGrade] = useState("");
 
-  const headers = useCallback(() => ({ Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" }), []);
-  const base = useCallback(() => getApiUrl(), []);
+  function authHeaders() {
+    return { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" };
+  }
+  function apiBase() {
+    return getApiUrl();
+  }
 
   const load = useCallback(async () => {
     setMounted(true);
@@ -53,8 +57,8 @@ export default function ProtectPage() {
     setRedTeamResults(null);
     setRedTeamGrade("");
     try {
-      const res = await fetch(`${base()}/v1/redteam/run`, {
-        method: "POST", headers: headers(),
+      const res = await fetch(`${apiBase()}/v1/redteam/run`, {
+        method: "POST", headers: authHeaders(),
         body: JSON.stringify({ attack_types: ATTACK_TYPES, iterations: 100 }),
       });
       if (!res.ok) { setRedTeamError(`Error: ${res.status}`); setRedTeamLoading(false); return; }
@@ -71,7 +75,7 @@ export default function ProtectPage() {
       // Poll
       for (let i = 0; i < 15; i++) {
         await new Promise(r => setTimeout(r, 2000));
-        const pollRes = await fetch(`${base()}/v1/redteam/status/${jobId}`, { headers: headers() });
+        const pollRes = await fetch(`${apiBase()}/v1/redteam/status/${jobId}`, { headers: authHeaders() });
         if (!pollRes.ok) continue;
         const pollData = await pollRes.json();
         if (pollData.status === "complete" || pollData.status === "completed") {
@@ -86,7 +90,10 @@ export default function ProtectPage() {
         }
       }
       setRedTeamError("Red team timed out.");
-    } catch (e) { setRedTeamError(e instanceof Error ? e.message : "Request failed"); }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setRedTeamError(`Request failed: ${msg}`);
+    }
     setRedTeamLoading(false);
   }
 
