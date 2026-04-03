@@ -25,7 +25,6 @@ export default function ProtectPage() {
   const [redTeamLoading, setRedTeamLoading] = useState(false);
   const [redTeamError, setRedTeamError] = useState("");
   const [redTeamGrade, setRedTeamGrade] = useState("");
-  const [clickCount, setClickCount] = useState(0);
 
   const headers = useCallback(() => ({ Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" }), []);
   const base = useCallback(() => getApiUrl(), []);
@@ -49,7 +48,6 @@ export default function ProtectPage() {
   useEffect(() => { load(); }, [load]);
 
   async function runRedTeam() {
-    console.log("Red Team button clicked");
     setRedTeamLoading(true);
     setRedTeamError("");
     setRedTeamResults(null);
@@ -176,11 +174,11 @@ export default function ProtectPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Red Team</h2>
           <button
-            onClick={() => { console.log("clicked"); setClickCount(c => c + 1); runRedTeam(); }}
+            onClick={runRedTeam}
             disabled={redTeamLoading}
             className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50"
           >
-            {redTeamLoading ? "Running..." : `Run Red Team${clickCount > 0 ? ` (${clickCount})` : ""}`}
+            {redTeamLoading ? "Running..." : "Run Red Team"}
           </button>
         </div>
         <p className="text-xs text-muted mb-4">6 attack vectors: injection, poisoning, replay, drift, tamper, sleeper.</p>
