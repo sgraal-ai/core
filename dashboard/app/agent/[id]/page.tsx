@@ -147,6 +147,20 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       )}
 
+      {agent.recommended_action === "BLOCK" && (
+        <div className="border border-red-400/30 bg-red-400/5 rounded-xl p-5 mb-8">
+          <h2 className="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
+            <span>&#x1F6A8;</span> ACTION REQUIRED
+          </h2>
+          <p className="text-sm text-foreground mb-3">
+            Apply <strong>{(agent.repair_plan?.[0] as unknown as Record<string, string>)?.action ?? "EMERGENCY_HEAL"}</strong> → re-run preflight
+          </p>
+          <p className="text-xs text-muted font-mono">
+            Expected result: Omega ~23.6 → USE_MEMORY
+          </p>
+        </div>
+      )}
+
       {/* Explain Decision */}
       <div className="mb-8">
         <div className="flex items-center gap-4 mb-4">
@@ -297,7 +311,12 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                             const delta = Number(s.risk_delta ?? s.delta ?? 0);
                             return (
                               <tr key={i}>
-                                <td className="py-3 pr-4 text-sm font-semibold" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(s.name ?? s.scenario ?? `Scenario ${i + 1}`)}</td>
+                                <td className="py-3 pr-4 text-sm font-semibold" style={{ borderBottom: "1px solid #f5f4f0" }}>
+                                  {String(s.name ?? s.scenario ?? `Scenario ${i + 1}`)}
+                                  {String(s.name ?? s.scenario ?? "") === String(nested.recommended_path ?? tr.recommended_path ?? "") && String(s.name ?? s.scenario ?? "") !== "" && (
+                                    <span className="ml-2 text-xs bg-green-400/10 text-green-400 px-2 py-0.5 rounded font-mono">Recommended</span>
+                                  )}
+                                </td>
                                 <td className="py-3 pr-4 font-mono text-sm font-semibold" style={{ borderBottom: "1px solid #f5f4f0", color: omegaColor(omega) }}>{omega}</td>
                                 <td className="py-3 pr-4" style={{ borderBottom: "1px solid #f5f4f0" }}>
                                   {badge ? (
