@@ -59,7 +59,7 @@ export default function ApprovalsPage() {
 
     try {
       const apiUrl = getApiUrl();
-      const res = await fetch(`${apiUrl}/v1/approvals/pending`, {
+      const res = await fetch(`${apiUrl}/v1/approvals`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
       if (res.ok) {
