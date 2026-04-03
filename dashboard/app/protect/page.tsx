@@ -52,16 +52,28 @@ export default function ProtectPage() {
   useEffect(() => { load(); }, [load]);
 
   async function runRedTeam() {
+    // Phase 1: confirm function body executes
+    setRedTeamError("CLICKED — fetching...");
     setRedTeamLoading(true);
-    setRedTeamError("");
     setRedTeamResults(null);
     setRedTeamGrade("");
+
+    // Phase 2: attempt fetch with isolated try-catch
+    const url = `${apiBase()}/v1/redteam/run`;
+    const hdrs = authHeaders();
+    const bodyStr = JSON.stringify({ attack_types: ATTACK_TYPES, iterations: 100 });
+
+    let res: Response;
     try {
-      const res = await fetch(`${apiBase()}/v1/redteam/run`, {
-        method: "POST", headers: authHeaders(),
-        body: JSON.stringify({ attack_types: ATTACK_TYPES, iterations: 100 }),
-      });
-      if (!res.ok) { setRedTeamError(`Error: ${res.status}`); setRedTeamLoading(false); return; }
+      res = await fetch(url, { method: "POST", headers: hdrs, body: bodyStr });
+    } catch (fetchErr) {
+      setRedTeamError(`FETCH FAILED: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)} | URL: ${url}`);
+      setRedTeamLoading(false);
+      return;
+    }
+
+    try {
+      if (!res.ok) { setRedTeamError(`HTTP ${res.status} ${res.statusText} | URL: ${url}`); setRedTeamLoading(false); return; }
       const data = await res.json();
       const jobId = data.job_id ?? data.id;
 
