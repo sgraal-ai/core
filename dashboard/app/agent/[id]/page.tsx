@@ -205,14 +205,40 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             onClick={async () => {
               setTwinLoading(true);
               setTwinError("");
+              setTwinResult(null);
+              const headers = { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" };
+              const base = getApiUrl();
               try {
-                const res = await fetch(`${getApiUrl()}/v1/simulate/twin`, {
-                  method: "POST",
-                  headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
-                  body: JSON.stringify({ agent_id: agent.id, memory_state: [], action_type: "informational" }),
+                // Step 1: Start twin simulation
+                const startRes = await fetch(`${base}/v1/simulate/twin`, {
+                  method: "POST", headers,
+                  body: JSON.stringify({
+                    agent_id: agent.id,
+                    memory_state: (agent as unknown as Record<string, unknown>).memory_state ?? [],
+                    action_type: (agent as unknown as Record<string, unknown>).action_type ?? "irreversible",
+                  }),
                 });
-                if (res.ok) { setTwinResult(await res.json()); setTwinOpen(true); }
-                else setTwinError(`Error: ${res.status}`);
+                if (!startRes.ok) { setTwinError(`Error: ${startRes.status}`); setTwinLoading(false); return; }
+                const startData = await startRes.json();
+                const jobId = startData.job_id ?? startData.id ?? startData.twin_id;
+                if (!jobId) { setTwinResult(startData); setTwinOpen(true); setTwinLoading(false); return; }
+
+                // Step 2: Poll for completion
+                for (let i = 0; i < 10; i++) {
+                  await new Promise((r) => setTimeout(r, 1000));
+                  const pollRes = await fetch(`${base}/v1/simulate/twin/${jobId}`, { headers });
+                  if (!pollRes.ok) continue;
+                  const pollData = await pollRes.json();
+                  const status = pollData.status ?? pollData.state;
+                  if (status === "complete" || status === "completed") {
+                    setTwinResult(pollData); setTwinOpen(true); setTwinLoading(false); return;
+                  }
+                  if (status === "failed") {
+                    setTwinError("Simulation failed — try with a different memory state.");
+                    setTwinLoading(false); return;
+                  }
+                }
+                setTwinError("Simulation timed out after 10 seconds.");
               } catch (e) { setTwinError(e instanceof Error ? e.message : "Request failed"); }
               setTwinLoading(false);
             }}
@@ -230,9 +256,33 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
               <span className="text-muted">{twinOpen ? "▲" : "▼"}</span>
             </button>
             {twinOpen && (
-              <pre className="px-5 pb-4 text-xs font-mono text-muted overflow-x-auto max-h-64 overflow-y-auto">
-                {JSON.stringify(twinResult, null, 2)}
-              </pre>
+              <div className="px-5 pb-4">
+                {Array.isArray((twinResult as Record<string, unknown>).scenarios) ? (
+                  <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        {["Scenario", "Omega", "Action", "Risk Delta"].map((h) => (
+                          <th key={h} className="text-xs text-muted uppercase text-left pb-2 pr-4" style={{ borderBottom: "1px solid #e5e7eb" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {((twinResult as Record<string, unknown>).scenarios as Array<Record<string, unknown>>).map((s, i) => (
+                        <tr key={i}>
+                          <td className="py-2 pr-4 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(s.name ?? s.scenario ?? `Scenario ${i + 1}`)}</td>
+                          <td className="py-2 pr-4 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0", color: Number(s.omega ?? 0) > 60 ? "#dc2626" : Number(s.omega ?? 0) > 30 ? "#c9a962" : "#16a34a" }}>{String(s.omega ?? s.omega_mem_final ?? "—")}</td>
+                          <td className="py-2 pr-4 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(s.action ?? s.recommended_action ?? "—")}</td>
+                          <td className="py-2 pr-4 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(s.risk_delta ?? s.delta ?? "—")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <pre className="text-xs font-mono text-muted overflow-x-auto max-h-64 overflow-y-auto">
+                    {JSON.stringify(twinResult, null, 2)}
+                  </pre>
+                )}
+              </div>
             )}
           </div>
         )}
