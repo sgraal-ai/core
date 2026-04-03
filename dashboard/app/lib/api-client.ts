@@ -19,6 +19,7 @@ export async function fetchPreflight(
       memory_state: agent.memory_state,
       action_type: agent.action_type,
       domain: agent.domain,
+      response_profile: "standard",
     }),
   });
 
