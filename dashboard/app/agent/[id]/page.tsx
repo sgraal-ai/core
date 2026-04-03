@@ -128,8 +128,8 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             <span className="text-sm font-mono px-3 py-1 rounded bg-surface-light text-muted">
               {agent.domain}
             </span>
-            <span className="text-sm font-mono px-3 py-1 rounded bg-surface-light text-muted">
-              GSV: {agent.gsv}
+            <span className="text-sm font-mono px-3 py-1 rounded bg-surface-light text-muted" title="Global State Vector — increments with each preflight call">
+              State: {agent.gsv}
             </span>
             <span className="text-sm font-mono px-3 py-1 rounded bg-surface-light text-muted">
               Healed: {agent.healing_counter}x

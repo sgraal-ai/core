@@ -29,7 +29,6 @@ export function AgentCard({ agent }: { agent: Agent }) {
         <div className="flex gap-4 text-xs text-muted">
           <span>Assurance: {agent.assurance_score}%</span>
           <span>Domain: {agent.domain}</span>
-          <span>GSV: {agent.gsv}</span>
           {agent.repair_plan.length > 0 && (
             <span className="text-gold">{agent.repair_plan.length} repair actions</span>
           )}
