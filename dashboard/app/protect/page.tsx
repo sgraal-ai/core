@@ -48,6 +48,7 @@ export default function ProtectPage() {
   useEffect(() => { load(); }, [load]);
 
   async function runRedTeam() {
+    console.log("Red Team button clicked");
     setRedTeamLoading(true);
     setRedTeamError("");
     setRedTeamResults(null);
