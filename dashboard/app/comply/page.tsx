@@ -111,18 +111,28 @@ export default function ComplyPage() {
                   <p className="font-semibold">{String((report.article_13_transparency as Record<string, unknown>)?.compliant ?? report.article_13_transparency)}</p>
                 </div>
               )}
-              {report.article_14_human_oversight !== undefined && (
-                <div>
-                  <p className="text-xs text-muted uppercase mb-1">Article 14 — Human Oversight</p>
-                  <p className="font-semibold">{String((report.article_14_human_oversight as Record<string, unknown>)?.compliant ?? report.article_14_human_oversight)}</p>
-                </div>
-              )}
-              {report.article_17_quality_management !== undefined && (
-                <div>
-                  <p className="text-xs text-muted uppercase mb-1">Article 17 — Quality Management</p>
-                  <p className="font-semibold">{String((report.article_17_quality_management as Record<string, unknown>)?.compliant ?? report.article_17_quality_management)}</p>
-                </div>
-              )}
+              {report.article_14_human_oversight !== undefined && (() => {
+                const a14 = report.article_14_human_oversight as Record<string, unknown>;
+                const reviews = Array.isArray(a14?.human_review_recommended) ? (a14.human_review_recommended as string[]).join(", ") : "";
+                return (
+                  <div>
+                    <p className="text-xs text-muted uppercase mb-1">Article 14 — Human Oversight</p>
+                    <p className="text-sm">Blocks: <strong>{String(a14?.block_count ?? 0)}</strong></p>
+                    {reviews && <p className="text-xs text-muted mt-1">Review recommended: {reviews}</p>}
+                  </div>
+                );
+              })()}
+              {report.article_17_quality_management !== undefined && (() => {
+                const a17 = report.article_17_quality_management as Record<string, unknown>;
+                return (
+                  <div>
+                    <p className="text-xs text-muted uppercase mb-1">Article 17 — Quality Management</p>
+                    <p className="text-sm">Calls: <strong>{String(a17?.total_calls ?? 0)}</strong></p>
+                    <p className="text-sm">Block rate: <strong>{String(a17?.block_rate ?? 0)}%</strong></p>
+                    <p className="text-sm">Heal success: <strong>{String(a17?.heal_success_rate ?? 0)}%</strong></p>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         ) : (
@@ -186,12 +196,25 @@ export default function ComplyPage() {
             {!!gdpr.data_location && (
               <div><p className="text-xs text-muted uppercase mb-1">Data Location</p><p className="text-sm">{String(gdpr.data_location)}</p></div>
             )}
-            {!!gdpr.dpa_contact && (
-              <div><p className="text-xs text-muted uppercase mb-1">DPA Contact</p><p className="text-sm font-mono">{String(gdpr.dpa_contact)}</p></div>
-            )}
-            {!!gdpr.right_to_erasure && (
-              <div><p className="text-xs text-muted uppercase mb-1">Right to Erasure</p><p className="text-sm">{String(gdpr.right_to_erasure)}</p></div>
-            )}
+            {!!gdpr.dpa_contact && (() => {
+              const dpa = gdpr.dpa_contact as Record<string, unknown>;
+              return (
+                <div>
+                  <p className="text-xs text-muted uppercase mb-1">DPA Contact</p>
+                  <p className="text-sm">{String(dpa.email ?? "")} — {String(dpa.name ?? "")} — Response: {String(dpa.response_time ?? "")}</p>
+                </div>
+              );
+            })()}
+            {!!gdpr.right_to_erasure && (() => {
+              const rte = gdpr.right_to_erasure as Record<string, unknown>;
+              return (
+                <div>
+                  <p className="text-xs text-muted uppercase mb-1">Right to Erasure</p>
+                  <p className="text-sm">Contact: {String(rte.contact ?? "")}</p>
+                  <p className="text-sm">Scope: {String(rte.scope ?? "")}</p>
+                </div>
+              );
+            })()}
             {Array.isArray(gdpr.data_retention) && (
               <div>
                 <p className="text-xs text-muted uppercase mb-2">Data Retention</p>
