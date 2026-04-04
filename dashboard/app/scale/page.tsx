@@ -77,7 +77,7 @@ export default function ScalePage() {
     try {
       const res = await fetch(`${base()}/v1/heal/batch`, {
         method: "POST", headers: headers(),
-        body: JSON.stringify({ agent_ids: DEMO_FLEET.map(a => a.id) }),
+        body: JSON.stringify({ entries: DEMO_FLEET.map(a => ({ entry_id: a.id, agent_id: a.id, action: "REFETCH" })) }),
       });
       if (res.ok) {
         const data = await res.json();
