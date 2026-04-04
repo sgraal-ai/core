@@ -52,16 +52,19 @@ export default function ProtectPage() {
   useEffect(() => { load(); }, [load]);
 
   async function runRedTeam() {
-    // Phase 1: confirm function body executes
-    setRedTeamError("CLICKED — fetching...");
+    const baseUrl = apiBase();
+    const key = getApiKey();
+    const url = `${baseUrl}/v1/redteam/run`;
+    const hdrs = { Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
+    const bodyObj = { attack_types: ATTACK_TYPES, iterations: 100 };
+    const bodyStr = JSON.stringify(bodyObj);
+
+    alert(`URL: ${url}\nKey: ${key ? key.slice(0, 12) + "..." : "EMPTY"}\nBody: ${bodyStr}`);
+
+    setRedTeamError(`Sending to ${url}...`);
     setRedTeamLoading(true);
     setRedTeamResults(null);
     setRedTeamGrade("");
-
-    // Phase 2: attempt fetch with isolated try-catch
-    const url = `${apiBase()}/v1/redteam/run`;
-    const hdrs = authHeaders();
-    const bodyStr = JSON.stringify({ attack_types: ATTACK_TYPES, iterations: 100 });
 
     let res: Response;
     try {
