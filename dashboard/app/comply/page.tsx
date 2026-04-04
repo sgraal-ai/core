@@ -271,12 +271,29 @@ export default function ComplyPage() {
                 ))}
               </div>
               {active ? (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {!!active.description && <p className="text-sm text-muted mb-3">{String(active.description)}</p>}
                   {Object.entries(active).filter(([k]) => k !== "description").map(([k, v]) => (
-                    <div key={k} className="flex justify-between py-1.5 border-b border-surface-light last:border-0 text-sm">
-                      <span className="text-muted font-mono text-xs">{k}</span>
-                      <span className="text-foreground text-xs max-w-[60%] text-right">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+                    <div key={k} className="py-2 border-b border-surface-light last:border-0">
+                      <p className="text-xs text-muted font-mono mb-1">{k}</p>
+                      {Array.isArray(v) ? (
+                        <ul className="text-sm pl-4 space-y-1">
+                          {(v as unknown[]).map((item, i) => (
+                            <li key={i} className="list-disc text-foreground">{typeof item === "object" && item !== null ? JSON.stringify(item) : String(item)}</li>
+                          ))}
+                        </ul>
+                      ) : typeof v === "object" && v !== null ? (
+                        <div className="pl-2 space-y-1">
+                          {Object.entries(v as Record<string, unknown>).map(([sk, sv]) => (
+                            <div key={sk} className="flex gap-2 text-sm">
+                              <span className="text-muted text-xs font-mono min-w-[120px]">{sk}:</span>
+                              <span className="text-foreground text-xs">{String(sv)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-foreground">{String(v)}</p>
+                      )}
                     </div>
                   ))}
                 </div>
