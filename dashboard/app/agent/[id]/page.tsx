@@ -44,6 +44,9 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   const [snapshotError, setSnapshotError] = useState("");
   const [snapshotMsg, setSnapshotMsg] = useState("");
 
+  // Forensics
+  const [forensicsData, setForensicsData] = useState<Record<string, unknown> | null>(null);
+
   useEffect(() => {
     setMounted(true);
     const apiKey = getApiKey();
@@ -72,6 +75,21 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           });
           if (explainRes.ok) setExplainText(await explainRes.json());
         } catch {}
+        // Auto-load forensics for BLOCK decisions
+        if (liveAgent.recommended_action === "BLOCK") {
+          try {
+            const forensicsRes = await fetch(`${apiUrl}/v1/forensics/analyze`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                agent_id: liveAgent.id,
+                incident_type: "block",
+                context: { omega: liveAgent.omega_mem_final, decision: "BLOCK", domain: liveAgent.domain },
+              }),
+            });
+            if (forensicsRes.ok) setForensicsData(await forensicsRes.json());
+          } catch {}
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -169,6 +187,42 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           <p className="text-xs text-muted font-mono">
             Expected result: Omega ~23.6 → USE_MEMORY
           </p>
+        </div>
+      )}
+
+      {/* Forensics */}
+      {agent.recommended_action === "BLOCK" && forensicsData && (
+        <div className="bg-surface border border-surface-light rounded-xl p-5 mb-8">
+          <h2 className="text-lg font-semibold mb-4">Forensics</h2>
+          {String(forensicsData.root_cause ?? "") === "insufficient_data" ? (
+            <p className="text-sm text-muted">Forensics requires more preflight history to generate a full incident trace.</p>
+          ) : (
+            <div className="space-y-3">
+              {!!forensicsData.forensics_id && (
+                <p className="text-xs text-muted font-mono">{String(forensicsData.forensics_id)}</p>
+              )}
+              {!!forensicsData.root_cause && (
+                <div>
+                  <p className="text-xs text-muted uppercase mb-1">Root Cause</p>
+                  <p className="text-sm">{String(forensicsData.root_cause)}</p>
+                </div>
+              )}
+              {!!forensicsData.recommendation && (
+                <div>
+                  <p className="text-xs text-muted uppercase mb-1">Recommendation</p>
+                  <p className="text-sm">{String(forensicsData.recommendation)}</p>
+                </div>
+              )}
+              <div className="flex gap-6 text-xs text-muted">
+                {Array.isArray(forensicsData.timeline) && (
+                  <span>Timeline: <strong className="text-foreground">{String((forensicsData.timeline as unknown[]).length)} events</strong></span>
+                )}
+                {Array.isArray(forensicsData.contamination_chain) && (
+                  <span>Contamination chain: <strong className="text-foreground">{String((forensicsData.contamination_chain as unknown[]).length)} entries</strong></span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
