@@ -42,7 +42,11 @@ export default function ToolsWebhooksPage() {
         headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
         body: JSON.stringify({ url, events: selectedEvents }),
       });
-      if (res.ok) { setToast({ message: "Webhook registered", type: "success" }); setUrl(""); load(); }
+      if (res.ok) {
+        const data = await res.json();
+        setHooks(prev => [...prev, { id: data.id, url, events: selectedEvents, created_at: new Date().toISOString() }]);
+        setToast({ message: "Webhook registered", type: "success" }); setUrl("");
+      }
       else setToast({ message: `Failed: ${res.status}`, type: "error" });
     } catch { setToast({ message: "Registration failed", type: "error" }); }
   }
