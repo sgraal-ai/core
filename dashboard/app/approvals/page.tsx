@@ -107,12 +107,16 @@ export default function ApprovalsPage() {
     const apiKey = getApiKey() || "sg_demo_playground";
     const apiUrl = getApiUrl();
     try {
-      await fetch(`${apiUrl}/v1/approvals/${id}/approve`, {
+      const res = await fetch(`${apiUrl}/v1/approvals/${id}/approve`, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
       });
-      showToast("Decision approved", "success");
-      loadApprovals();
+      if (res.ok) {
+        setPending(prev => prev.filter(p => p.id !== id));
+        showToast("Approved", "success");
+      } else {
+        showToast(`Approve failed: ${res.status}`, "error");
+      }
     } catch {
       showToast("Failed to approve", "error");
     }
@@ -122,12 +126,16 @@ export default function ApprovalsPage() {
     const apiKey = getApiKey() || "sg_demo_playground";
     const apiUrl = getApiUrl();
     try {
-      await fetch(`${apiUrl}/v1/approvals/${id}/reject`, {
+      const res = await fetch(`${apiUrl}/v1/approvals/${id}/reject`, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
       });
-      showToast("Decision rejected", "success");
-      loadApprovals();
+      if (res.ok) {
+        setPending(prev => prev.filter(p => p.id !== id));
+        showToast("Rejected", "success");
+      } else {
+        showToast(`Reject failed: ${res.status}`, "error");
+      }
     } catch {
       showToast("Failed to reject", "error");
     }
