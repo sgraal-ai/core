@@ -23,6 +23,8 @@ export default function ScalePage() {
   const [healthHistory, setHealthHistory] = useState<HealthPoint[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [weights, setWeights] = useState<Record<string, unknown> | null>(null);
+  const [lineageData, setLineageData] = useState<Record<string, { count: number; format: string }>>({});
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
@@ -42,6 +44,7 @@ export default function ScalePage() {
     await Promise.all([
       fetch(`${u}/v1/learning/qtable-status`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setQtable(d)).catch(() => {}),
       fetch(`${u}/v1/alerts/predictive`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => { if (d) setAlerts(Array.isArray(d) ? d : d.alerts ?? []); }).catch(() => {}),
+      fetch(`${u}/v1/weights/export`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setWeights(d)).catch(() => {}),
       ...DEMO_FLEET.map(agent =>
         fetch(`${u}/v1/memory/health-history?agent_id=${agent.id}`, { headers: h })
           .then(r => r.ok ? r.json() : null)
@@ -258,6 +261,119 @@ export default function ScalePage() {
     "failure_components": []
   }'`}</pre>
         <p className="text-xs text-muted mt-3">Each reported outcome updates the Q-table, calibrates thresholds, and improves Shapley attribution weights.</p>
+      </div>
+
+      {/* Weight Export/Import */}
+      <div className={`${CARD} mb-6`}>
+        <h2 className="text-lg font-semibold mb-2">Weight Export / Import</h2>
+        <p className="text-sm text-muted mb-4">Weights encode your system{"'"}s learned thresholds. Export to back up or transfer to another environment.</p>
+        <div className="flex gap-3 mb-4">
+          <button onClick={async () => {
+            try {
+              const res = await fetch(`${base()}/v1/weights/export`, { headers: headers() });
+              if (!res.ok) return;
+              const data = await res.json();
+              setWeights(data);
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = "sgraal-weights.json"; a.click();
+              URL.revokeObjectURL(url);
+              setToast({ message: "Weights exported", type: "success" });
+            } catch { setToast({ message: "Export failed", type: "error" }); }
+          }} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition">Export Weights</button>
+          <label className="text-sm px-4 py-1.5 rounded border border-surface-light text-muted hover:text-foreground transition cursor-pointer">
+            Import Weights
+            <input type="file" accept=".json" className="hidden" onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                const res = await fetch(`${base()}/v1/weights/import`, { method: "POST", headers: headers(), body: JSON.stringify(data) });
+                if (res.ok) { setToast({ message: "Weights imported", type: "success" }); setWeights(data); }
+                else setToast({ message: `Import failed: ${res.status}`, type: "error" });
+              } catch { setToast({ message: "Invalid JSON file", type: "error" }); }
+            }} />
+          </label>
+        </div>
+        {weights && (() => {
+          const thresholds = (weights.thresholds ?? weights) as Record<string, unknown>;
+          const lr = (weights.learning_rate ?? weights) as Record<string, unknown>;
+          return (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
+              {thresholds.warn !== undefined && <div><p className="text-xs text-muted uppercase">Warn</p><p className="font-semibold font-mono">{String(thresholds.warn)}</p></div>}
+              {thresholds.ask_user !== undefined && <div><p className="text-xs text-muted uppercase">Ask User</p><p className="font-semibold font-mono">{String(thresholds.ask_user)}</p></div>}
+              {thresholds.block !== undefined && <div><p className="text-xs text-muted uppercase">Block</p><p className="font-semibold font-mono">{String(thresholds.block)}</p></div>}
+              {lr.eta !== undefined && <div><p className="text-xs text-muted uppercase">Learning Rate</p><p className="font-semibold font-mono">{String(lr.eta)}</p></div>}
+              {lr.ewc_strength !== undefined && <div><p className="text-xs text-muted uppercase">EWC Strength</p><p className="font-semibold font-mono">{String(lr.ewc_strength)}</p></div>}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Agent Lineage */}
+      <div className={`${CARD} mb-6`}>
+        <h2 className="text-lg font-semibold mb-2">Agent Lineage</h2>
+        <p className="text-sm text-muted mb-4">Lineage tracks how each memory entry was created and modified over time.</p>
+        <div className="space-y-2">
+          {DEMO_FLEET.map(agent => {
+            const data = lineageData[agent.id];
+            return (
+              <div key={agent.id} className="flex items-center justify-between py-2 border-b border-surface-light last:border-0">
+                <div>
+                  <p className="text-sm font-semibold">{agent.name}</p>
+                  <p className="text-xs text-muted font-mono">{agent.id}</p>
+                  {data && <p className="text-xs text-muted mt-1">{data.count} entries · {data.format}</p>}
+                </div>
+                <button onClick={async () => {
+                  try {
+                    const res = await fetch(`${base()}/v1/store/lineage/export?agent_id=${agent.id}`, { headers: headers() });
+                    if (res.ok) {
+                      const d = await res.json();
+                      const entries = Array.isArray(d) ? d : d.entries ?? d.data ?? [];
+                      setLineageData(prev => ({ ...prev, [agent.id]: { count: entries.length, format: d.format ?? "json" } }));
+                    } else {
+                      setLineageData(prev => ({ ...prev, [agent.id]: { count: 0, format: "—" } }));
+                    }
+                  } catch {
+                    setLineageData(prev => ({ ...prev, [agent.id]: { count: 0, format: "error" } }));
+                  }
+                }} className="text-xs px-3 py-1 rounded border border-surface-light text-muted hover:text-foreground transition">
+                  View Lineage
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* RL Confidence Trend */}
+      <div className={`${CARD} mb-6`}>
+        <h2 className="text-lg font-semibold mb-2">RL Confidence Trend</h2>
+        <p className="text-sm text-muted mb-4">Confidence improves as more outcomes are submitted. Track accuracy gains over time.</p>
+        <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              {["Metric", "Value"].map(h => (
+                <th key={h} className="text-xs text-muted uppercase text-left pb-2 pr-4" style={{ borderBottom: "1px solid #e5e7eb" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td className="py-2 pr-4" style={{ borderBottom: "1px solid #f5f4f0" }}>Domain</td><td className="py-2 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{qtable?.domain ?? "—"}</td></tr>
+            <tr><td className="py-2 pr-4" style={{ borderBottom: "1px solid #f5f4f0" }}>Episodes</td><td className="py-2 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(qtable?.episodes ?? 0)}</td></tr>
+            <tr><td className="py-2 pr-4" style={{ borderBottom: "1px solid #f5f4f0" }}>Q-table Size</td><td className="py-2 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(qtable?.qtable_size ?? 0)}</td></tr>
+            <tr><td className="py-2 pr-4" style={{ borderBottom: "1px solid #f5f4f0" }}>Cold Start</td><td className="py-2 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{qtable?.cold_start ? "Yes" : "No"}</td></tr>
+            {weights && (() => {
+              const t = (weights.thresholds ?? weights) as Record<string, unknown>;
+              return <>
+                {t.warn !== undefined && <tr><td className="py-2 pr-4" style={{ borderBottom: "1px solid #f5f4f0" }}>Warn Threshold</td><td className="py-2 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(t.warn)}</td></tr>}
+                {t.ask_user !== undefined && <tr><td className="py-2 pr-4" style={{ borderBottom: "1px solid #f5f4f0" }}>Ask User Threshold</td><td className="py-2 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(t.ask_user)}</td></tr>}
+                {t.block !== undefined && <tr><td className="py-2 pr-4" style={{ borderBottom: "1px solid #f5f4f0" }}>Block Threshold</td><td className="py-2 font-mono text-xs" style={{ borderBottom: "1px solid #f5f4f0" }}>{String(t.block)}</td></tr>}
+              </>;
+            })()}
+          </tbody>
+        </table>
       </div>
 
       {/* Toast */}
