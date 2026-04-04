@@ -376,6 +376,40 @@ export default function ScalePage() {
         </table>
       </div>
 
+      {/* Store Export/Import */}
+      <div className={`${CARD} mb-6`}>
+        <h2 className="text-lg font-semibold mb-2">Store Export / Import</h2>
+        <p className="text-sm text-muted mb-4">Export and import your full memory store for backup or migration.</p>
+        <div className="flex gap-3">
+          <button onClick={async () => {
+            try {
+              const res = await fetch(`${base()}/v1/store/export`, { headers: headers() });
+              if (!res.ok) return;
+              const data = await res.json();
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = "sgraal-store-export.json"; a.click();
+              URL.revokeObjectURL(url);
+              setToast({ message: "Store exported", type: "success" });
+            } catch { setToast({ message: "Export failed", type: "error" }); }
+          }} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition">Export Store</button>
+          <label className="text-sm px-4 py-1.5 rounded border border-surface-light text-muted hover:text-foreground transition cursor-pointer">
+            Import Store
+            <input type="file" accept=".json" className="hidden" onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                const res = await fetch(`${base()}/v1/store/import`, { method: "POST", headers: headers(), body: JSON.stringify(data) });
+                if (res.ok) setToast({ message: "Store imported", type: "success" });
+                else setToast({ message: `Import failed: ${res.status}`, type: "error" });
+              } catch { setToast({ message: "Invalid JSON file", type: "error" }); }
+            }} />
+          </label>
+        </div>
+      </div>
+
       {/* Toast */}
       {toast && (
         <div style={{

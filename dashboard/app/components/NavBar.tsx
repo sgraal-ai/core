@@ -28,6 +28,8 @@ const TOOLS_ITEMS: DropdownItem[] = [
   { label: "Code Generator", href: "/code-generator" },
   { label: "Templates", href: "/templates" },
   { label: "Protect", href: "/protect" },
+  { label: "Webhooks", href: "/tools/webhooks" },
+  { label: "Traces", href: "/tools/traces" },
   { label: "Migrate", href: "/migrate" },
   { label: "Tutorial", href: "/tutorial" },
 ];

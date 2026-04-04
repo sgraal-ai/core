@@ -47,6 +47,10 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   // Forensics
   const [forensicsData, setForensicsData] = useState<Record<string, unknown> | null>(null);
 
+  // Passport
+  const [passport, setPassport] = useState<Record<string, unknown> | null>(null);
+  const [passportLoading, setPassportLoading] = useState(false);
+
   useEffect(() => {
     setMounted(true);
     const apiKey = getApiKey();
@@ -471,6 +475,36 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                 </div>
               ))}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Memory Passport */}
+      <div className="bg-surface border border-surface-light rounded-xl p-5 mb-10">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">Memory Passport</h2>
+          <button onClick={async () => {
+            setPassportLoading(true);
+            try {
+              const res = await fetch(`${getApiUrl()}/v1/memory/passport/export`, {
+                method: "POST", headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ agent_id: agent.id }),
+              });
+              if (res.ok) setPassport(await res.json());
+            } catch {}
+            setPassportLoading(false);
+          }} disabled={passportLoading} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">
+            {passportLoading ? "Exporting..." : "Export Passport"}
+          </button>
+        </div>
+        <p className="text-sm text-muted mb-3">Cryptographically signed snapshot of this agent{"'"}s memory state. Valid for 30 days.</p>
+        {passport && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            {!!passport.passport_id && <div><p className="text-xs text-muted uppercase mb-1">Passport ID</p><p className="font-mono text-xs">{String(passport.passport_id)}</p></div>}
+            {!!passport.issued_at && <div><p className="text-xs text-muted uppercase mb-1">Issued</p><p className="text-xs">{String(passport.issued_at)}</p></div>}
+            {!!passport.valid_until && <div><p className="text-xs text-muted uppercase mb-1">Valid Until</p><p className="text-xs">{String(passport.valid_until)}</p></div>}
+            {passport.assurance !== undefined && <div><p className="text-xs text-muted uppercase mb-1">Assurance</p><p className="text-xs font-semibold">{String(passport.assurance)}%</p></div>}
+            {!!passport.signature && <div className="col-span-2"><p className="text-xs text-muted uppercase mb-1">Signature</p><p className="font-mono text-xs">{String(passport.signature).slice(0, 16)}...</p></div>}
           </div>
         )}
       </div>
