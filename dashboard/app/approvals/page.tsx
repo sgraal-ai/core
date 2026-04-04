@@ -64,7 +64,8 @@ export default function ApprovalsPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        setPending(Array.isArray(data) ? data : data.pending ?? []);
+        const all = Array.isArray(data) ? data : data.approvals ?? data.pending ?? [];
+        setPending(all.filter((a: Record<string, unknown>) => a.status === "pending"));
       } else {
         setPending([]);
       }
