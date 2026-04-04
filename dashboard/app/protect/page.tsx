@@ -115,13 +115,13 @@ export default function ProtectPage() {
   function parseResults(data: Record<string, unknown>) {
     const nested = (data.result as Record<string, unknown>) ?? {};
     const raw = (data.attack_results ?? data.results ?? data.attacks ?? nested.attack_results ?? nested.results ?? []) as RedTeamResult[];
+    const grade = String(data.memory_readiness_grade ?? nested.memory_readiness_grade ?? data.grade ?? "");
     if (Array.isArray(raw) && raw.length > 0) {
       setRedTeamResults(raw);
-      const avg = raw.reduce((s, r) => s + (r.resilience ?? (r.total > 0 ? (r.blocked / r.total) * 100 : 0)), 0) / raw.length;
-      setRedTeamGrade(avg >= 90 ? "A" : avg >= 75 ? "B" : avg >= 60 ? "C" : avg >= 40 ? "D" : "F");
+      setRedTeamGrade(grade);
     } else {
       setRedTeamResults([]);
-      setRedTeamGrade(String(data.memory_readiness_grade ?? nested.memory_readiness_grade ?? data.grade ?? ""));
+      setRedTeamGrade(grade);
     }
   }
 
@@ -216,13 +216,13 @@ export default function ProtectPage() {
               </thead>
               <tbody>
                 {redTeamResults.map((r, i) => {
-                  const pct = r.resilience ?? (r.total > 0 ? Math.round((r.blocked / r.total) * 100) : 0);
+                  const pct = r.resilience != null ? Math.round(r.resilience * 100) : (r.total > 0 ? Math.round((r.blocked / r.total) * 100) : 0);
                   return (
                     <tr key={i}>
                       <td className="py-2 pr-4 font-mono text-xs font-semibold" style={{ borderBottom: "1px solid #f5f4f0" }}>{r.attack_type}</td>
                       <td className="py-2 pr-4 text-sm" style={{ borderBottom: "1px solid #f5f4f0" }}>{r.blocked}</td>
                       <td className="py-2 pr-4 text-sm" style={{ borderBottom: "1px solid #f5f4f0" }}>{r.total}</td>
-                      <td className="py-2 pr-4 text-sm font-semibold" style={{ borderBottom: "1px solid #f5f4f0", color: pct >= 90 ? "#16a34a" : pct >= 60 ? "#c9a962" : "#dc2626" }}>{pct}%</td>
+                      <td className="py-2 pr-4 text-sm font-semibold" style={{ borderBottom: "1px solid #f5f4f0", color: (r.resilience ?? 0) >= 0.9 ? "#16a34a" : (r.resilience ?? 0) >= 0.7 ? "#c9a962" : "#dc2626" }}>{pct}%</td>
                     </tr>
                   );
                 })}
