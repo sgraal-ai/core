@@ -154,10 +154,14 @@ export default function ProtectPage() {
       <div className={`${CARD} mb-6`}>
         <h2 className="text-lg font-semibold mb-3">Circuit Breaker</h2>
         {cb ? (
-          <div className="flex items-center gap-4">
-            <span className={`text-2xl font-bold font-mono ${cbColor}`}>{cb.state}</span>
-            {cb.failures !== undefined && <span className="text-sm text-muted">Failures: {cb.failures}</span>}
-            {cb.last_check && <span className="text-xs text-muted">Last check: {cb.last_check}</span>}
+          <div>
+            <div className="flex items-center gap-4">
+              <span className={`text-2xl font-bold font-mono ${cbColor}`}>{cb.state}</span>
+              {cb.failures !== undefined && <span className="text-sm text-muted">Failures: {cb.failures}</span>}
+              {cb.last_check && <span className="text-xs text-muted">Last check: {cb.last_check}</span>}
+            </div>
+            {cb.state === "CLOSED" && <p className="text-sm text-muted mt-2">No safety blocks triggered — system operating normally.</p>}
+            {cb.state === "OPEN" && <p className="text-sm text-red-400 mt-2">Safety block active — repeated high-risk patterns detected. Agents are paused.</p>}
           </div>
         ) : (
           <p className="text-sm text-muted">Circuit breaker status unavailable.</p>
@@ -168,7 +172,9 @@ export default function ProtectPage() {
       <div className={`${CARD} mb-6`}>
         <h2 className="text-lg font-semibold mb-3">Firewall Violations</h2>
         {violations.length > 0 ? (
-          <div className="space-y-2">
+          <div>
+            <p className="text-sm text-muted mb-3">{violations.length} injection attempt{violations.length > 1 ? "s" : ""} blocked before reaching your agents.</p>
+            <div className="space-y-2">
             {violations.map((v, i) => (
               <div key={i} className="flex justify-between items-center py-2 border-b border-surface-light last:border-0 text-sm">
                 <div>
@@ -182,10 +188,11 @@ export default function ProtectPage() {
               </div>
             ))}
           </div>
+          </div>
         ) : (
           <div className="text-center py-6">
             <p style={{ fontSize: "36px", color: "#16a34a" }}>&#x2713;</p>
-            <p className="text-sm text-muted mt-2">No firewall violations detected.</p>
+            <p className="text-sm text-muted mt-2">No injection attempts detected. Your write firewall is clean.</p>
           </div>
         )}
       </div>
@@ -229,9 +236,16 @@ export default function ProtectPage() {
               </tbody>
             </table>
             {redTeamGrade && (
-              <p className="mt-4 text-sm">
-                Overall grade: <strong className="text-lg" style={{ color: redTeamGrade <= "B" ? "#16a34a" : redTeamGrade <= "C" ? "#c9a962" : "#dc2626" }}>{redTeamGrade}</strong>
-              </p>
+              <>
+                <p className="mt-4 text-sm">
+                  Overall grade: <strong className="text-lg" style={{ color: redTeamGrade <= "B" ? "#16a34a" : redTeamGrade <= "C" ? "#c9a962" : "#dc2626" }}>{redTeamGrade}</strong>
+                </p>
+                {redTeamGrade <= "B" ? (
+                  <p className="text-sm text-muted mt-3">Your memory system withstood {Math.round(redTeamResults.reduce((s, r) => s + (r.resilience ?? 0), 0) / redTeamResults.length * 100)}% of simulated attacks across 6 attack vectors.</p>
+                ) : (
+                  <p className="text-sm text-red-400 mt-3">Vulnerabilities detected. Review attack types below and consider hardening your memory policies.</p>
+                )}
+              </>
             )}
           </>
         )}
@@ -260,7 +274,7 @@ export default function ProtectPage() {
         ) : (
           <div className="text-center py-6">
             <p style={{ fontSize: "36px", color: "#16a34a" }}>&#x2713;</p>
-            <p className="text-sm text-muted mt-2">No active alerts.</p>
+            <p className="text-sm text-muted mt-2">No emerging threats detected. All agents are within normal risk parameters.</p>
           </div>
         )}
       </div>
