@@ -16,6 +16,9 @@ export default function ComplyPage() {
   const [auditVerify, setAuditVerify] = useState<Record<string, unknown> | null>(null);
   const [gdpr, setGdpr] = useState<Record<string, unknown> | null>(null);
   const [showDeclarationJson, setShowDeclarationJson] = useState(false);
+  const [profiles, setProfiles] = useState<Record<string, unknown> | null>(null);
+  const [activeProfile, setActiveProfile] = useState("EU_AI_ACT");
+  const [siemPreview, setSiemPreview] = useState<string[]>([]);
 
   function headers() {
     return { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" };
@@ -33,6 +36,8 @@ export default function ComplyPage() {
       fetch(`${base}/v1/compliance/eu-ai-act/report`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setReport(d)).catch(() => {}),
       fetch(`${base}/v1/audit-log/verify`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setAuditVerify(d)).catch(() => {}),
       fetch(`${base}/v1/compliance/gdpr`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setGdpr(d)).catch(() => {}),
+      fetch(`${base}/v1/compliance/docs`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setProfiles(d)).catch(() => {}),
+      fetch(`${base}/v1/audit-log/export?format=splunk&limit=3`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => { if (d?.data) setSiemPreview(d.data.slice(0, 3)); }).catch(() => {}),
     ]);
     setLoading(false);
   }, []);
@@ -240,6 +245,84 @@ export default function ComplyPage() {
           </div>
         ) : (
           <p className="text-sm text-muted">GDPR policy data unavailable.</p>
+        )}
+      </div>
+
+      {/* Compliance Profiles */}
+      <div className={`${CARD} mb-6 mt-6`}>
+        <h2 className="text-lg font-semibold mb-4">Compliance Profiles</h2>
+        {profiles ? (() => {
+          const profileKeys = Object.keys(profiles).filter(k => typeof profiles[k] === "object" && profiles[k] !== null);
+          const tabs = profileKeys.length > 0 ? profileKeys : ["EU_AI_ACT", "GDPR", "FDA_510K", "HIPAA"];
+          const active = profiles[activeProfile] as Record<string, unknown> | undefined;
+          return (
+            <div>
+              <div className="flex gap-2 mb-4 flex-wrap">
+                {tabs.map(t => (
+                  <button key={t} onClick={() => setActiveProfile(t)}
+                    className="text-xs font-semibold px-3 py-1.5 rounded transition"
+                    style={{
+                      background: activeProfile === t ? "#c9a962" : "transparent",
+                      color: activeProfile === t ? "#0B0F14" : "#6b7280",
+                      border: activeProfile === t ? "none" : "1px solid #e5e7eb",
+                    }}
+                  >{t}</button>
+                ))}
+              </div>
+              {active ? (
+                <div className="space-y-2">
+                  {!!active.description && <p className="text-sm text-muted mb-3">{String(active.description)}</p>}
+                  {Object.entries(active).filter(([k]) => k !== "description").map(([k, v]) => (
+                    <div key={k} className="flex justify-between py-1.5 border-b border-surface-light last:border-0 text-sm">
+                      <span className="text-muted font-mono text-xs">{k}</span>
+                      <span className="text-foreground text-xs max-w-[60%] text-right">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted">Select a profile to view its rules and articles.</p>
+              )}
+            </div>
+          );
+        })() : (
+          <p className="text-sm text-muted">Compliance profile documentation unavailable.</p>
+        )}
+      </div>
+
+      {/* SIEM Export */}
+      <div className={CARD}>
+        <h2 className="text-lg font-semibold mb-4">SIEM Export</h2>
+        <div className="flex gap-3 mb-4">
+          {(["splunk", "datadog", "elastic"] as const).map(fmt => (
+            <button key={fmt} onClick={async () => {
+              const base = getApiUrl();
+              try {
+                const res = await fetch(`${base}/v1/audit-log/export?format=${fmt}`, { headers: headers() });
+                if (!res.ok) return;
+                const data = await res.json();
+                const content = fmt === "splunk" ? (data.data ?? []).join("\n") : JSON.stringify(data, null, 2);
+                const blob = new Blob([content], { type: "text/plain" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `sgraal-audit-${fmt}.${fmt === "elastic" ? "json" : "log"}`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch {}
+            }} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition capitalize">
+              Export {fmt}
+            </button>
+          ))}
+        </div>
+        {siemPreview.length > 0 ? (
+          <div>
+            <p className="text-xs text-muted uppercase mb-2">Preview (last 3 entries — Splunk format)</p>
+            <pre className="text-xs font-mono text-muted bg-surface-light rounded-lg p-3 overflow-x-auto">
+              {siemPreview.map(String).join("\n")}
+            </pre>
+          </div>
+        ) : (
+          <p className="text-sm text-muted">No audit entries available for export.</p>
         )}
       </div>
     </div>
