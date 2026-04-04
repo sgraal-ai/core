@@ -35,6 +35,15 @@ export function AgentCard({ agent }: { agent: Agent }) {
           {agent.at_risk_warnings.length > 0 && (
             <span className="text-red-400">{agent.at_risk_warnings.length} at risk</span>
           )}
+          {agent.poisoning_suspected && (
+            <span className="text-red-400 font-semibold">&#x26A0; POISONING</span>
+          )}
+          {agent.tamper_detected && (
+            <span className="text-red-400 font-semibold">&#x26A0; TAMPER</span>
+          )}
+          {agent.hallucination_risk === "high" && (
+            <span className="text-orange-400 font-semibold">&#x26A0; HALLUCINATION RISK</span>
+          )}
         </div>
       </div>
     </Link>

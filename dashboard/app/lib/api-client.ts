@@ -52,6 +52,9 @@ export async function fetchPreflight(
     hawkes_intensity: data.hawkes_intensity,
     copula_analysis: data.copula_analysis,
     mewma: data.mewma,
+    poisoning_suspected: data.poisoning_suspected ?? false,
+    tamper_detected: data.tamper_detected ?? false,
+    hallucination_risk: data.hallucination_risk ?? "low",
   };
 }
 
