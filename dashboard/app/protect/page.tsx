@@ -57,43 +57,71 @@ export default function ProtectPage() {
     setRedTeamResults(null);
     setRedTeamGrade("");
 
-    const url = `${apiBase()}/v1/redteam/run`;
     const hdrs = { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" };
-    const body = JSON.stringify({ attack_types: ATTACK_TYPES, iterations: 100 });
+    const base = apiBase();
 
     try {
-      // Step 1: Start
-      const res = await fetch(url, { method: "POST", headers: hdrs, body });
-      const text = await res.text();
-      setRedTeamError(`Step 1 response (${res.status}): ${text.slice(0, 500)}`);
-
-      if (!res.ok) { setRedTeamLoading(false); return; }
-
-      let data: Record<string, unknown>;
-      try { data = JSON.parse(text); } catch { setRedTeamLoading(false); return; }
-
+      // Step 1: Start red team run
+      const res = await fetch(`${base}/v1/redteam/run`, {
+        method: "POST", headers: hdrs,
+        body: JSON.stringify({ attack_types: ATTACK_TYPES, iterations: 100 }),
+      });
+      if (!res.ok) { setRedTeamError(`Error: ${res.status}`); setRedTeamLoading(false); return; }
+      const data = await res.json();
       const jobId = data.job_id ?? data.id ?? data.scan_id;
 
+      // Sync response (no job_id)
       if (!jobId) {
-        // Sync response — show raw
-        setRedTeamGrade(String(data.memory_readiness_grade ?? data.grade ?? ""));
-        setRedTeamError(`Sync result: ${text.slice(0, 1000)}`);
+        parseResults(data);
         setRedTeamLoading(false);
         return;
       }
 
-      // Step 2: Wait 5s then poll once
-      setRedTeamError(`Got job_id: ${jobId} — polling in 5s...`);
-      await new Promise(r => setTimeout(r, 5000));
-
-      const pollUrl = `${apiBase()}/v1/redteam/status/${jobId}`;
-      const pollRes = await fetch(pollUrl, { headers: hdrs });
-      const pollText = await pollRes.text();
-      setRedTeamError(`Poll response (${pollRes.status}): ${pollText.slice(0, 1000)}`);
-      setRedTeamLoading(false);
+      // Step 2: Poll for completion
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const pollRes = await fetch(`${base}/v1/redteam/status/${jobId}`, { headers: hdrs });
+        if (!pollRes.ok) continue;
+        const pollData = await pollRes.json();
+        const status = pollData.status ?? pollData.state;
+        if (status === "complete" || status === "completed") {
+          // Step 3: Fetch full report
+          try {
+            const reportRes = await fetch(`${base}/v1/redteam/report/${jobId}`, { headers: hdrs });
+            if (reportRes.ok) {
+              parseResults(await reportRes.json());
+              setRedTeamLoading(false);
+              return;
+            }
+          } catch {}
+          // Fallback: use poll data directly
+          parseResults(pollData);
+          setRedTeamLoading(false);
+          return;
+        }
+        if (status === "failed") {
+          setRedTeamError("Simulation failed — try with a different memory state.");
+          setRedTeamLoading(false);
+          return;
+        }
+      }
+      setRedTeamError("Simulation timed out after 30 seconds.");
     } catch (e) {
-      setRedTeamError(`Exception: ${e instanceof Error ? e.message : String(e)}`);
-      setRedTeamLoading(false);
+      setRedTeamError(e instanceof Error ? e.message : "Request failed");
+    }
+    setRedTeamLoading(false);
+  }
+
+  function parseResults(data: Record<string, unknown>) {
+    const nested = (data.result as Record<string, unknown>) ?? {};
+    const raw = (data.attack_results ?? data.results ?? data.attacks ?? nested.attack_results ?? nested.results ?? []) as RedTeamResult[];
+    if (Array.isArray(raw) && raw.length > 0) {
+      setRedTeamResults(raw);
+      const avg = raw.reduce((s, r) => s + (r.resilience ?? (r.total > 0 ? (r.blocked / r.total) * 100 : 0)), 0) / raw.length;
+      setRedTeamGrade(avg >= 90 ? "A" : avg >= 75 ? "B" : avg >= 60 ? "C" : avg >= 40 ? "D" : "F");
+    } else {
+      setRedTeamResults([]);
+      setRedTeamGrade(String(data.memory_readiness_grade ?? nested.memory_readiness_grade ?? data.grade ?? ""));
     }
   }
 
