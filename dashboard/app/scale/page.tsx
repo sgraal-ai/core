@@ -42,7 +42,7 @@ export default function ScalePage() {
     await Promise.all([
       fetch(`${u}/v1/learning/qtable-status`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setQtable(d)).catch(() => {}),
       fetch(`${u}/v1/alerts/predictive`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => { if (d) setAlerts(Array.isArray(d) ? d : d.alerts ?? []); }).catch(() => {}),
-      ...DEMO_FLEET.slice(0, 3).map(agent =>
+      ...DEMO_FLEET.map(agent =>
         fetch(`${u}/v1/memory/health-history?agent_id=${agent.id}`, { headers: h })
           .then(r => r.ok ? r.json() : null)
           .then(d => { if (d) setHealthHistory(prev => [...prev, { ...d, agent_id: agent.id }]); })
@@ -163,28 +163,24 @@ export default function ScalePage() {
           {DEMO_FLEET.map(agent => {
             const result = healResults.find(r => r.agent_id === agent.id);
             return (
-              <div key={agent.id} className="flex items-center justify-between py-2 border-b border-surface-light last:border-0">
-                <div>
-                  <p className="text-sm font-semibold">{agent.name}</p>
-                  <p className="text-xs text-muted font-mono">{agent.id}</p>
-                </div>
-                <div className="flex items-center gap-4">
-                  {result && (
-                    <div className="text-xs text-right">
-                      <span className="text-muted">Omega: {String(result.omega_before ?? "?")} → </span>
-                      <span style={{ color: (result.omega_after ?? 0) < (result.omega_before ?? 0) ? "#16a34a" : "#6b7280" }}>
-                        {String(result.omega_after ?? "?")}
-                      </span>
-                      {result.actions_taken !== undefined && (
-                        <span className="text-muted ml-2">{result.actions_taken} actions</span>
-                      )}
-                    </div>
-                  )}
+              <div key={agent.id} className="py-2 border-b border-surface-light last:border-0">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold">{agent.name}</p>
+                    <p className="text-xs text-muted font-mono">{agent.id}</p>
+                  </div>
                   <button onClick={() => runHeal(agent.id)} disabled={healLoading === agent.id}
                     className="text-xs px-3 py-1 rounded border border-surface-light text-muted hover:text-foreground transition disabled:opacity-50">
                     {healLoading === agent.id ? "..." : "Heal"}
                   </button>
                 </div>
+                {result && (
+                  <p className="text-xs mt-1" style={{ color: "#16a34a" }}>
+                    &#x2713; Healed — &#x3A9; before: {String(result.omega_before ?? "?")} &rarr; after: {String(result.omega_after ?? "?")}
+                    {result.improvement !== undefined && <>, improvement: {String(result.improvement)}</>}
+                    {result.actions_taken !== undefined && <>, {result.actions_taken} actions</>}
+                  </p>
+                )}
               </div>
             );
           })}
