@@ -5148,17 +5148,17 @@ def gdpr_compliance():
             "memory_state": "not stored — processed in real time and discarded",
         },
         "right_to_erasure": {
-            "endpoint": "DELETE /v1/account (planned — contact dpa@sgraal.com)",
+            "endpoint": "DELETE /v1/account (planned — contact hello@sgraal.com)",
             "scope": "All API keys, logs, and associated data permanently deleted within 30 days",
-            "contact": "dpa@sgraal.com",
+            "contact": "hello@sgraal.com",
         },
         "data_portability": {
-            "endpoint": "GET /v1/account/export (planned — contact dpa@sgraal.com)",
+            "endpoint": "GET /v1/account/export (planned — contact hello@sgraal.com)",
             "format": "JSON",
             "scope": "All preflight logs, audit logs, and API key metadata",
         },
         "dpa_contact": {
-            "email": "dpa@sgraal.com",
+            "email": "hello@sgraal.com",
             "name": "Sgraal Data Protection Officer",
             "response_time": "72 hours",
         },

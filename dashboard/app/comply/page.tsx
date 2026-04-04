@@ -252,9 +252,10 @@ export default function ComplyPage() {
       <div className={`${CARD} mb-6 mt-6`}>
         <h2 className="text-lg font-semibold mb-4">Compliance Profiles</h2>
         {profiles ? (() => {
-          const profileKeys = Object.keys(profiles).filter(k => typeof profiles[k] === "object" && profiles[k] !== null);
+          const profileMap = (profiles.profiles ?? profiles) as Record<string, unknown>;
+          const profileKeys = Object.keys(profileMap).filter(k => typeof profileMap[k] === "object" && profileMap[k] !== null);
           const tabs = profileKeys.length > 0 ? profileKeys : ["EU_AI_ACT", "GDPR", "FDA_510K", "HIPAA"];
-          const active = profiles[activeProfile] as Record<string, unknown> | undefined;
+          const active = profileMap[activeProfile] as Record<string, unknown> | undefined;
           return (
             <div>
               <div className="flex gap-2 mb-4 flex-wrap">
