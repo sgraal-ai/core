@@ -584,6 +584,44 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
                     "firewall_bypass_reason": req.firewall_bypass_reason or "not_provided"})
         _firewall_triggered = True
 
+    # Check 3: Injection & sleeper pattern detection
+    _content_lower = req.content.lower()
+    _injection_patterns = [
+        "ignore all previous instructions", "ignore previous instructions",
+        "disregard previous", "you are now", "act as", "jailbreak",
+        "send money to", "wire transfer",
+    ]
+    _sleeper_patterns = [
+        "execute when", "activate when", "trigger when",
+        "if date >", "if time >",
+    ]
+    _block_reason = None
+    for _pat in _injection_patterns:
+        if _pat in _content_lower:
+            _block_reason = "INJECTION_PATTERN_DETECTED"
+            break
+    if not _block_reason:
+        for _pat in _sleeper_patterns:
+            if _pat in _content_lower:
+                _block_reason = "SLEEPER_PATTERN_DETECTED"
+                break
+    if not _block_reason:
+        # Check financial transfer patterns: "transfer $" or "transfer €" followed by digits
+        import re as _re_fw
+        if _re_fw.search(r"transfer\s*[\$€]\s*\d", _content_lower):
+            _block_reason = "INJECTION_PATTERN_DETECTED"
+
+    if _block_reason:
+        blocked = True
+        _firewall_triggered = True
+        _firewall_checks += 1
+        _audit_log("firewall_block", str(uuid.uuid4()), key_record, _block_reason, omega,
+                   {"entry_id": mem_id, "agent_id": req.agent_id, "pattern": _block_reason})
+        return {"id": mem_id, "content": req.content, "metadata": req.metadata or {}, "score": omega, "blocked": True,
+                "write_firewall_triggered": True, "firewall_checks": _firewall_checks,
+                "block_reason": _block_reason, "uri": None,
+                "_headers": {"X-Sgraal-Write-Firewall": "blocked"}}
+
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             _store_r = http_requests.post(f"{SUPABASE_URL}/rest/v1/memory_store",
