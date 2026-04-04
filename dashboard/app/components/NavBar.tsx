@@ -17,6 +17,7 @@ const MONITOR_ITEMS: DropdownItem[] = [
 ];
 
 const CONFIGURE_ITEMS: DropdownItem[] = [
+  { label: "Comply", href: "/comply" },
   { label: "Profiles", href: "/profiles" },
   { label: "Webhooks", href: "/webhooks" },
   { label: "Team", href: "/team" },
