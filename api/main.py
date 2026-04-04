@@ -617,6 +617,19 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
         _firewall_checks += 1
         _audit_log("firewall_block", str(uuid.uuid4()), key_record, _block_reason, omega,
                    {"entry_id": mem_id, "agent_id": req.agent_id, "pattern": _block_reason})
+        # Log to firewall violations store
+        if kh not in _firewall_violations:
+            _firewall_violations[kh] = []
+        _firewall_violations[kh].append({
+            "agent_id": req.agent_id or "anonymous",
+            "reason": _block_reason,
+            "content_preview": req.content[:100],
+            "entry_id": mem_id,
+            "omega": omega,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        if len(_firewall_violations[kh]) > 1000:
+            _firewall_violations[kh] = _firewall_violations[kh][-1000:]
         return {"id": mem_id, "content": req.content, "metadata": req.metadata or {}, "score": omega, "blocked": True,
                 "write_firewall_triggered": True, "firewall_checks": _firewall_checks,
                 "block_reason": _block_reason, "uri": None,
