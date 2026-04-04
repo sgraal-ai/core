@@ -13,6 +13,7 @@ const MONITOR_ITEMS: DropdownItem[] = [
   { label: "Analytics", href: "/analytics" },
   { label: "Audit Log", href: "/audit" },
   { label: "SLA", href: "/sla" },
+  { label: "Scale", href: "/scale" },
   { label: "Memory Graph", href: "/consciousness" },
 ];
 
