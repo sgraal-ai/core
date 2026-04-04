@@ -52,77 +52,48 @@ export default function ProtectPage() {
   useEffect(() => { load(); }, [load]);
 
   async function runRedTeam() {
-    const baseUrl = apiBase();
-    const key = getApiKey();
-    const url = `${baseUrl}/v1/redteam/run`;
-    const hdrs = { Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
-    const bodyObj = { attack_types: ATTACK_TYPES, iterations: 100 };
-    const bodyStr = JSON.stringify(bodyObj);
-
-    alert(`URL: ${url}\nKey: ${key ? key.slice(0, 12) + "..." : "EMPTY"}\nBody: ${bodyStr}`);
-
-    setRedTeamError(`Sending to ${url}...`);
     setRedTeamLoading(true);
+    setRedTeamError("");
     setRedTeamResults(null);
     setRedTeamGrade("");
 
-    let res: Response;
-    try {
-      res = await fetch(url, { method: "POST", headers: hdrs, body: bodyStr });
-    } catch (fetchErr) {
-      setRedTeamError(`FETCH FAILED: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)} | URL: ${url}`);
-      setRedTeamLoading(false);
-      return;
-    }
+    const url = `${apiBase()}/v1/redteam/run`;
+    const hdrs = { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" };
+    const body = JSON.stringify({ attack_types: ATTACK_TYPES, iterations: 100 });
 
     try {
-      if (!res.ok) { setRedTeamError(`HTTP ${res.status} ${res.statusText} | URL: ${url}`); setRedTeamLoading(false); return; }
-      const data = await res.json();
-      const jobId = data.job_id ?? data.id;
+      // Step 1: Start
+      const res = await fetch(url, { method: "POST", headers: hdrs, body });
+      const text = await res.text();
+      setRedTeamError(`Step 1 response (${res.status}): ${text.slice(0, 500)}`);
+
+      if (!res.ok) { setRedTeamLoading(false); return; }
+
+      let data: Record<string, unknown>;
+      try { data = JSON.parse(text); } catch { setRedTeamLoading(false); return; }
+
+      const jobId = data.job_id ?? data.id ?? data.scan_id;
 
       if (!jobId) {
-        // Sync response
-        parseRedTeamResult(data);
+        // Sync response — show raw
+        setRedTeamGrade(String(data.memory_readiness_grade ?? data.grade ?? ""));
+        setRedTeamError(`Sync result: ${text.slice(0, 1000)}`);
         setRedTeamLoading(false);
         return;
       }
 
-      // Poll
-      for (let i = 0; i < 15; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-        const pollRes = await fetch(`${apiBase()}/v1/redteam/status/${jobId}`, { headers: authHeaders() });
-        if (!pollRes.ok) continue;
-        const pollData = await pollRes.json();
-        if (pollData.status === "complete" || pollData.status === "completed") {
-          parseRedTeamResult(pollData);
-          setRedTeamLoading(false);
-          return;
-        }
-        if (pollData.status === "failed") {
-          setRedTeamError("Red team simulation failed.");
-          setRedTeamLoading(false);
-          return;
-        }
-      }
-      setRedTeamError("Red team timed out.");
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setRedTeamError(`Request failed: ${msg}`);
-    }
-    setRedTeamLoading(false);
-  }
+      // Step 2: Wait 5s then poll once
+      setRedTeamError(`Got job_id: ${jobId} — polling in 5s...`);
+      await new Promise(r => setTimeout(r, 5000));
 
-  function parseRedTeamResult(data: Record<string, unknown>) {
-    const nested = (data.result as Record<string, unknown>) ?? {};
-    const results = (data.attack_results ?? data.results ?? data.attacks ?? nested.results ?? []) as RedTeamResult[];
-    if (Array.isArray(results) && results.length > 0) {
-      setRedTeamResults(results);
-      const avgResilience = results.reduce((s, r) => s + (r.resilience ?? (r.total > 0 ? (r.blocked / r.total) * 100 : 0)), 0) / results.length;
-      setRedTeamGrade(avgResilience >= 90 ? "A" : avgResilience >= 75 ? "B" : avgResilience >= 60 ? "C" : avgResilience >= 40 ? "D" : "F");
-    } else {
-      // Flat response — show raw
-      setRedTeamResults([]);
-      setRedTeamGrade(String(data.memory_readiness_grade ?? data.grade ?? data.immunity_score ?? ""));
+      const pollUrl = `${apiBase()}/v1/redteam/status/${jobId}`;
+      const pollRes = await fetch(pollUrl, { headers: hdrs });
+      const pollText = await pollRes.text();
+      setRedTeamError(`Poll response (${pollRes.status}): ${pollText.slice(0, 1000)}`);
+      setRedTeamLoading(false);
+    } catch (e) {
+      setRedTeamError(`Exception: ${e instanceof Error ? e.message : String(e)}`);
+      setRedTeamLoading(false);
     }
   }
 
