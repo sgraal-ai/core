@@ -4440,9 +4440,38 @@ def create_approval(req: ApprovalRequest, key_record: dict = Depends(verify_api_
 def list_approvals(key_record: dict = Depends(verify_api_key)):
     now = _time.time()
     results = []
+
+    # Batch-fetch audit_log entries for enrichment
+    _audit_cache: dict[str, dict] = {}
+    _sb = supabase_service_client or supabase_client
+    if _sb:
+        preflight_ids = [a.get("preflight_id", "") for a in _approvals.values() if a.get("preflight_id")]
+        if preflight_ids:
+            try:
+                # Fetch up to 100 matching audit entries
+                for pid in preflight_ids[:100]:
+                    q = _sb.table("audit_log").select("*").eq("request_id", pid).limit(1)
+                    r = q.execute()
+                    if r.data and len(r.data) > 0:
+                        _audit_cache[pid] = r.data[0]
+            except Exception:
+                pass
+
     for a in _approvals.values():
         status = a["status"] if now < a.get("expires_at", 0) or a["status"] != "pending" else "expired"
-        results.append({**a, "status": status})
+        enriched = {**a, "status": status}
+
+        # Enrich from audit_log
+        audit = _audit_cache.get(a.get("preflight_id", ""), {})
+        enriched["agent_id"] = audit.get("agent_id") or a.get("agent_id", "")
+        enriched["action_type"] = audit.get("action_type") or a.get("action_type", "")
+        enriched["domain"] = audit.get("domain") or a.get("domain", "")
+        enriched["omega"] = audit.get("omega_mem_final") or audit.get("omega_score") or a.get("omega", 0)
+        enriched["explanation"] = a.get("reason") or audit.get("explainability_note") or ""
+        enriched["memory_summary"] = a.get("memory_summary", "")
+        enriched["timestamp"] = audit.get("created_at") or a.get("created_at", "")
+
+        results.append(enriched)
     return {"approvals": results}
 
 @app.get("/v1/approvals/{approval_id}")

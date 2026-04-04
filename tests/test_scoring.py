@@ -2608,7 +2608,7 @@ class TestComplianceEndpoints:
         assert "right_to_erasure" in data
         assert "data_portability" in data
         assert "dpa_contact" in data
-        assert data["dpa_contact"]["email"] == "dpa@sgraal.com"
+        assert data["dpa_contact"]["email"] == "hello@sgraal.com"
         assert "memory_state" in data["data_retention"]
         assert "not stored" in data["data_retention"]["memory_state"]
 
