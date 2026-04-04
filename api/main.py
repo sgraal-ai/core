@@ -6514,10 +6514,48 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "dp_satisfied": dp_check.dp_satisfied,
         }
 
+    # Security detection: poisoning, hallucination risk, tamper
+    _injection_pats = [
+        "ignore all previous instructions", "ignore previous instructions",
+        "disregard previous", "you are now", "act as", "jailbreak",
+        "send money to", "wire transfer",
+    ]
+    import re as _re_pf
+    _poisoning_suspected = False
+    for _entry in entries:
+        _cl = (_entry.content or "").lower()
+        if any(p in _cl for p in _injection_pats) or _re_pf.search(r"transfer\s*[\$€]\s*\d", _cl):
+            _poisoning_suspected = True
+            break
+
+    _cb = result.component_breakdown
+    _s_interf = _cb.get("s_interference", 0)
+    _s_drift = _cb.get("s_drift", 0)
+    if _s_interf > 50 and _s_drift > 40:
+        _hallucination_risk = "high"
+    elif _s_interf > 30 or _s_drift > 25:
+        _hallucination_risk = "medium"
+    else:
+        _hallucination_risk = "low"
+
+    _tamper_detected = any(
+        (e.source_trust or 1.0) < 0.3 and (e.source_conflict or 0.0) > 0.7
+        for e in entries
+    )
+
+    _final_action = result.recommended_action
+    if _poisoning_suspected:
+        _final_action = "BLOCK"
+        repair_plan_out.insert(0, {
+            "action": "POISONING_BLOCK", "entry_id": "*",
+            "reason": "Injection pattern detected in memory content",
+            "priority": "high", "projected_improvement": 0, "success_probability": 1.0,
+        })
+
     response = {
         "omega_mem_final": omega_out,
         "memcube_version": "2.0.0",
-        "recommended_action": result.recommended_action,
+        "recommended_action": _final_action,
         "assurance_score": result.assurance_score,
         "explainability_note": result.explainability_note,
         "component_breakdown": result.component_breakdown,
@@ -6542,6 +6580,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "request_id": request_id,
         "use_pagerank": req.use_pagerank,
         "omega_sanitized": _omega_sanitized,
+        "poisoning_suspected": _poisoning_suspected,
+        "hallucination_risk": _hallucination_risk,
+        "tamper_detected": _tamper_detected,
         "shapley_values": compute_shapley_values(
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
