@@ -142,7 +142,7 @@ export default function ScalePage() {
             <p className="text-sm text-muted">
               {qtable.cold_start
                 ? "Cold start — submit outcomes to begin training."
-                : `System is learning from outcomes — ${episodes} episodes recorded.`}
+                : `The system has learned from ${episodes} decision outcomes. Thresholds are calibrating automatically.`}
             </p>
           </div>
         ) : (
@@ -152,13 +152,15 @@ export default function ScalePage() {
 
       {/* Autonomous Heal */}
       <div className={`${CARD} mb-6`}>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold">Autonomous Heal</h2>
           <button onClick={runBatchHeal} disabled={healLoading === "batch"}
             className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">
             {healLoading === "batch" ? "Healing..." : "Run Batch Heal"}
           </button>
         </div>
+        <p className="text-sm text-muted mb-4">Autonomous heal detects memory degradation and applies the optimal repair plan — without manual intervention.</p>
+        <p className="text-xs text-muted mb-4">Batch heal runs the full repair sequence across all agents simultaneously.</p>
         <div className="space-y-3">
           {DEMO_FLEET.map(agent => {
             const result = healResults.find(r => r.agent_id === agent.id);
@@ -189,7 +191,8 @@ export default function ScalePage() {
 
       {/* Health History */}
       <div className={`${CARD} mb-6`}>
-        <h2 className="text-lg font-semibold mb-3">Health History</h2>
+        <h2 className="text-lg font-semibold mb-2">Health History</h2>
+        <p className="text-sm text-muted mb-4">Tracks omega score trends over time. Rising P95 indicates systemic memory degradation across your fleet.</p>
         {healthHistory.length > 0 ? (
           <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
             <thead>
@@ -236,6 +239,7 @@ export default function ScalePage() {
           <div className="text-center py-6">
             <p style={{ fontSize: "36px", color: "#16a34a" }}>&#x2713;</p>
             <p className="text-sm text-muted mt-2">No emerging threats detected.</p>
+            <p className="text-xs text-muted mt-2">Predictive alerts fire when health trends suggest a future BLOCK — before it happens.</p>
           </div>
         )}
       </div>
@@ -243,7 +247,8 @@ export default function ScalePage() {
       {/* Outcome History */}
       <div className={CARD}>
         <h2 className="text-lg font-semibold mb-3">Outcome Reporting</h2>
-        <p className="text-sm text-muted mb-4">Submit outcomes via <code className="text-gold font-mono text-xs">POST /v1/outcome</code> to train the RL model and improve future decisions.</p>
+        <p className="text-sm text-muted mb-2">Submit outcomes via <code className="text-gold font-mono text-xs">POST /v1/outcome</code> to train the RL model and improve future decisions.</p>
+        <p className="text-sm text-muted mb-4">Every reported outcome trains the RL model. The more outcomes you submit, the more accurately Sgraal calibrates thresholds for your specific use case.</p>
         <pre className="bg-surface-light rounded-lg p-4 text-xs font-mono text-foreground overflow-x-auto">{`curl -X POST https://api.sgraal.com/v1/outcome \\
   -H "Authorization: Bearer sg_live_..." \\
   -H "Content-Type: application/json" \\
