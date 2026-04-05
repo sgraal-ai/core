@@ -1,6 +1,10 @@
 "use client";
 import { CollapsibleSection, KV } from "./CollapsibleSection";
 
+function Insight({ children }: { children: React.ReactNode }) {
+  return <p className="text-xs text-muted italic mt-2 mb-1" style={{ lineHeight: 1.5 }}>{children}</p>;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function DeepAnalytics({ data }: { data: Record<string, any> }) {
   if (!data) return null;
@@ -15,23 +19,27 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
           <KV label="half_life" value={data.ornstein_uhlenbeck.half_life} />
           <KV label="expected_value_5" value={data.ornstein_uhlenbeck.expected_value_5} />
           <KV label="equilibrium" value={data.ornstein_uhlenbeck.equilibrium} />
+          <Insight>Memory tends to revert to its average state. Half-life {data.ornstein_uhlenbeck.half_life ?? "?"} steps means it takes that long to recover halfway from a shock.</Insight>
         </>}
         {data.jump_diffusion && <>
           <p className="text-xs text-muted mb-2 mt-3">Jump-Diffusion</p>
           <KV label="jump_detected" value={data.jump_diffusion.jump_detected} />
           <KV label="flash_crash_risk" value={data.jump_diffusion.flash_crash_risk} />
           <KV label="jump_rate_lambda" value={data.jump_diffusion.jump_rate_lambda} />
+          <Insight>{data.jump_diffusion.jump_detected ? "Sudden memory discontinuity detected — possible data corruption or source switch." : "No sudden jumps detected."}</Insight>
         </>}
         {data.levy_flight && <>
           <p className="text-xs text-muted mb-2 mt-3">Levy Flight</p>
           <KV label="alpha" value={data.levy_flight.alpha} />
           <KV label="tail_index" value={data.levy_flight.tail_index} />
           <KV label="heavy_tail_risk" value={data.levy_flight.heavy_tail_risk} />
+          <Insight>{data.levy_flight.heavy_tail_risk ? "Extreme memory changes are possible — high volatility risk." : "Memory changes follow normal patterns."}</Insight>
         </>}
         {data.hmm_regime && <>
           <p className="text-xs text-muted mb-2 mt-3">HMM Regime</p>
           <KV label="current_state" value={data.hmm_regime.current_state} />
           <KV label="state_probability" value={data.hmm_regime.state_probability} />
+          <Insight>{data.hmm_regime.current_state === "CRITICAL" ? "Memory system is in a critical regime — degradation is accelerating." : "Memory system regime is stable."}</Insight>
         </>}
         {data.particle_filter && <>
           <p className="text-xs text-muted mb-2 mt-3">Particle Filter</p>
@@ -47,6 +55,7 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
           <p className="text-xs text-muted mb-2 mt-2">Free Energy</p>
           <KV label="F" value={data.free_energy.F} />
           <KV label="surprise" value={data.free_energy.surprise} />
+          <Insight>{Number(data.free_energy.F) > 2 ? "High free energy indicates the memory model is surprised by current data — beliefs may be outdated." : "Memory model matches current data well."}</Insight>
         </>}
         {data.mutual_information && <>
           <p className="text-xs text-muted mb-2 mt-3">Mutual Information</p>
@@ -63,6 +72,7 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
           <p className="text-xs text-muted mb-2 mt-3">Ergodicity</p>
           <KV label="delta" value={data.ergodicity.delta} />
           <KV label="ergodic" value={data.ergodicity.ergodic} />
+          <Insight>{data.ergodicity.ergodic ? "Memory behavior is predictable from historical patterns." : "Memory behavior is non-ergodic — time averages differ from ensemble averages. Historical patterns may not predict future behavior."}</Insight>
         </>}
       </CollapsibleSection>
 
@@ -82,6 +92,7 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
           <p className="text-xs text-muted mb-2 mt-3">Homology Torsion</p>
           <KV label="torsion_detected" value={data.homology_torsion.torsion_detected} />
           <KV label="hallucination_risk" value={data.homology_torsion.hallucination_risk} />
+          <Insight>{data.homology_torsion.torsion_detected ? "Topological anomaly detected — memory graph has contradictory loops." : "Memory graph topology is clean."}</Insight>
         </>}
         {data.persistence_landscape && <>
           <p className="text-xs text-muted mb-2 mt-3">Persistence Landscape</p>
@@ -138,6 +149,12 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
           <KV label="drift_sustained" value={data.trend_detection.drift_sustained} />
           {data.trend_detection.page_hinkley && <KV label="ph_alert" value={data.trend_detection.page_hinkley.alert} />}
           {data.trend_detection.bocpd && <KV label="regime_change" value={data.trend_detection.bocpd.regime_change} />}
+          <Insight>
+            {data.trend_detection.cusum_alert || data.trend_detection.ewma_alert
+              ? "Statistical drift detected — memory quality is declining over time."
+              : "No statistical drift detected."}
+            {data.trend_detection.page_hinkley?.alert && " Page-Hinkley change point detected — sudden shift in memory quality distribution."}
+          </Insight>
         </>}
         {data.shapley_values && <>
           <p className="text-xs text-muted mb-2 mt-3">Shapley Values (top 3)</p>
@@ -158,11 +175,13 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
           <p className="text-xs text-muted mb-2 mt-3">Sparse Merkle Tree</p>
           <KV label="integrity_verified" value={data.sparse_merkle.integrity_verified} />
           <KV label="tamper_detected" value={data.sparse_merkle.tamper_detected} />
+          <Insight>{data.sparse_merkle.integrity_verified ? "Merkle tree integrity verified — no tampering detected." : "WARNING: integrity check failed."}</Insight>
         </>}
         {data.security_transfer_entropy && <>
           <p className="text-xs text-muted mb-2 mt-3">Security Transfer Entropy</p>
           <KV label="leakage_detected" value={data.security_transfer_entropy.leakage_detected} />
           <KV label="risk_level" value={data.security_transfer_entropy.risk_level} />
+          {data.security_transfer_entropy.leakage_detected && <Insight>Security transfer entropy anomaly — possible data leakage pattern.</Insight>}
         </>}
         {data.dirichlet_process && <>
           <p className="text-xs text-muted mb-2 mt-3">Dirichlet Process</p>
@@ -178,6 +197,7 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
           <KV label="brier_score" value={data.calibration.brier_score} />
           <KV label="log_loss" value={data.calibration.log_loss} />
           <KV label="meta_score" value={data.calibration.meta_score} />
+          <Insight>{Number(data.calibration.brier_score) < 0.1 ? "Excellent calibration — predictions are highly accurate." : Number(data.calibration.brier_score) < 0.2 ? "Good calibration." : "Poor calibration — predictions need improvement."}</Insight>
         </>}
         {data.recursive_colimit && <>
           <p className="text-xs text-muted mb-2 mt-3">Recursive Colimit</p>
@@ -194,6 +214,7 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
           <KV label="score" value={data.stability_score.score} />
           <KV label="interpretation" value={data.stability_score.interpretation} />
           <KV label="component_count" value={data.stability_score.component_count} />
+          <Insight>{Number(data.stability_score.score) > 0.8 ? "Memory system is stable." : Number(data.stability_score.score) > 0.5 ? "Memory system is degrading — monitor closely." : "Memory system is unstable — immediate action recommended."}</Insight>
         </>}
         <KV label="r_total_normalized" value={data.r_total_normalized} />
       </CollapsibleSection>
