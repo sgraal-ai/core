@@ -40,6 +40,7 @@ export default function ConsciousnessPage() {
   const zoomRef = useRef<{ zoomIn: () => void; zoomOut: () => void; reset: () => void } | null>(null);
   const [mounted, setMounted] = useState(false);
   const [d3Ready, setD3Ready] = useState(false);
+  const [d3Error, setD3Error] = useState(false);
   const [nodes, setNodes] = useState<MemNode[]>([]);
   const [edges, setEdges] = useState<MemEdge[]>([]);
   const [selected, setSelected] = useState<MemNode | null>(null);
@@ -279,7 +280,7 @@ export default function ConsciousnessPage() {
 
   return (
     <div style={{ position: "relative" }}>
-      <Script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" integrity="sha384-su5kReKyYlIFrI62mbQRKXHzFobMa7BHp1cK6julLPbnYcCW9NIZKJiTODjLPeDh" crossOrigin="anonymous" onLoad={() => setD3Ready(true)} />
+      <Script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" integrity="sha384-su5kReKyYlIFrI62mbQRKXHzFobMa7BHp1cK6julLPbnYcCW9NIZKJiTODjLPeDh" crossOrigin="anonymous" onLoad={() => setD3Ready(true)} onError={() => setD3Error(true)} />
 
       <div className="flex items-start justify-between mb-4">
         <div>
@@ -291,6 +292,12 @@ export default function ConsciousnessPage() {
           <button onClick={handleSnapshot} style={BTN}>Take snapshot</button>
         </div>
       </div>
+
+      {d3Error && (
+        <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "12px 16px", marginBottom: "12px", fontSize: "14px", color: "#dc2626" }}>
+          Memory graph unavailable — visualization library failed to load.
+        </div>
+      )}
 
       {/* Legend */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "12px", fontSize: "12px" }}>

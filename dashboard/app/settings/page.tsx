@@ -30,7 +30,7 @@ export default function SettingsPage() {
   }
 
   function handleCopy() {
-    navigator.clipboard.writeText(savedKey);
+    try { navigator.clipboard.writeText(savedKey); } catch {}
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }

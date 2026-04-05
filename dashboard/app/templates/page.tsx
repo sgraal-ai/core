@@ -144,7 +144,7 @@ export default function TemplatesPage() {
   const filtered = category === "All" ? TEMPLATES : TEMPLATES.filter((t) => t.category === category);
 
   function copyCode(id: string, code: string) {
-    navigator.clipboard.writeText(code);
+    try { navigator.clipboard.writeText(code); } catch {}
     setCopied(id);
     setTimeout(() => setCopied(null), 2000);
   }

@@ -94,7 +94,7 @@ export default function AuditPage() {
       a.href = url;
       a.download = "sgraal-audit-export.csv";
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {}
   }
 

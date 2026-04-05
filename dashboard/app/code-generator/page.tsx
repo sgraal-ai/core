@@ -55,7 +55,7 @@ export default function CodeGeneratorPage() {
   const copyCode = () => {
     // Insert real key only into clipboard, never in DOM
     const withKey = apiKey ? code.replace(/sg_live_\.\.\./g, apiKey) : code;
-    navigator.clipboard.writeText(withKey);
+    try { navigator.clipboard.writeText(withKey); } catch {}
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

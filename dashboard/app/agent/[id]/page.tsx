@@ -549,38 +549,40 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       <div className="bg-surface border border-surface-light rounded-xl p-5 mb-10">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold">Memory Passport</h2>
-          <button onClick={async () => {
-            setPassportLoading(true);
-            try {
-              const res = await fetch(`${getApiUrl()}/v1/memory/passport/export`, {
-                method: "POST", headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ agent_id: agent.id }),
-              });
-              if (res.ok) setPassport(await res.json());
-            } catch {}
-            setPassportLoading(false);
-          }} disabled={passportLoading} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">
-            {passportLoading ? "Exporting..." : "Export Passport"}
-          </button>
-          <label className="text-sm px-4 py-1.5 rounded border border-surface-light text-muted hover:text-foreground transition cursor-pointer">
-            Import Passport
-            <input type="file" accept=".json" className="hidden" onChange={async (ev) => {
-              const file = ev.target.files?.[0];
-              if (!file) return;
-              setPassportImportMsg("");
+          <div className="flex items-center gap-2">
+            <button onClick={async () => {
+              setPassportLoading(true);
               try {
-                const text = await file.text();
-                const parsed = JSON.parse(text);
-                const res = await fetch(`${getApiUrl()}/v1/memory/passport/import`, {
-                  method: "POST",
-                  headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
-                  body: JSON.stringify({ agent_id: agent.id, passport_data: parsed }),
+                const res = await fetch(`${getApiUrl()}/v1/memory/passport/export`, {
+                  method: "POST", headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({ agent_id: agent.id }),
                 });
-                if (res.ok) setPassportImportMsg("success");
-                else setPassportImportMsg(`Error: ${res.status}`);
-              } catch (e) { setPassportImportMsg(e instanceof Error ? e.message : "Import failed"); }
-            }} />
-          </label>
+                if (res.ok) setPassport(await res.json());
+              } catch {}
+              setPassportLoading(false);
+            }} disabled={passportLoading} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">
+              {passportLoading ? "Exporting..." : "Export Passport"}
+            </button>
+            <label className="text-sm px-4 py-1.5 rounded border border-surface-light text-muted hover:text-foreground transition cursor-pointer">
+              Import Passport
+              <input type="file" accept=".json" className="hidden" onChange={async (ev) => {
+                const file = ev.target.files?.[0];
+                if (!file) return;
+                setPassportImportMsg("");
+                try {
+                  const text = await file.text();
+                  const parsed = JSON.parse(text);
+                  const res = await fetch(`${getApiUrl()}/v1/memory/passport/import`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({ agent_id: agent.id, passport_data: parsed }),
+                  });
+                  if (res.ok) setPassportImportMsg("success");
+                  else setPassportImportMsg(`Error: ${res.status}`);
+                } catch (e) { setPassportImportMsg(e instanceof Error ? e.message : "Import failed"); }
+              }} />
+            </label>
+          </div>
         </div>
         {passportImportMsg === "success" && <p className="text-sm mb-3" style={{ color: "#16a34a" }}>&#x2713; Passport imported successfully</p>}
         {passportImportMsg && passportImportMsg !== "success" && <p className="text-sm text-red-400 mb-3">{passportImportMsg}</p>}

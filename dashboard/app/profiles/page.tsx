@@ -49,7 +49,10 @@ export default function ProfilesPage() {
         headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
         body: JSON.stringify({ active: !wasActive }),
       });
-    } catch {}
+    } catch {
+      setToast({ message: "Failed to update profile", type: "error" });
+      return;
+    }
     setProfiles((prev) => prev.map((p) => p.id === id ? { ...p, active: !p.active } : p));
     setToast({ message: wasActive ? `${current?.title} deactivated` : `${current?.title} activated`, type: "success" });
   }

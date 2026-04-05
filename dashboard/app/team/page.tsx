@@ -28,6 +28,7 @@ export default function TeamPage() {
   const [inviteRole, setInviteRole] = useState("developer");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
@@ -45,11 +46,12 @@ export default function TeamPage() {
     const apiKey = getApiKey();
     setHasKey(!!apiKey);
     setStoredKey(apiKey);
-    if (!apiKey) { return; }
+    if (!apiKey) { setLoading(false); return; }
     try {
       const mRes = await fetch(`${apiUrl()}/v1/team/members`, { headers: apiHeaders() });
       if (mRes.ok) { const d = await mRes.json(); setMembers(Array.isArray(d) ? d : d.members ?? []); }
     } catch {}
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -88,6 +90,14 @@ export default function TeamPage() {
       <h1 className="text-2xl font-bold mb-1">Team</h1>
       <p className="text-muted text-sm mb-6">Manage access to your Sgraal workspace.</p>
       <ConnectKeyState />
+    </div>
+  );
+
+  if (loading) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Team</h1>
+      <p className="text-muted text-sm mb-6">Manage access to your Sgraal workspace.</p>
+      <LoadingSkeleton rows={3} />
     </div>
   );
 
@@ -185,7 +195,7 @@ export default function TeamPage() {
               {storedKey.length > 16 ? storedKey.slice(0, 12) + "..." + storedKey.slice(-4) : storedKey}
             </span>
             <button
-              onClick={() => { navigator.clipboard.writeText(storedKey); setCopied("apikey"); setTimeout(() => setCopied(null), 2000); }}
+              onClick={() => { try { navigator.clipboard.writeText(storedKey); } catch {} setCopied("apikey"); setTimeout(() => setCopied(null), 2000); }}
               style={{ fontSize: "13px", color: copied === "apikey" ? "#c9a962" : "#6b7280", cursor: "pointer", background: "none", border: "none", fontWeight: 500 }}
             >
               {copied === "apikey" ? "Copied!" : "Copy"}

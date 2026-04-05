@@ -49,17 +49,16 @@ export default function WebhooksPage() {
   async function saveWebhook() {
     if (!newUrl.startsWith("https://")) { setToast({ message: "URL must start with https://", type: "error" }); return; }
     const apiKey = getApiKey();
-    if (apiKey) {
-      const apiUrl = getApiUrl();
-      try {
-        const res = await fetch(`${apiUrl}/v1/webhooks/learning-events`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ url: newUrl, events: newEvents, secret: newSecret || undefined }),
-        });
-        if (!res.ok) return;
-      } catch { return; }
-    }
+    if (!apiKey) { setToast({ message: "API key required", type: "error" }); return; }
+    const apiUrl = getApiUrl();
+    try {
+      const res = await fetch(`${apiUrl}/v1/webhooks/learning-events`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ url: newUrl, events: newEvents, secret: newSecret || undefined }),
+      });
+      if (!res.ok) return;
+    } catch { return; }
     setHooks((prev) => [...prev, { id: `wh_${Date.now()}`, url: newUrl, events: newEvents, active: true, last_triggered: "Never" }]);
     setShowModal(false);
     setNewUrl("");

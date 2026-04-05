@@ -20,7 +20,7 @@ export default function MigratePage() {
 
   function copyCmd() {
     if (!source) return;
-    navigator.clipboard.writeText(source.cmd);
+    try { navigator.clipboard.writeText(source.cmd); } catch {}
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }

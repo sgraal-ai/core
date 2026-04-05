@@ -149,7 +149,7 @@ export function NavBar() {
   }
 
   function handleCopy() {
-    navigator.clipboard.writeText(apiKey);
+    try { navigator.clipboard.writeText(apiKey); } catch {}
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
