@@ -55,6 +55,7 @@ export async function fetchPreflight(
     poisoning_suspected: data.poisoning_suspected ?? false,
     tamper_detected: data.tamper_detected ?? false,
     hallucination_risk: data.hallucination_risk ?? "low",
+    outcome_id: data.outcome_id,
   };
 }
 
