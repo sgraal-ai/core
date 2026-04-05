@@ -52,7 +52,7 @@ export default function WebhooksPage() {
     if (apiKey) {
       const apiUrl = getApiUrl();
       try {
-        const res = await fetch(`${apiUrl}/v1/webhooks`, {
+        const res = await fetch(`${apiUrl}/v1/webhooks/learning-events`, {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ url: newUrl, events: newEvents, secret: newSecret || undefined }),

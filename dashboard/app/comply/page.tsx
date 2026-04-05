@@ -324,7 +324,7 @@ export default function ComplyPage() {
                 a.href = url;
                 a.download = `sgraal-audit-${fmt}.${fmt === "elastic" ? "json" : "log"}`;
                 a.click();
-                URL.revokeObjectURL(url);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
               } catch {}
             }} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition capitalize">
               Export {fmt}

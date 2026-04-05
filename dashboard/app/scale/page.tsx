@@ -280,7 +280,7 @@ export default function ScalePage() {
               const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a"); a.href = url; a.download = "sgraal-weights.json"; a.click();
-              URL.revokeObjectURL(url);
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
               setToast({ message: "Weights exported", type: "success" });
             } catch { setToast({ message: "Export failed", type: "error" }); }
           }} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition">Export Weights</button>
@@ -392,7 +392,7 @@ export default function ScalePage() {
               const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a"); a.href = url; a.download = "sgraal-store-export.json"; a.click();
-              URL.revokeObjectURL(url);
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
               setToast({ message: "Store exported", type: "success" });
             } catch { setToast({ message: "Export failed", type: "error" }); }
           }} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition">Export Store</button>

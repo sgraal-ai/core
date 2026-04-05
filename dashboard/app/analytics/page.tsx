@@ -102,7 +102,7 @@ export default function AnalyticsPage() {
   // Derive decision breakdown from waste data
   const totalDecisions = summary.total_calls || 1;
   const blockPct = summary.block_rate ?? 0;
-  const warnPct = totalDecisions > 0 ? Math.round((waste.warn_retrievals / totalDecisions) * 100) : 0;
+  const warnPct = Math.min(totalDecisions > 0 ? Math.round((waste.warn_retrievals / totalDecisions) * 100) : 0, 100 - blockPct);
   const usePct = Math.max(0, 100 - blockPct - warnPct);
 
   const decisions = [

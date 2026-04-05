@@ -38,7 +38,7 @@ export default function TracesPage() {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = `sgraal-traces-${format}.json`; a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       setToast({ message: `${format.toUpperCase()} exported`, type: "success" });
     } catch { setToast({ message: "Export failed", type: "error" }); }
   }

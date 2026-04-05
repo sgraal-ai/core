@@ -17,6 +17,7 @@ export default function DashboardHome() {
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [auditError, setAuditError] = useState("");
 
   useEffect(() => {
     setMounted(true);
@@ -92,7 +93,7 @@ export default function DashboardHome() {
             }
           }
         }
-      } catch {}
+      } catch (e) { setAuditError("Could not load fleet from audit log"); }
 
       // Step 2: Fallback to DEMO_FLEET
       try {
@@ -141,6 +142,10 @@ export default function DashboardHome() {
     <div>
       <h1 className="text-2xl font-bold mb-1">Decision Readiness Dashboard</h1>
       <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
+
+      {auditError && (
+        <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-lg px-4 py-3 mb-6 text-sm text-yellow-500">{auditError}</div>
+      )}
 
       {isLive && (
         <div className="bg-green-400/10 border border-green-400/30 rounded-lg px-4 py-3 mb-6 text-sm text-green-400 flex items-center gap-2">

@@ -45,6 +45,8 @@ function NavDropdown({ label, items, openKey, onToggle }: {
       <button
         onClick={() => onToggle(label)}
         className="flex items-center gap-1 text-muted hover:text-foreground transition text-sm"
+        aria-haspopup="true"
+        aria-expanded={isOpen}
       >
         {label}
         <span
@@ -193,6 +195,7 @@ export function NavBar() {
             <button
               onClick={handleCopy}
               className="transition-colors"
+              aria-label="Copy API key to clipboard"
               style={{ fontSize: "12px", color: copied ? "#c9a962" : "#6b7280", cursor: "pointer" }}
               onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "#c9a962"; }}
               onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "#6b7280"; }}
