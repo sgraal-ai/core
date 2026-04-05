@@ -40,9 +40,16 @@ export default function ProfilesPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  function toggleProfile(id: string) {
+  async function toggleProfile(id: string) {
     const current = profiles.find((p) => p.id === id);
     const wasActive = current?.active ?? false;
+    try {
+      await fetch(`${getApiUrl()}/v1/compliance/profiles/${id}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !wasActive }),
+      });
+    } catch {}
     setProfiles((prev) => prev.map((p) => p.id === id ? { ...p, active: !p.active } : p));
     setToast({ message: wasActive ? `${current?.title} deactivated` : `${current?.title} activated`, type: "success" });
   }

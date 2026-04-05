@@ -147,7 +147,9 @@ export default function ConsciousnessPage() {
       .attr("font-size", "9px").attr("fill", "#6b7280").attr("text-anchor", "middle").attr("dy", (d: D3Node) => -(d.contribution + 8));
 
     // Tooltip
+    d3.select(".sgraal-tooltip").remove();
     const tooltip = d3.select("body").append("div")
+      .attr("class", "sgraal-tooltip")
       .style("position", "absolute").style("background", "#ffffff").style("border", "1px solid #e5e7eb")
       .style("border-radius", "6px").style("padding", "8px 12px").style("font-size", "12px")
       .style("pointer-events", "none").style("opacity", "0").style("box-shadow", "0 4px 12px rgba(0,0,0,0.1)")
@@ -186,11 +188,12 @@ export default function ConsciousnessPage() {
 
   async function handleScan() {
     const apiKey = getApiKey();
+    if (!apiKey) return;
     const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/memory/scan`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiKey || "sg_demo_playground"}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ agent_id: "consciousness", scan_depth: "quick" }),
       });
       if (res.ok) {
@@ -207,11 +210,12 @@ export default function ConsciousnessPage() {
 
   async function handleSnapshot() {
     const apiKey = getApiKey();
+    if (!apiKey) return;
     const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/memory/snapshot`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiKey || "sg_demo_playground"}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ agent_id: "consciousness", label: "manual snapshot" }),
       });
       if (res.ok) {

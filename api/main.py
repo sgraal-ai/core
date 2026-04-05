@@ -251,6 +251,10 @@ def auth_github(response: Response):
     """Redirect to GitHub OAuth with CSRF state token."""
     if not GITHUB_CLIENT_ID:
         raise HTTPException(status_code=503, detail="GitHub OAuth not configured")
+    # Cleanup expired states (older than 10 minutes)
+    _now = _time.time()
+    expired = [k for k, v in _oauth_states.items() if _now - v > 600]
+    for k in expired: del _oauth_states[k]
     state = secrets.token_urlsafe(32)
     _oauth_states[state] = _time.time()
     response = RedirectResponse(
@@ -336,6 +340,10 @@ def exchange_oauth_token(token: str, request: Request):
     """Exchange one-time token for API key. Rate limited: 5/min per IP, 429 after 3 failed."""
     ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or request.headers.get("x-real-ip", "") or (request.client.host if request.client else "unknown")
     now = _time.time()
+    # Cleanup old rate limit entries (older than 1 hour)
+    for ip_key in list(_exchange_attempts.keys()):
+        _exchange_attempts[ip_key] = [t for t in _exchange_attempts[ip_key] if now - t < 3600]
+        if not _exchange_attempts[ip_key]: del _exchange_attempts[ip_key]
     attempts = _exchange_attempts.get(ip, [])
     attempts = [t for t in attempts if now - t < 60]
     if len(attempts) >= 5:

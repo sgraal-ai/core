@@ -57,11 +57,12 @@ export default function TeamPage() {
   async function sendInvite() {
     if (!inviteEmail) return;
     try {
-      await fetch(`${apiUrl()}/v1/team/invite`, {
+      const res = await fetch(`${apiUrl()}/v1/team/invite`, {
         method: "POST", headers: apiHeaders(),
         body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
       });
-    } catch {}
+      if (!res.ok) return;
+    } catch { return; }
     setMembers((prev) => [...prev, { email: inviteEmail, role: ROLES.find((r) => r.id === inviteRole)?.label ?? inviteRole, joined: "Just now", status: "Pending" }]);
     setShowInviteModal(false);
     setInviteEmail("");
@@ -69,7 +70,13 @@ export default function TeamPage() {
     setToast({ message: `Invite sent to ${inviteEmail}`, type: "success" });
   }
 
-  function removeMember(email: string) {
+  async function removeMember(email: string) {
+    try {
+      await fetch(`${apiUrl()}/v1/team/members/${encodeURIComponent(email)}`, {
+        method: "DELETE",
+        headers: apiHeaders(),
+      });
+    } catch {}
     setMembers((prev) => prev.filter((m) => m.email !== email));
     setToast({ message: `Removed ${email}`, type: "success" });
   }

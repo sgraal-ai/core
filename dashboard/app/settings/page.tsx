@@ -73,7 +73,7 @@ export default function SettingsPage() {
           <div>
             <div className="flex items-center gap-3 mb-3">
               <input
-                type="text"
+                type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="sg_live_..."

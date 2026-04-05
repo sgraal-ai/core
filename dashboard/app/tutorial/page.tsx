@@ -46,6 +46,7 @@ export default function TutorialPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${DEMO_KEY}` },
         body: JSON.stringify({ memory_state: [entry] }),
       });
+      if (!r.ok) return;
       const data = await r.json();
       setResult(data);
       const nc = callCount + 1;

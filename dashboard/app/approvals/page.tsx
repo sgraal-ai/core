@@ -128,7 +128,8 @@ export default function ApprovalsPage() {
   }
 
   async function approveDecision(id: string) {
-    const apiKey = getApiKey() || "sg_demo_playground";
+    const apiKey = getApiKey();
+    if (!apiKey) { showToast("API key required", "error"); return; }
     const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/approvals/${id}/approve`, {
@@ -147,7 +148,8 @@ export default function ApprovalsPage() {
   }
 
   async function rejectDecision(id: string) {
-    const apiKey = getApiKey() || "sg_demo_playground";
+    const apiKey = getApiKey();
+    if (!apiKey) { showToast("API key required", "error"); return; }
     const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/v1/approvals/${id}/reject`, {

@@ -39,7 +39,16 @@ export default function ConflictsPage() {
 
   const pendingCount = conflicts.filter((c) => c.status === "pending").length;
 
-  function handleResolve(id: string) {
+  async function handleResolve(id: string) {
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+    try {
+      await fetch(`${getApiUrl()}/v1/conflicts/${id}/resolve`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy }),
+      });
+    } catch {}
     setConflicts((prev) => prev.map((c) => (c.id === id ? { ...c, status: "resolved" as const } : c)));
   }
 

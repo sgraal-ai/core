@@ -54,12 +54,13 @@ export default function WebhooksPage() {
     if (apiKey) {
       const apiUrl = getApiUrl();
       try {
-        await fetch(`${apiUrl}/v1/webhooks`, {
+        const res = await fetch(`${apiUrl}/v1/webhooks`, {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ url: newUrl, events: newEvents, secret: newSecret || undefined }),
         });
-      } catch {}
+        if (!res.ok) return;
+      } catch { return; }
     }
     setHooks((prev) => [...prev, { id: `wh_${Date.now()}`, url: newUrl, events: newEvents, active: true, last_triggered: "Never" }]);
     setShowModal(false);
