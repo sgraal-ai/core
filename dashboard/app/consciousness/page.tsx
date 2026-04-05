@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Script from "next/script";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
 import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
@@ -344,17 +344,29 @@ export default function ConsciousnessPage() {
           {/* Mock component breakdown */}
           <div style={{ marginBottom: "24px" }}>
             <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "8px" }}>Component Breakdown</p>
-            {["s_freshness", "s_drift", "s_provenance", "s_interference", "s_propagation", "r_recall", "r_encode", "r_belief", "s_relevance", "r_recovery"].map((c) => {
-              const v = Math.round(Math.random() * selected.omega + 10);
-              return (
-                <div key={c} style={{ marginBottom: "6px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#6b7280", marginBottom: "2px" }}><span>{c}</span><span>{Math.min(v, 100)}</span></div>
-                  <div style={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", overflow: "hidden" }}>
-                    <div style={{ width: `${Math.min(v, 100)}%`, height: "100%", background: v > 60 ? "#dc2626" : v > 30 ? "#c9a962" : "#16a34a", borderRadius: "2px" }} />
+            {(() => {
+              const components = ["s_freshness", "s_drift", "s_provenance", "s_interference", "s_propagation", "r_recall", "r_encode", "r_belief", "s_relevance", "r_recovery"];
+              const stableValues: Record<string, number> = {};
+              for (const c of components) {
+                const str = selected.id + c;
+                let hash = 0;
+                for (let i = 0; i < str.length; i++) {
+                  hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+                }
+                stableValues[c] = Math.round(((Math.abs(hash) % 1000) / 1000) * selected.omega + 10);
+              }
+              return components.map((c) => {
+                const v = stableValues[c];
+                return (
+                  <div key={c} style={{ marginBottom: "6px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#6b7280", marginBottom: "2px" }}><span>{c}</span><span>{Math.min(v, 100)}</span></div>
+                    <div style={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", overflow: "hidden" }}>
+                      <div style={{ width: `${Math.min(v, 100)}%`, height: "100%", background: v > 60 ? "#dc2626" : v > 30 ? "#c9a962" : "#16a34a", borderRadius: "2px" }} />
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
 
           {selected.omega > 30 && (

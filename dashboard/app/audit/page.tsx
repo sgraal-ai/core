@@ -83,11 +83,25 @@ export default function AuditPage() {
 
   const totalEntries = sorted.length;
 
-  function exportCsv() {
+  async function exportCsv() {
     const apiKey = getApiKey();
     if (!apiKey) return;
     const apiUrl = getApiUrl();
-    window.open(`${apiUrl}/v1/audit-log/export?format=csv`, "_blank");
+    try {
+      const res = await fetch(`${apiUrl}/v1/audit-log/export?format=csv`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const content = (data.data ?? []).join("\n");
+      const blob = new Blob([content], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "sgraal-audit-export.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {}
   }
 
   if (!mounted) return null;

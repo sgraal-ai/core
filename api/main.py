@@ -7,6 +7,7 @@ from typing import Literal, Optional
 import sys, os, math, re
 import secrets
 import hashlib
+import urllib.parse
 import hmac as _hmac
 import json as _json
 import threading
@@ -297,7 +298,7 @@ def auth_github_callback(code: str = Query(...), state: str = Query(...), sgraal
         # Check if email already has a key (idempotent)
         if SUPABASE_URL and SUPABASE_SERVICE_KEY:
             existing = http_requests.get(
-                f"{SUPABASE_URL}/rest/v1/api_keys?email=eq.{primary_email}&select=id",
+                f"{SUPABASE_URL}/rest/v1/api_keys?email=eq.{urllib.parse.quote(primary_email, safe='')}&select=id",
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
                 timeout=5,
             )
@@ -331,10 +332,9 @@ def auth_github_callback(code: str = Query(...), state: str = Query(...), sgraal
 _exchange_attempts: dict[str, list] = {}  # ip → [timestamps]
 
 @app.get("/v1/auth/exchange/{token}")
-def exchange_oauth_token(token: str):
+def exchange_oauth_token(token: str, request: Request):
     """Exchange one-time token for API key. Rate limited: 5/min per IP, 429 after 3 failed."""
-    # Rate limit by IP (use "unknown" without real IP in test context)
-    ip = "unknown"
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or request.headers.get("x-real-ip", "") or (request.client.host if request.client else "unknown")
     now = _time.time()
     attempts = _exchange_attempts.get(ip, [])
     attempts = [t for t in attempts if now - t < 60]

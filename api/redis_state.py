@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import logging
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def redis_set(key: str, value, ttl: int = 0):
     try:
         import requests
         data = json.dumps(value)
-        url = f"{UPSTASH_REDIS_URL}/SET/{key}/{data}"
+        url = f"{UPSTASH_REDIS_URL}/SET/{key}/{urllib.parse.quote(data, safe='')}"
         if ttl > 0:
             url += f"/EX/{ttl}"
         requests.post(url, headers=_headers(), timeout=2)
@@ -48,11 +49,10 @@ def redis_setnx(key: str, value, ttl: int = 0):
         return
     try:
         import requests
-        # Check existence first
-        r = requests.get(f"{UPSTASH_REDIS_URL}/EXISTS/{key}", headers=_headers(), timeout=2)
-        if r.ok and r.json().get("result", 0) > 0:
-            return  # Key exists — don't overwrite
-        redis_set(key, value, ttl)
+        data = json.dumps(value)
+        r = requests.post(f"{UPSTASH_REDIS_URL}/SETNX/{key}/{urllib.parse.quote(data, safe='')}", headers=_headers(), timeout=2)
+        if r.ok and r.json().get("result", 0) == 1 and ttl > 0:
+            requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{key}/{ttl}", headers=_headers(), timeout=2)
     except Exception as e:
         logger.debug("redis_setnx %s failed: %s", key, e)
 
