@@ -51,6 +51,10 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   const [passport, setPassport] = useState<Record<string, unknown> | null>(null);
   const [passportLoading, setPassportLoading] = useState(false);
 
+  // Outcome
+  const [outcomeSubmitted, setOutcomeSubmitted] = useState(false);
+  const [outcomeError, setOutcomeError] = useState("");
+
   useEffect(() => {
     setMounted(true);
     const apiKey = getApiKey();
@@ -552,6 +556,52 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           <RepairPlanList plan={agent.repair_plan ?? []} />
         </div>
       </div>
+
+      {/* Submit Outcome */}
+      {!!(agent as unknown as Record<string, unknown>).outcome_id && (
+        <div className="bg-surface border border-surface-light rounded-xl p-5 mb-10">
+          <h2 className="text-lg font-semibold mb-2">Submit Outcome</h2>
+          <p className="text-sm text-muted mb-3">Report whether this agent{"'"}s action succeeded or failed. Every outcome trains the RL model to make better decisions.</p>
+          <p className="text-xs text-muted font-mono mb-4">outcome_id: {String((agent as unknown as Record<string, unknown>).outcome_id)}</p>
+          {outcomeSubmitted ? (
+            <p className="text-sm font-semibold" style={{ color: "#16a34a" }}>&#x2713; Outcome submitted — RL model updated</p>
+          ) : (
+            <div>
+              <div className="flex gap-3">
+                <button onClick={async () => {
+                  setOutcomeError("");
+                  try {
+                    const res = await fetch(`${getApiUrl()}/v1/outcome`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({ outcome_id: (agent as unknown as Record<string, unknown>).outcome_id, status: "success", failure_components: [] }),
+                    });
+                    if (res.ok) setOutcomeSubmitted(true);
+                    else setOutcomeError(`Error: ${res.status}`);
+                  } catch (e) { setOutcomeError(e instanceof Error ? e.message : "Failed"); }
+                }} className="text-sm font-semibold px-5 py-2 rounded" style={{ background: "#16a34a", color: "white", border: "none", cursor: "pointer" }}>
+                  &#x2713; Success
+                </button>
+                <button onClick={async () => {
+                  setOutcomeError("");
+                  try {
+                    const res = await fetch(`${getApiUrl()}/v1/outcome`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({ outcome_id: (agent as unknown as Record<string, unknown>).outcome_id, status: "failure", failure_components: [] }),
+                    });
+                    if (res.ok) setOutcomeSubmitted(true);
+                    else setOutcomeError(`Error: ${res.status}`);
+                  } catch (e) { setOutcomeError(e instanceof Error ? e.message : "Failed"); }
+                }} className="text-sm font-semibold px-5 py-2 rounded" style={{ background: "#dc2626", color: "white", border: "none", cursor: "pointer" }}>
+                  &#x2717; Failed
+                </button>
+              </div>
+              {outcomeError && <p className="text-sm text-red-400 mt-2">{outcomeError}</p>}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mb-10">
         <h2 className="text-lg font-semibold mb-4">
