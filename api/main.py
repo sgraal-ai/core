@@ -128,6 +128,10 @@ def verify_api_key(
     cache_key = f"api_key_valid:{key_hash[:16]}"
 
     # Check Redis cache first
+    # NOTE: Cached tier/plan may be stale for up to 5 minutes (TTL=300s) after
+    # a plan change in Supabase. This is acceptable — plan changes are rare.
+    # If a Stripe webhook handler is added later, it should call
+    # redis_delete(f"api_key_valid:{key_hash[:16]}") to invalidate immediately.
     try:
         cached = redis_get(cache_key)
         if cached and isinstance(cached, dict) and cached.get("valid"):
