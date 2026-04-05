@@ -196,17 +196,17 @@ export default function ApprovalsPage() {
           <p className="text-muted text-sm">Pending ASK_USER decisions waiting for human review.</p>
         </div>
         <div className="text-right">
-          <p style={{ fontSize: "12px", color: "#6b7280" }}>Auto-refreshing every 30s</p>
-          <p style={{ fontSize: "12px", color: "#6b7280" }}>Updated {timeAgo}</p>
+          <p className="text-xs text-muted">Auto-refreshing every 30s</p>
+          <p className="text-xs text-muted">Updated {timeAgo}</p>
         </div>
       </div>
 
       {/* Empty state */}
       {showEmpty && (
         <div style={{ textAlign: "center", padding: "80px 0" }}>
-          <p style={{ fontSize: "48px", color: "#16a34a" }}>✓</p>
-          <h3 style={{ fontSize: "20px", color: "#0B0F14", marginTop: "8px" }}>No pending approvals</h3>
-          <p style={{ fontSize: "14px", color: "#6b7280", marginTop: "8px" }}>
+          <p className="text-green-600" style={{ fontSize: "48px" }}>✓</p>
+          <h3 className="text-xl font-bold text-foreground" style={{ marginTop: "8px" }}>No pending approvals</h3>
+          <p className="text-sm text-muted" style={{ marginTop: "8px" }}>
             When an agent receives ASK_USER, it will appear here for your review.
           </p>
         </div>
@@ -232,7 +232,7 @@ export default function ApprovalsPage() {
                 <span style={{ fontFamily: "monospace", fontSize: "14px", color: "#0B0F14", fontWeight: 600 }}>
                   {item.agent_id}
                 </span>
-                <span style={{ fontSize: "13px", color: "#6b7280" }}>{item.timestamp}</span>
+                <span className="text-xs text-muted">{item.timestamp}</span>
               </div>
 
               {/* Badges */}

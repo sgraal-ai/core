@@ -405,6 +405,10 @@ export default function ScalePage() {
                 const text = await file.text();
                 const parsed = JSON.parse(text);
                 const entries = parsed.data ?? parsed.entries ?? (Array.isArray(parsed) ? parsed : []);
+                if (!Array.isArray(entries)) {
+                  setToast({ message: "Invalid format — expected array of memory entries", type: "error" });
+                  return;
+                }
                 const res = await fetch(`${base()}/v1/store/import`, { method: "POST", headers: headers(), body: JSON.stringify(entries) });
                 if (res.ok) setToast({ message: "Store imported", type: "success" });
                 else setToast({ message: `Import failed: ${res.status}`, type: "error" });

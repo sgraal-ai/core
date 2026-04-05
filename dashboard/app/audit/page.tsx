@@ -58,7 +58,7 @@ export default function AuditPage() {
       if (domainFilter) params.set("domain", domainFilter);
       if (dateRange) params.set("range", dateRange);
       const res = await fetch(`${apiUrl}/v1/audit-log?${params}`, { headers: { Authorization: `Bearer ${apiKey}` } });
-      if (res.ok) { const d = await res.json(); setEntries(Array.isArray(d) ? d : d.entries ?? []); setTotalCount(d.count ?? (Array.isArray(d) ? d.length : (d.entries ?? []).length)); }
+      if (res.ok) { const d = await res.json(); const parsed = Array.isArray(d) ? d : d.entries ?? []; setEntries(parsed); setTotalCount(d.count ?? parsed.length); }
     } catch {}
     setLoading(false);
   }, [agentFilter, decisionFilter, domainFilter, page, dateRange]);

@@ -2905,6 +2905,8 @@ def _check_namespace_firewall(kh: str, agent_id: str, namespace: str, omega: flo
             "reason": "not_authorized", "timestamp": _time.time()})
         if len(_firewall_violations[kh]) > 1000: _firewall_violations[kh] = _firewall_violations[kh][-1000:]
         return "agent not authorized to write to this namespace"
+    # require_preflight_score: maximum allowed omega score.
+    # Higher omega = higher risk. Entries with omega above this threshold are blocked.
     if omega > rule.get("require_preflight_score", 70):
         if kh not in _firewall_violations: _firewall_violations[kh] = []
         _firewall_violations[kh].append({"agent_id": agent_id, "namespace": namespace,
