@@ -9002,6 +9002,13 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _profile = "standard"  # test keys default to standard for backward compat
         else:
             _profile = "compact"  # compact is now the default for free/starter tiers
+    # Alias fields for dashboard convenience
+    _rp = response.get("repair_plan")
+    response["heal_decision"] = _rp[0]["action"] if _rp and isinstance(_rp, list) and len(_rp) > 0 and isinstance(_rp[0], dict) else "NONE"
+    _ss = response.get("stability_score")
+    _lv = response.get("lyapunov_stability")
+    response["stability_gauge"] = _ss["score"] if _ss and isinstance(_ss, dict) and "score" in _ss else (_lv["V"] if _lv and isinstance(_lv, dict) and "V" in _lv else 0.0)
+
     response["response_profile_used"] = _profile
     if _profile == "compact":
         _compact_keys = {"omega_mem_final", "omega_adjusted", "recommended_action", "assurance_score",
@@ -9017,7 +9024,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "forecast_available", "prune_recommended",
                          "divergence_check_available", "persona_conflict", "persona_violation",
                          "decision_based_on", "degraded_mode", "degraded_features",
-                         "auto_inference_suppressed"}
+                         "auto_inference_suppressed", "heal_decision", "stability_gauge"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
