@@ -26,6 +26,7 @@ export default function ScalePage() {
   const [weights, setWeights] = useState<Record<string, unknown> | null>(null);
   const [lineageData, setLineageData] = useState<Record<string, { count: number; format: string }>>({});
   const [fleetAgents, setFleetAgents] = useState<Array<{ id: string; name: string }>>([]);
+  const [currentWeights, setCurrentWeights] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
@@ -70,6 +71,7 @@ export default function ScalePage() {
       fetch(`${u}/v1/learning/qtable-status`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setQtable(d)).catch(() => {}),
       fetch(`${u}/v1/alerts/predictive`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => { if (d) setAlerts(Array.isArray(d) ? d : d.alerts ?? []); }).catch(() => {}),
       fetch(`${u}/v1/weights/export`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setWeights(d)).catch(() => {}),
+      fetch(`${u}/v1/weights/current`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setCurrentWeights(d)).catch(() => {}),
       ...agents.map(agent =>
         fetch(`${u}/v1/memory/health-history?agent_id=${agent.id}`, { headers: h })
           .then(r => r.ok ? r.json() : null)
@@ -400,6 +402,56 @@ export default function ScalePage() {
             })()}
           </tbody>
         </table>
+      </div>
+
+      {/* Current Weights */}
+      <div className={`${CARD} mb-6`}>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">Current Weights</h2>
+          {currentWeights && (
+            <span className="text-xs font-mono px-2 py-1 rounded" style={{
+              background: currentWeights.calibrated ? "rgba(22,163,74,0.1)" : "rgba(107,114,128,0.1)",
+              color: currentWeights.calibrated ? "#16a34a" : "#6b7280",
+            }}>
+              {currentWeights.calibrated ? "Calibrated" : "Baseline"}
+            </span>
+          )}
+        </div>
+        <p className="text-sm text-muted mb-4">Weights adjust automatically as you submit outcomes. Drift shows how much the system has learned.</p>
+        {currentWeights && currentWeights.components ? (() => {
+          const comps = currentWeights.components as Record<string, { baseline: number; current: number; drift: number }>;
+          const totalDrift = Number(currentWeights.total_drift ?? 0);
+          const TH_S: React.CSSProperties = { fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "6px 12px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em" };
+          const TD_S: React.CSSProperties = { fontSize: "13px", padding: "8px 12px", borderBottom: "1px solid #f5f4f0", fontFamily: "monospace" };
+          return (
+            <div>
+              <table className="w-full" style={{ borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    {["Component", "Baseline", "Current", "Drift"].map(h => <th key={h} style={TH_S}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(comps).map(([k, v]) => {
+                    const absDrift = Math.abs(v.drift);
+                    const driftColor = absDrift === 0 ? "#16a34a" : absDrift < 0.01 ? "#c9a962" : "#dc2626";
+                    return (
+                      <tr key={k}>
+                        <td style={{ ...TD_S, fontWeight: 600 }}>{k}</td>
+                        <td style={TD_S}>{v.baseline}</td>
+                        <td style={TD_S}>{v.current}</td>
+                        <td style={{ ...TD_S, color: driftColor, fontWeight: 600 }}>{v.drift > 0 ? "+" : ""}{v.drift}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="text-xs text-muted mt-3">Total drift: <strong className="font-mono">{totalDrift}</strong> — Domain: <strong>{String(currentWeights.domain ?? "general")}</strong></p>
+            </div>
+          );
+        })() : (
+          <p className="text-sm text-muted">Submit outcomes to begin weight calibration.</p>
+        )}
       </div>
 
       {/* Store Export/Import */}
