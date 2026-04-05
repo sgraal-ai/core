@@ -39,7 +39,12 @@ export function DeepAnalytics({ data }: { data: Record<string, any> }) {
           <p className="text-xs text-muted mb-2 mt-3">HMM Regime</p>
           <KV label="current_state" value={data.hmm_regime.current_state} />
           <KV label="state_probability" value={data.hmm_regime.state_probability} />
-          <Insight>{data.hmm_regime.current_state === "CRITICAL" ? "Memory system is in a critical regime — degradation is accelerating." : "Memory system regime is stable."}</Insight>
+          <Insight>{
+            data.hmm_regime.current_state === "CRITICAL" ? "Memory system is in a critical regime — degradation is accelerating." :
+            data.hmm_regime.current_state === "DEGRADING" ? "Memory system is degrading — intervention recommended before it reaches critical state." :
+            data.hmm_regime.current_state === "STABLE" || data.hmm_regime.current_state === "NORMAL" ? "Memory system regime is stable." :
+            `Memory system regime: ${data.hmm_regime.current_state}.`
+          }</Insight>
         </>}
         {data.particle_filter && <>
           <p className="text-xs text-muted mb-2 mt-3">Particle Filter</p>
