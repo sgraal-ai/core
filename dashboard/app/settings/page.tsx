@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { getApiKey, setApiKey as saveApiKey, removeApiKey } from "../lib/storage";
 
 export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");

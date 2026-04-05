@@ -235,18 +235,22 @@ export default function ProtectPage() {
                 })}
               </tbody>
             </table>
-            {redTeamGrade && (
+            {redTeamGrade && (() => {
+              const gradeGood = ["A", "B"].includes(redTeamGrade);
+              const gradeOk = ["A", "B", "C"].includes(redTeamGrade);
+              return (
               <>
                 <p className="mt-4 text-sm">
-                  Overall grade: <strong className="text-lg" style={{ color: redTeamGrade <= "B" ? "#16a34a" : redTeamGrade <= "C" ? "#c9a962" : "#dc2626" }}>{redTeamGrade}</strong>
+                  Overall grade: <strong className="text-lg" style={{ color: gradeGood ? "#16a34a" : gradeOk ? "#c9a962" : "#dc2626" }}>{redTeamGrade}</strong>
                 </p>
-                {redTeamGrade <= "B" ? (
+                {gradeGood ? (
                   <p className="text-sm text-muted mt-3">Your memory system withstood {Math.round(redTeamResults.reduce((s, r) => s + (r.resilience ?? 0), 0) / redTeamResults.length * 100)}% of simulated attacks across 6 attack vectors.</p>
                 ) : (
                   <p className="text-sm text-red-400 mt-3">Vulnerabilities detected. Review attack types below and consider hardening your memory policies.</p>
                 )}
               </>
-            )}
+              );
+            })()}
           </>
         )}
         {redTeamResults && redTeamResults.length === 0 && redTeamGrade && (

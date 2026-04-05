@@ -1,7 +1,7 @@
 import type { Agent } from "./mock-data";
 import type { DemoAgent } from "./demo-fleet";
 
-const DEFAULT_API_URL = process.env.NEXT_PUBLIC_SGRAAL_API_URL ?? "https://api.sgraal.com";
+const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "https://api.sgraal.com";
 
 export async function fetchPreflight(
   agent: DemoAgent,

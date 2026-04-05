@@ -1,8 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { getItem, setItem } from "../lib/storage";
-
-const API_URL = "https://api.sgraal.com";
+import { getItem, setItem, getApiUrl } from "../lib/storage";
 const DEMO_KEY = "sg_demo_playground";
 const MAX_CALLS = 20;
 
@@ -41,7 +39,7 @@ export default function TutorialPage() {
     if (rateLimited) return;
     setLoading(true);
     try {
-      const r = await fetch(`${API_URL}/v1/preflight`, {
+      const r = await fetch(`${getApiUrl()}/v1/preflight`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${DEMO_KEY}` },
         body: JSON.stringify({ memory_state: [entry] }),
@@ -61,7 +59,7 @@ export default function TutorialPage() {
     setLoading(true);
     try {
       // Explain instead of heal (demo key can't heal)
-      const r = await fetch(`${API_URL}/v1/explain`, {
+      const r = await fetch(`${getApiUrl()}/v1/explain`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${DEMO_KEY}` },
         body: JSON.stringify({ preflight_result: result, audience: "developer" }),

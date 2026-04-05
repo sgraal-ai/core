@@ -230,7 +230,3 @@ export const MOCK_AGENTS: Agent[] = [
     stability_score: { score: 0.94, components: { delta_alpha: 0.02, p_transition: 0.05, omega_drift: 0.03, omega_0: 0.06, lambda_2: 0.1, hurst: 0.02, h1_rank: 0, tau_mix: 1.0, d_geo_causal: 0.05 }, interpretation: "stable" },
   },
 ];
-
-export function getAgent(id: string): Agent | undefined {
-  return MOCK_AGENTS.find((a) => a.id === id);
-}

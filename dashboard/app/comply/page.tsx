@@ -15,7 +15,6 @@ export default function ComplyPage() {
   const [declaration, setDeclaration] = useState<Record<string, unknown> | null>(null);
   const [auditVerify, setAuditVerify] = useState<Record<string, unknown> | null>(null);
   const [gdpr, setGdpr] = useState<Record<string, unknown> | null>(null);
-  const [showDeclarationJson, setShowDeclarationJson] = useState(false);
   const [profiles, setProfiles] = useState<Record<string, unknown> | null>(null);
   const [activeProfile, setActiveProfile] = useState("EU_AI_ACT");
   const [siemPreview, setSiemPreview] = useState<string[]>([]);
@@ -56,7 +55,7 @@ export default function ComplyPage() {
     const base = getApiUrl();
     try {
       const res = await fetch(`${base}/v1/compliance/eu-ai-act/declaration`, { headers: headers() });
-      if (res.ok) { setDeclaration(await res.json()); setShowDeclarationJson(true); }
+      if (res.ok) { setDeclaration(await res.json()); }
     } catch {}
   }
 
@@ -151,7 +150,7 @@ export default function ComplyPage() {
           <h2 className="text-lg font-semibold">EU AI Act Declaration</h2>
           <button onClick={fetchDeclaration} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition">Download Declaration</button>
         </div>
-        {showDeclarationJson && declaration ? (
+        {declaration ? (
           <div>
             <div className="grid grid-cols-2 gap-4 text-sm mb-4">
               {!!declaration.title && <div><p className="text-xs text-muted uppercase mb-1">Title</p><p className="font-semibold">{String(declaration.title)}</p></div>}

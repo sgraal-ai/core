@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, Fragment } from "react";
-import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { getApiKey, getApiUrl } from "../lib/storage";
 import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface AuditEntry {
@@ -68,14 +68,7 @@ export default function AuditPage() {
     if (sortKey === key) setSortAsc(!sortAsc); else { setSortKey(key); setSortAsc(true); }
   }
 
-  const filtered = entries.filter((e) => {
-    if (agentFilter && !e.agent_id.toLowerCase().includes(agentFilter.toLowerCase())) return false;
-    if (decisionFilter && e.decision !== decisionFilter) return false;
-    if (domainFilter && e.domain !== domainFilter) return false;
-    return true;
-  });
-
-  const sorted = [...filtered].sort((a, b) => {
+  const sorted = [...entries].sort((a, b) => {
     const av = a[sortKey], bv = b[sortKey];
     const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
     return sortAsc ? cmp : -cmp;

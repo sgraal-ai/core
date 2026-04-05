@@ -57,7 +57,7 @@ export default function DashboardHome() {
                 memory_state: [{
                   id: `mem_${agentId}`,
                   content: `Memory for ${agentId}`,
-                  type: "fact",
+                  type: "semantic",
                   timestamp_age_days: 1,
                   source_trust: 0.8,
                   source_conflict: 0.1,
