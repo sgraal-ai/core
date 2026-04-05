@@ -59,6 +59,8 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   // Outcome
   const [outcomeSubmitted, setOutcomeSubmitted] = useState(false);
   const [outcomeError, setOutcomeError] = useState("");
+  const [showFailurePanel, setShowFailurePanel] = useState(false);
+  const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
 
   useEffect(() => {
     setMounted(true);
@@ -650,6 +652,44 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           <p className="text-xs text-muted font-mono mb-4">outcome_id: {String((agent as unknown as Record<string, unknown>).outcome_id)}</p>
           {outcomeSubmitted ? (
             <p className="text-sm font-semibold" style={{ color: "#16a34a" }}>&#x2713; Outcome submitted — RL model updated</p>
+          ) : showFailurePanel ? (
+            <div>
+              <p className="text-sm text-muted mb-3">Which components contributed to the failure?</p>
+              <div className="space-y-2 mb-4">
+                {Object.entries(agent.component_breakdown ?? {}).filter(([, v]) => typeof v === "number").map(([key, value]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedComponents.includes(key)}
+                      onChange={() => setSelectedComponents(prev => prev.includes(key) ? prev.filter(c => c !== key) : [...prev, key])}
+                      style={{ accentColor: "#c9a962" }}
+                    />
+                    <span className="font-mono text-xs">{key}</span>
+                    <span className="text-xs text-muted">({Math.round(value as number)})</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={async () => {
+                  setOutcomeError("");
+                  try {
+                    const res = await fetch(`${getApiUrl()}/v1/outcome`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                      body: JSON.stringify({ outcome_id: (agent as unknown as Record<string, unknown>).outcome_id, status: "failure", failure_components: selectedComponents }),
+                    });
+                    if (res.ok) setOutcomeSubmitted(true);
+                    else setOutcomeError(`Error: ${res.status}`);
+                  } catch (e) { setOutcomeError(e instanceof Error ? e.message : "Failed"); }
+                }} className="text-sm font-semibold px-5 py-2 rounded" style={{ background: "#dc2626", color: "white", border: "none", cursor: "pointer" }}>
+                  Confirm Failure ({selectedComponents.length} components)
+                </button>
+                <button onClick={() => { setShowFailurePanel(false); setSelectedComponents([]); }} className="text-sm text-muted hover:text-foreground transition">
+                  Cancel
+                </button>
+              </div>
+              {outcomeError && <p className="text-sm text-red-400 mt-2">{outcomeError}</p>}
+            </div>
           ) : (
             <div>
               <div className="flex gap-3">
@@ -667,17 +707,13 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                 }} className="text-sm font-semibold px-5 py-2 rounded" style={{ background: "#16a34a", color: "white", border: "none", cursor: "pointer" }}>
                   &#x2713; Success
                 </button>
-                <button onClick={async () => {
-                  setOutcomeError("");
-                  try {
-                    const res = await fetch(`${getApiUrl()}/v1/outcome`, {
-                      method: "POST",
-                      headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
-                      body: JSON.stringify({ outcome_id: (agent as unknown as Record<string, unknown>).outcome_id, status: "failure", failure_components: [] }),
-                    });
-                    if (res.ok) setOutcomeSubmitted(true);
-                    else setOutcomeError(`Error: ${res.status}`);
-                  } catch (e) { setOutcomeError(e instanceof Error ? e.message : "Failed"); }
+                <button onClick={() => {
+                  // Pre-select components with value > 50
+                  const preselected = Object.entries(agent.component_breakdown ?? {})
+                    .filter(([, v]) => typeof v === "number" && (v as number) > 50)
+                    .map(([k]) => k);
+                  setSelectedComponents(preselected);
+                  setShowFailurePanel(true);
                 }} className="text-sm font-semibold px-5 py-2 rounded" style={{ background: "#dc2626", color: "white", border: "none", cursor: "pointer" }}>
                   &#x2717; Failed
                 </button>
