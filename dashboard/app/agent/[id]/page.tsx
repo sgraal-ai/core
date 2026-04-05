@@ -50,6 +50,11 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   // Passport
   const [passport, setPassport] = useState<Record<string, unknown> | null>(null);
   const [passportLoading, setPassportLoading] = useState(false);
+  const [passportImportMsg, setPassportImportMsg] = useState("");
+
+  // Compliance profile
+  const [complianceProfile, setComplianceProfile] = useState("GENERAL");
+  const [reloading, setReloading] = useState(false);
 
   // Outcome
   const [outcomeSubmitted, setOutcomeSubmitted] = useState(false);
@@ -102,6 +107,46 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
+
+  async function rerunWithProfile(profile: string) {
+    setReloading(true);
+    setComplianceProfile(profile);
+    const apiKey = getApiKey();
+    const apiUrl = getApiUrl();
+    const demo = DEMO_FLEET.find((d) => d.id === id);
+    if (!apiKey || !demo) { setReloading(false); return; }
+    try {
+      const res = await fetch(`${apiUrl}/v1/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          agent_id: demo.id, memory_state: demo.memory_state,
+          action_type: demo.action_type, domain: demo.domain,
+          compliance_profile: profile, response_profile: "standard",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAgent({
+          id: demo.id, name: demo.name, domain: demo.domain,
+          omega_mem_final: data.omega_mem_final, recommended_action: data.recommended_action,
+          assurance_score: data.assurance_score, last_preflight: new Date().toISOString(),
+          healing_counter: data.healing_counter ?? 0, gsv: data.gsv ?? 0,
+          component_breakdown: data.component_breakdown, repair_plan: data.repair_plan ?? [],
+          at_risk_warnings: data.at_risk_warnings ?? [],
+          compliance_result: data.compliance_result ?? { compliant: true, violations: [], audit_required: false, profile_applied: profile },
+          calibration: data.calibration, hawkes_intensity: data.hawkes_intensity,
+          copula_analysis: data.copula_analysis, mewma: data.mewma,
+          poisoning_suspected: data.poisoning_suspected ?? false,
+          tamper_detected: data.tamper_detected ?? false,
+          hallucination_risk: data.hallucination_risk ?? "low",
+          outcome_id: data.outcome_id,
+        });
+        setOutcomeSubmitted(false);
+      }
+    } catch {}
+    setReloading(false);
+  }
 
   if (!mounted) return null;
 
@@ -163,7 +208,13 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           </div>
           <div className="flex gap-6 text-sm text-muted">
             <span>Assurance: <strong className="text-foreground">{agent.assurance_score}%</strong></span>
-            <span>Profile: <strong className="text-foreground">{agent.compliance_result?.profile_applied ?? "N/A"}</strong></span>
+            <span className="flex items-center gap-2">Profile:
+              <select value={complianceProfile} onChange={(e) => rerunWithProfile(e.target.value)} disabled={reloading}
+                className="bg-surface border border-surface-light rounded px-2 py-0.5 text-xs font-mono text-foreground disabled:opacity-50" style={{ cursor: "pointer" }}>
+                {["GENERAL", "EU_AI_ACT", "HIPAA", "MIFID2", "FDA_510K", "GDPR"].map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+              {reloading && <span className="text-xs text-muted">Reloading...</span>}
+            </span>
             {agent.compliance_result?.audit_required && (
               <span className="text-red-400 font-mono">AUDIT REQUIRED</span>
             )}
@@ -500,7 +551,28 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           }} disabled={passportLoading} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">
             {passportLoading ? "Exporting..." : "Export Passport"}
           </button>
+          <label className="text-sm px-4 py-1.5 rounded border border-surface-light text-muted hover:text-foreground transition cursor-pointer">
+            Import Passport
+            <input type="file" accept=".json" className="hidden" onChange={async (ev) => {
+              const file = ev.target.files?.[0];
+              if (!file) return;
+              setPassportImportMsg("");
+              try {
+                const text = await file.text();
+                const parsed = JSON.parse(text);
+                const res = await fetch(`${getApiUrl()}/v1/memory/passport/import`, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({ agent_id: agent.id, passport_data: parsed }),
+                });
+                if (res.ok) setPassportImportMsg("success");
+                else setPassportImportMsg(`Error: ${res.status}`);
+              } catch (e) { setPassportImportMsg(e instanceof Error ? e.message : "Import failed"); }
+            }} />
+          </label>
         </div>
+        {passportImportMsg === "success" && <p className="text-sm mb-3" style={{ color: "#16a34a" }}>&#x2713; Passport imported successfully</p>}
+        {passportImportMsg && passportImportMsg !== "success" && <p className="text-sm text-red-400 mb-3">{passportImportMsg}</p>}
         <p className="text-sm text-muted mb-3">Cryptographically signed snapshot of this agent{"'"}s memory state. Valid for 30 days.</p>
         {passport && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
