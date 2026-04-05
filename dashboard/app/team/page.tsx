@@ -29,6 +29,8 @@ export default function TeamPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [teamKeys, setTeamKeys] = useState<Array<Record<string, unknown>>>([]);
+  const [newKeyName, setNewKeyName] = useState("");
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
@@ -48,8 +50,12 @@ export default function TeamPage() {
     setStoredKey(apiKey);
     if (!apiKey) { setLoading(false); return; }
     try {
-      const mRes = await fetch(`${apiUrl()}/v1/team/members`, { headers: apiHeaders() });
+      const [mRes, kRes] = await Promise.all([
+        fetch(`${apiUrl()}/v1/team/members`, { headers: apiHeaders() }),
+        fetch(`${apiUrl()}/v1/api-keys`, { headers: apiHeaders() }),
+      ]);
       if (mRes.ok) { const d = await mRes.json(); setMembers(Array.isArray(d) ? d : d.members ?? []); }
+      if (kRes.ok) { const d = await kRes.json(); setTeamKeys(Array.isArray(d) ? d : d.keys ?? []); }
     } catch {}
     setLoading(false);
   }, []);
@@ -180,6 +186,55 @@ export default function TeamPage() {
           <p style={{ fontSize: "13px", color: "#6b7280" }}>No pending invites.</p>
         </div>
       )}
+
+      {/* Team API Keys */}
+      <div style={{ ...CARD, marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+          <h2 style={{ fontSize: "16px", fontWeight: 700 }}>Team API Keys</h2>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="Key name" style={{ ...INPUT, width: "160px", padding: "6px 10px", fontSize: "13px" }} />
+            <button onClick={async () => {
+              if (!newKeyName.trim()) return;
+              try {
+                const res = await fetch(`${apiUrl()}/v1/api-keys/generate`, { method: "POST", headers: apiHeaders(), body: JSON.stringify({ name: newKeyName.trim() }) });
+                if (res.ok) {
+                  const d = await res.json();
+                  setTeamKeys(prev => [...prev, { id: d.id, name: d.name, key_truncated: d.key_truncated, created: d.created, active: true }]);
+                  setNewKeyName("");
+                  setToast({ message: `Key "${d.name}" created`, type: "success" });
+                } else { setToast({ message: `Failed: ${res.status}`, type: "error" }); }
+              } catch { setToast({ message: "Failed to create key", type: "error" }); }
+            }} style={{ ...BTN_GOLD, padding: "6px 14px", fontSize: "13px" }}>Create Key</button>
+          </div>
+        </div>
+        {teamKeys.length > 0 ? (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>
+              {["Name", "Key", "Created", "Actions"].map(h => <th key={h} style={TH}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {teamKeys.map((k, i) => (
+                <tr key={String(k.id ?? i)}>
+                  <td style={{ ...TD, fontWeight: 600 }}>{String(k.name ?? "Key")}</td>
+                  <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px", color: "#c9a962" }}>{String(k.key_truncated ?? "")}</td>
+                  <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{String(k.created ?? k.created_at ?? "")}</td>
+                  <td style={TD}>
+                    <button onClick={async () => {
+                      try {
+                        await fetch(`${apiUrl()}/v1/api-keys/${String(k.id)}`, { method: "DELETE", headers: apiHeaders() });
+                        setTeamKeys(prev => prev.filter(key => key.id !== k.id));
+                        setToast({ message: "Key revoked", type: "success" });
+                      } catch {}
+                    }} style={{ fontSize: "13px", color: "#dc2626", cursor: "pointer", background: "none", border: "none" }}>Revoke</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p style={{ fontSize: "13px", color: "#6b7280" }}>No team API keys. Create one above.</p>
+        )}
+      </div>
 
       {/* Your API Key */}
       <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "4px" }}>Your API Key</h2>

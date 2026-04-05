@@ -88,7 +88,20 @@ export default function AnalyticsPage() {
     </div>
   );
 
-  if (!summary || !waste) return (
+  // Derive fleet KPIs from audit log data (primary source) with API summary as fallback
+  const auditTotal = auditEntries.length;
+  const auditBlocks = auditEntries.filter(e => e.decision === "BLOCK").length;
+  const auditWarns = auditEntries.filter(e => e.decision === "WARN" || e.decision === "ASK_USER").length;
+  const auditUse = auditEntries.filter(e => e.decision === "USE_MEMORY").length;
+  const auditOmegaSum = auditEntries.reduce((s, e) => s + Number(e.omega_mem_final ?? 0), 0);
+
+  const totalDecisions = auditTotal > 0 ? auditTotal : (summary?.total_calls ?? 0);
+  const blockPct = totalDecisions > 0 ? Math.round((auditBlocks / totalDecisions) * 100) : (summary?.block_rate ?? 0);
+  const warnPct = totalDecisions > 0 ? Math.round((auditWarns / totalDecisions) * 100) : 0;
+  const usePct = totalDecisions > 0 ? Math.round((auditUse / totalDecisions) * 100) : Math.max(0, 100 - blockPct - warnPct);
+  const avgOmega = totalDecisions > 0 ? Math.round(auditOmegaSum / totalDecisions * 10) / 10 : (summary?.avg_omega ?? 0);
+
+  if (!loading && totalDecisions === 0 && !summary && !waste) return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Analytics</h1>
       <p className="text-muted text-sm mb-6">Fleet-wide decision analytics and token waste tracking.</p>
@@ -101,23 +114,18 @@ export default function AnalyticsPage() {
 
   const fmt = (n: number) => n.toLocaleString();
   const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
-  const omegaLabel = summary.avg_omega < 30 ? "Low" : summary.avg_omega < 60 ? "Medium" : "High";
-  const omegaColor = summary.avg_omega < 30 ? "#16a34a" : summary.avg_omega < 60 ? "#c9a962" : "#dc2626";
-  const trendLabel = summary.trend ?? "stable";
-
-  // Derive decision breakdown from waste data
-  const totalDecisions = summary.total_calls || 1;
-  const blockPct = summary.block_rate ?? 0;
-  const warnPct = Math.min(totalDecisions > 0 ? Math.round((waste.warn_retrievals / totalDecisions) * 100) : 0, 100 - blockPct);
-  const usePct = Math.max(0, 100 - blockPct - warnPct);
+  const omegaLabel = avgOmega < 30 ? "Low" : avgOmega < 60 ? "Medium" : "High";
+  const omegaColor = avgOmega < 30 ? "#16a34a" : avgOmega < 60 ? "#c9a962" : "#dc2626";
+  const trendLabel = summary?.trend ?? "stable";
 
   const decisions = [
     { key: "USE_MEMORY", pct: usePct, color: "#16a34a" },
     { key: "WARN", pct: warnPct, color: "#eab308" },
+    { key: "ASK_USER", pct: totalDecisions > 0 ? Math.round((auditEntries.filter(e => e.decision === "ASK_USER").length / totalDecisions) * 100) : 0, color: "#f97316" },
     { key: "BLOCK", pct: blockPct, color: "#dc2626" },
   ];
 
-  const wastefulEntries = waste.top_wasteful_entries ?? [];
+  const wastefulEntries = waste?.top_wasteful_entries ?? [];
 
   return (
     <div>
@@ -133,23 +141,23 @@ export default function AnalyticsPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", marginBottom: "24px" }}>
         <div style={CARD}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Total Decisions</p>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>{fmt(summary.total_calls)}</p>
+          <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>{fmt(totalDecisions)}</p>
           <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>Trend: {trendLabel}</p>
         </div>
         <div style={CARD}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Block Rate</p>
           <p style={{ fontSize: "28px", fontWeight: 700, color: blockPct > 20 ? "#dc2626" : "#0B0F14", marginTop: "4px" }}>{blockPct}%</p>
-          <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>{waste.blocked_retrievals} blocked calls</p>
+          <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>{auditBlocks} blocked calls</p>
         </div>
         <div style={CARD}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Avg Omega Score</p>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: omegaColor, marginTop: "4px" }}>{summary.avg_omega}</p>
+          <p style={{ fontSize: "28px", fontWeight: 700, color: omegaColor, marginTop: "4px" }}>{avgOmega}</p>
           <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>Fleet risk: {omegaLabel}</p>
         </div>
         <div style={CARD}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Savings Potential</p>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>{fmtUsd(waste.savings_if_filtered)}</p>
-          <p style={{ fontSize: "12px", color: "#c9a962", marginTop: "4px" }}>{waste.roi_multiple}x ROI</p>
+          <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>{waste ? fmtUsd(waste.savings_if_filtered) : "$0.00"}</p>
+          <p style={{ fontSize: "12px", color: "#c9a962", marginTop: "4px" }}>{waste?.roi_multiple ?? 0}x ROI</p>
         </div>
       </div>
 
@@ -170,9 +178,10 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Token Waste Widget */}
+      {waste && (
       <div style={{ ...CARD, marginBottom: "24px", background: "rgba(201,169,98,0.06)", border: "1px solid rgba(201,169,98,0.2)" }}>
         <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px" }}>Token Waste Analysis</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "16px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "16px" }}>
           <div>
             <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Tokens Wasted</p>
             <p style={{ fontSize: "24px", fontWeight: 700, color: "#dc2626" }}>{fmt(waste.estimated_tokens_wasted)}</p>
@@ -194,6 +203,7 @@ export default function AnalyticsPage() {
           <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "12px", fontStyle: "italic" }}>{waste.recommendation}</p>
         )}
       </div>
+      )}
 
       {/* Top Wasteful Entries */}
       {wastefulEntries.length > 0 && (
