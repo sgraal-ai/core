@@ -41,9 +41,10 @@ export default function ProfilesPage() {
   useEffect(() => { load(); }, [load]);
 
   function toggleProfile(id: string) {
+    const current = profiles.find((p) => p.id === id);
+    const wasActive = current?.active ?? false;
     setProfiles((prev) => prev.map((p) => p.id === id ? { ...p, active: !p.active } : p));
-    const p = profiles.find((p) => p.id === id);
-    setToast({ message: p?.active ? `${p.title} deactivated` : `${p?.title} activated`, type: "success" });
+    setToast({ message: wasActive ? `${current?.title} deactivated` : `${current?.title} activated`, type: "success" });
   }
 
   if (!mounted) return null;

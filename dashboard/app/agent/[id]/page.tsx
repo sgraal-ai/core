@@ -356,7 +356,6 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                   domain: agent.domain,
                   timestamp_age_days: 30,
                 }];
-                console.log("Twin memory_state:", JSON.stringify(memoryState));
                 const startRes = await fetch(`${base}/v1/simulate/twin`, {
                   method: "POST", headers,
                   body: JSON.stringify({

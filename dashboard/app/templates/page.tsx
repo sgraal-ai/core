@@ -72,7 +72,7 @@ execute_trade(memory=my_memory, amount=12500)`,
       source_conflict: 0.4,
       downstream_count: 5,
     }],
-    action_type: "financial",
+    action_type: "irreversible",
     domain: "fintech",
   }),
 });

@@ -72,6 +72,29 @@ export default function ApprovalsPage() {
     } catch {
       setPending([]);
     }
+
+    // Fetch recent decisions for history table
+    try {
+      const apiUrl = getApiUrl();
+      const histRes = await fetch(`${apiUrl}/v1/audit-log?limit=10`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (histRes.ok) {
+        const histData = await histRes.json();
+        const auditEntries = Array.isArray(histData) ? histData : histData.entries ?? [];
+        const mapped: HistoryRow[] = auditEntries.map((entry: Record<string, unknown>) => ({
+          agent_id: entry.agent_id as string,
+          action_type: entry.action_type as string,
+          omega: entry.omega_mem_final as number ?? entry.omega as number ?? 0,
+          decision: entry.decision === "BLOCK" ? "Rejected" as const : "Approved" as const,
+          timestamp: entry.created_at as string ?? entry.timestamp as string ?? "",
+        }));
+        setHistory(mapped);
+      }
+    } catch {
+      // history fetch is non-critical
+    }
+
     setLoading(false);
     setLastUpdated(new Date());
   }, []);

@@ -169,7 +169,9 @@ export default function SlaPage() {
         <div style={{ textAlign: "center", padding: "40px 0" }}>
           <p style={{ fontSize: "36px", color: "#16a34a" }}>✓</p>
           <p style={{ fontSize: "16px", color: "#0B0F14", fontWeight: 600, marginTop: "8px" }}>No incidents in the last {data.days_since_incident} days.</p>
-          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>All SLA targets are being met.</p>
+          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>
+            {targets.every(t => t.met || t.info) ? "All SLA targets are being met." : "Some SLA targets are not being met — review above."}
+          </p>
         </div>
       </div>
     </div>
