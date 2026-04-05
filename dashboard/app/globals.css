@@ -1,9 +1,10 @@
+/* Note: @import is render-blocking. Consider migrating to next/font for Manrope and Inter. */
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 :root {
   --background: #ffffff;
-  --foreground: #0B0F14;
+  --foreground: #0B0F14; /* use text-foreground class or var(--foreground) in inline styles instead of hardcoding */
   --gold: #C9A962;
   --gold-dim: #745b1c;
   --surface: #f5f4f0;

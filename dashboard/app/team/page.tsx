@@ -194,12 +194,14 @@ export default function TeamPage() {
             <span style={{ fontFamily: "monospace", fontSize: "15px", color: "#c9a962" }}>
               {storedKey.length > 16 ? storedKey.slice(0, 12) + "..." + storedKey.slice(-4) : storedKey}
             </span>
-            <button
-              onClick={() => { try { navigator.clipboard.writeText(storedKey); } catch {} setCopied("apikey"); setTimeout(() => setCopied(null), 2000); }}
-              style={{ fontSize: "13px", color: copied === "apikey" ? "#c9a962" : "#6b7280", cursor: "pointer", background: "none", border: "none", fontWeight: 500 }}
-            >
-              {copied === "apikey" ? "Copied!" : "Copy"}
-            </button>
+            {storedKey && (
+              <button
+                onClick={() => { try { navigator.clipboard.writeText(storedKey); } catch {} setCopied("apikey"); setTimeout(() => setCopied(null), 2000); }}
+                style={{ fontSize: "13px", color: copied === "apikey" ? "#c9a962" : "#6b7280", cursor: "pointer", background: "none", border: "none", fontWeight: 500 }}
+              >
+                {copied === "apikey" ? "Copied!" : "Copy"}
+              </button>
+            )}
           </div>
           <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "10px" }}>
             {"Lost your key? "}
@@ -216,6 +218,7 @@ export default function TeamPage() {
       )}
 
       {/* Invite Modal */}
+      {/* TODO: Add focus trap for accessibility */}
       {showInviteModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }} onClick={() => setShowInviteModal(false)}>
           <div style={{ background: "#ffffff", borderRadius: "12px", padding: "32px", width: "440px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }} onClick={(e) => e.stopPropagation()}>
@@ -239,7 +242,7 @@ export default function TeamPage() {
       )}
 
       {toast && (
-        <div style={{ position: "fixed", bottom: "24px", right: "24px", background: toast.type === "success" ? "#16a34a" : "#dc2626", color: "white", padding: "12px 24px", borderRadius: "8px", fontSize: "14px", fontWeight: 600, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100 }}>
+        <div role="alert" aria-live="polite" style={{ position: "fixed", bottom: "24px", right: "24px", background: toast.type === "success" ? "#16a34a" : "#dc2626", color: "white", padding: "12px 24px", borderRadius: "8px", fontSize: "14px", fontWeight: 600, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100 }}>
           {toast.message}
         </div>
       )}

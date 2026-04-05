@@ -97,7 +97,7 @@ export default function ConsciousnessPage() {
   useEffect(() => {
     if (!d3Ready || !svgRef.current || nodes.length === 0) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const d3 = (window as any).d3 as any;
+    const d3 = (window as unknown as { d3: any }).d3;
     if (!d3) return;
 
     const svg = d3.select(svgRef.current);
@@ -316,9 +316,9 @@ export default function ConsciousnessPage() {
         <svg ref={svgRef} width="100%" height="500" style={{ display: "block", background: "#faf9f6" }} />
         {/* Zoom controls */}
         <div style={{ position: "absolute", top: "12px", right: "12px", display: "flex", flexDirection: "column", gap: "4px" }}>
-          <button style={ZOOM_BTN} onClick={() => zoomRef.current?.zoomIn()} title="Zoom in">+</button>
-          <button style={ZOOM_BTN} onClick={() => zoomRef.current?.zoomOut()} title="Zoom out">−</button>
-          <button style={ZOOM_BTN} onClick={() => zoomRef.current?.reset()} title="Reset zoom">⊡</button>
+          <button style={ZOOM_BTN} onClick={() => zoomRef.current?.zoomIn()} title="Zoom in" aria-label="Zoom in">+</button>
+          <button style={ZOOM_BTN} onClick={() => zoomRef.current?.zoomOut()} title="Zoom out" aria-label="Zoom out">−</button>
+          <button style={ZOOM_BTN} onClick={() => zoomRef.current?.reset()} title="Reset zoom" aria-label="Reset zoom">⊡</button>
         </div>
       </div>
 
@@ -404,6 +404,8 @@ export default function ConsciousnessPage() {
       {/* Toast */}
       {toast && (
         <div
+          role="alert"
+          aria-live="polite"
           style={{
             position: "fixed", bottom: "24px", right: "24px",
             background: toast.type === "success" ? "#16a34a" : "#dc2626",

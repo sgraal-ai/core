@@ -4,7 +4,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Literal, Optional
-import sys, os, math, re
+import sys, os, math, re, logging
 import secrets
 import hashlib
 import urllib.parse
@@ -54,16 +54,18 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_URL") or os.getenv("UPSTASH_REDIS_REST_URL")
 UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
+logger = logging.getLogger(__name__)
+
 supabase_client = None
 if SUPABASE_URL and SUPABASE_KEY:
     try:
         from supabase import create_client
         supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        print(f"SUPABASE_INIT: OK", flush=True)
+        logger.info("SUPABASE_INIT: OK")
     except Exception as e:
-        print(f"SUPABASE_INIT_ERROR: {e}", flush=True)
+        logger.warning("SUPABASE_INIT_ERROR: %s", e)
 else:
-    print(f"SUPABASE_INIT: missing env vars URL={bool(SUPABASE_URL)} KEY={bool(SUPABASE_KEY)}", flush=True)
+    logger.info("SUPABASE_INIT: missing env vars URL=%s KEY=%s", bool(SUPABASE_URL), bool(SUPABASE_KEY))
 
 supabase_service_client = None
 if SUPABASE_URL and SUPABASE_SERVICE_KEY:
@@ -651,9 +653,9 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
             if not _store_r.ok:
-                print(f"MEMORY_STORE_INSERT_ERROR: {_store_r.status_code} {_store_r.text}", flush=True)
+                logger.warning("MEMORY_STORE_INSERT_ERROR: %s %s", _store_r.status_code, _store_r.text)
         except Exception as e:
-            print(f"MEMORY_STORE_INSERT_EXCEPTION: {e}", flush=True)
+            logger.warning("MEMORY_STORE_INSERT_EXCEPTION: %s", e)
 
     # FIX 5: Trigger consensus check on memory write
     try:
@@ -906,11 +908,11 @@ def memory_graph(agent_id: Optional[str] = None, key_record: dict = Depends(veri
                 for m in r.json():
                     nodes.append({"id": m["id"], "type": m.get("memory_type"), "omega": m.get("omega_score", 0)})
             else:
-                print(f"MEMORY_GRAPH_READ_ERROR: {r.status_code} {r.text}", flush=True)
+                logger.warning("MEMORY_GRAPH_READ_ERROR: %s %s", r.status_code, r.text)
         except Exception as e:
-            print(f"MEMORY_GRAPH_READ_EXCEPTION: {e}", flush=True)
+            logger.warning("MEMORY_GRAPH_READ_EXCEPTION: %s", e)
     else:
-        print(f"MEMORY_GRAPH: no supabase config URL={bool(SUPABASE_URL)} KEY={bool(SUPABASE_SERVICE_KEY)}", flush=True)
+        logger.info("MEMORY_GRAPH: no supabase config URL=%s KEY=%s", bool(SUPABASE_URL), bool(SUPABASE_SERVICE_KEY))
     return {"nodes": nodes, "edges": edges, "clusters": clusters, "layout_hint": "force-directed"}
 
 
@@ -4817,7 +4819,7 @@ def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, o
             entries = result.data or []
             total = result.count if hasattr(result, "count") and result.count is not None else len(entries)
         except Exception as e:
-            print(f"AUDIT_LOG_READ_ERROR: {e}", flush=True)
+            logger.warning("AUDIT_LOG_READ_ERROR: %s", e)
     return {"entries": entries, "count": total}
 
 @app.get("/v1/audit-log/export")
@@ -4835,7 +4837,7 @@ def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_a
                 q = q.eq("event_type", "firewall_bypass")
             entries = q.execute().data or []
         except Exception as e:
-            print(f"AUDIT_LOG_EXPORT_ERROR: {e}", flush=True)
+            logger.warning("AUDIT_LOG_EXPORT_ERROR: %s", e)
     # In-memory fallback filter for firewall_bypassed
     if firewall_bypassed is True and entries:
         entries = [e for e in entries if e.get("event_type") == "firewall_bypass"]
@@ -5511,10 +5513,10 @@ def _generate_unsubscribe_token(email: str) -> str:
 
 def _add_resend_contact(email: str) -> None:
     """Add email to Resend audience. Fire-and-forget."""
-    print(f"[RESEND] Adding contact: {email}")
-    print(f"[RESEND] Audience ID: {RESEND_AUDIENCE_ID}")
+    logger.debug("[RESEND] Adding contact: %s", email)
+    logger.debug("[RESEND] Audience ID: %s", RESEND_AUDIENCE_ID)
     if not resend.api_key or not RESEND_AUDIENCE_ID:
-        print("[RESEND] Skipping — missing api_key or audience_id")
+        logger.debug("[RESEND] Skipping — missing api_key or audience_id")
         return
     try:
         r = http_requests.post(
@@ -5523,10 +5525,10 @@ def _add_resend_contact(email: str) -> None:
             json={"email": email, "unsubscribed": False, "audience_id": RESEND_AUDIENCE_ID},
             timeout=5,
         )
-        print(f"[RESEND] Response status: {r.status_code}")
-        print(f"[RESEND] Response body: {r.text}")
+        logger.debug("[RESEND] Response status: %s", r.status_code)
+        logger.debug("[RESEND] Response body: %s", r.text)
     except Exception as e:
-        print(f"[RESEND] Error: {e}")
+        logger.debug("[RESEND] Error: %s", e)
 
 
 def _send_api_key_email(email: str, api_key: str) -> None:
@@ -5817,7 +5819,7 @@ def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str
             record.update(extra)
         _sb.table("audit_log").insert(record).execute()
     except Exception as e:
-        print(f"AUDIT_LOG_ERROR: {e}", flush=True)
+        logger.warning("AUDIT_LOG_ERROR: %s", e)
 
 
 # In-memory healing counter store (per entry_id)

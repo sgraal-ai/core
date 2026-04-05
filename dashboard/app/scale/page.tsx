@@ -202,7 +202,7 @@ export default function ScalePage() {
                   </div>
                   <button onClick={() => runHeal(agent.id)} disabled={healLoading === agent.id}
                     className="text-xs px-3 py-1 rounded border border-surface-light text-muted hover:text-foreground transition disabled:opacity-50">
-                    {healLoading === agent.id ? "..." : "Heal"}
+                    {healLoading === agent.id ? <span aria-label="Healing agent">...</span> : "Heal"}
                   </button>
                 </div>
                 {result && (
@@ -443,7 +443,7 @@ export default function ScalePage() {
 
       {/* Toast */}
       {toast && (
-        <div style={{
+        <div role="alert" aria-live="polite" style={{
           position: "fixed", bottom: "24px", right: "24px",
           background: toast.type === "success" ? "#16a34a" : "#dc2626",
           color: "white", padding: "12px 24px", borderRadius: "8px",

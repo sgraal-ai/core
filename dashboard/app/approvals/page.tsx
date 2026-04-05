@@ -100,6 +100,7 @@ export default function ApprovalsPage() {
   }, []);
 
   useEffect(() => {
+    // Note: React 18+ handles setState on unmounted components gracefully
     loadApprovals();
     const interval = setInterval(loadApprovals, 30000);
     return () => clearInterval(interval);
@@ -367,6 +368,8 @@ export default function ApprovalsPage() {
       {/* Toast */}
       {toast && (
         <div
+          role="alert"
+          aria-live="polite"
           style={{
             position: "fixed",
             bottom: "24px",

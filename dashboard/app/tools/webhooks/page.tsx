@@ -89,7 +89,7 @@ export default function ToolsWebhooksPage() {
         )) : <p className="text-sm text-muted">No webhooks registered yet.</p>}
       </div>
 
-      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, background: toast.type === "success" ? "#16a34a" : "#dc2626", color: "white", padding: "12px 24px", borderRadius: 8, fontSize: 14, fontWeight: 600, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100 }}>{toast.message}</div>}
+      {toast && <div role="alert" aria-live="polite" style={{ position: "fixed", bottom: 24, right: 24, background: toast.type === "success" ? "#16a34a" : "#dc2626", color: "white", padding: "12px 24px", borderRadius: 8, fontSize: 14, fontWeight: 600, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100 }}>{toast.message}</div>}
     </div>
   );
 }
