@@ -6230,6 +6230,48 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
         except Exception:
             pass
 
+    # 7. Shadow calibration: adjust core scoring weights from outcome
+    _weight_calibrated = False
+    try:
+        from scoring_engine.omega_mem import WEIGHTS as _BASE_WEIGHTS
+        _cal_lr = 0.001  # small learning rate
+        _kh_cal = key_record.get("key_hash", "default")
+        _domain_cal = outcome.get("domain", "general")
+        _cal_key = f"calibrated_weights:{_kh_cal}:{_domain_cal}"
+        _cb = outcome.get("component_breakdown", {})
+
+        # Load current calibrated weights from Redis (or start from baseline)
+        _cal_weights = dict(_BASE_WEIGHTS)
+        _cal_stored = _load_store(_cal_key, None)
+        if _cal_stored and isinstance(_cal_stored, dict):
+            _cal_weights.update(_cal_stored)
+
+        _updates = {}
+        if req.status == "failure" and req.failure_components:
+            # Increase weight of components blamed for failure
+            for comp in req.failure_components:
+                if comp in _cal_weights:
+                    old_w = _cal_weights[comp]
+                    new_w = round(old_w + _cal_lr, 6)
+                    _cal_weights[comp] = new_w
+                    _updates[comp] = (old_w, new_w)
+        elif req.status == "success" and _cb:
+            # Decrease weight of components that were high but action succeeded
+            for comp, score in _cb.items():
+                if comp in _cal_weights and isinstance(score, (int, float)) and score > 70:
+                    old_w = _cal_weights[comp]
+                    new_w = round(max(0.01, old_w - _cal_lr), 6)
+                    _cal_weights[comp] = new_w
+                    _updates[comp] = (old_w, new_w)
+
+        if _updates:
+            _persist_store(_cal_key, _cal_weights, ttl=604800)  # 7 day TTL
+            for comp, (old_w, new_w) in _updates.items():
+                logger.info(f"Weight update: {comp} {old_w} → {new_w} ({_domain_cal}, {req.status})")
+            _weight_calibrated = True
+    except Exception:
+        pass
+
     resp = {
         "outcome_id": req.outcome_id,
         "status": req.status,
@@ -6241,7 +6283,37 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
         resp["lv4_geodesic_updated"] = True
     if pg_temp_decayed:
         resp["pg_temperature_decayed"] = True
+    if _weight_calibrated:
+        resp["weight_calibration"] = True
     return resp
+
+
+# --- Live weights endpoint ---
+@app.get("/v1/weights/current")
+def get_current_weights(key_record: dict = Depends(verify_api_key), domain: str = "general"):
+    """Return current calibrated weights vs baseline, with drift."""
+    from scoring_engine.omega_mem import WEIGHTS as _BASE_WEIGHTS
+    _kh = key_record.get("key_hash", "default")
+    _cal_key = f"calibrated_weights:{_kh}:{domain}"
+    _cal_stored = _load_store(_cal_key, None)
+    _cal_weights = dict(_BASE_WEIGHTS)
+    if _cal_stored and isinstance(_cal_stored, dict):
+        _cal_weights.update(_cal_stored)
+
+    components = {}
+    for k in _BASE_WEIGHTS:
+        baseline = _BASE_WEIGHTS[k]
+        current = _cal_weights.get(k, baseline)
+        drift = round(current - baseline, 6)
+        components[k] = {"baseline": baseline, "current": current, "drift": drift}
+
+    total_drift = sum(abs(c["drift"]) for c in components.values())
+    return {
+        "domain": domain,
+        "components": components,
+        "total_drift": round(total_drift, 6),
+        "calibrated": _cal_stored is not None,
+    }
 
 
 @app.post("/v1/preflight")
@@ -6328,7 +6400,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             return {"omega_mem_final": 100, "recommended_action": "BLOCK",
                     "policy_applied": _policy_result, "request_id": str(uuid.uuid4())}
 
-    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, req.custom_weights, req.thresholds, req.use_pagerank)
+    # Load calibrated weights from outcome learning (merge with user custom_weights)
+    _effective_weights = req.custom_weights
+    if not _effective_weights:
+        _cal_key_pf = f"calibrated_weights:{key_record.get('key_hash', 'default')}:{req.domain}"
+        _cal_pf = _load_store(_cal_key_pf, None)
+        if _cal_pf and isinstance(_cal_pf, dict):
+            _effective_weights = _cal_pf
+
+    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, _effective_weights, req.thresholds, req.use_pagerank)
 
     # Fetch te_history ONCE for all time-series modules (eliminates 10 redundant Redis calls)
     _te_history_cache = list(req.score_history) if req.score_history else []
