@@ -42,6 +42,7 @@ export default function AuditPage() {
   const [sortAsc, setSortAsc] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
   const perPage = 50;
 
   const load = useCallback(async () => {
@@ -57,7 +58,7 @@ export default function AuditPage() {
       if (domainFilter) params.set("domain", domainFilter);
       if (dateRange) params.set("range", dateRange);
       const res = await fetch(`${apiUrl}/v1/audit-log?${params}`, { headers: { Authorization: `Bearer ${apiKey}` } });
-      if (res.ok) { const d = await res.json(); setEntries(Array.isArray(d) ? d : d.entries ?? []); }
+      if (res.ok) { const d = await res.json(); setEntries(Array.isArray(d) ? d : d.entries ?? []); setTotalCount(d.count ?? (Array.isArray(d) ? d.length : (d.entries ?? []).length)); }
     } catch {}
     setLoading(false);
   }, [agentFilter, decisionFilter, domainFilter, page, dateRange]);
@@ -74,7 +75,7 @@ export default function AuditPage() {
     return sortAsc ? cmp : -cmp;
   });
 
-  const totalEntries = sorted.length;
+  const totalEntries = totalCount;
 
   async function exportCsv() {
     const apiKey = getApiKey();
@@ -215,7 +216,7 @@ export default function AuditPage() {
         <p style={{ fontSize: "13px", color: "#6b7280" }}>Showing {page * perPage + 1}-{Math.min((page + 1) * perPage, totalEntries)} of {totalEntries.toLocaleString()} entries</p>
         <div style={{ display: "flex", gap: "8px" }}>
           <button disabled={page === 0} onClick={() => setPage(page - 1)} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: page === 0 ? "not-allowed" : "pointer", opacity: page === 0 ? 0.4 : 1 }}>Previous</button>
-          <button disabled={sorted.length < perPage} onClick={() => setPage(page + 1)} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: sorted.length < perPage ? "not-allowed" : "pointer", opacity: sorted.length < perPage ? 0.4 : 1 }}>Next</button>
+          <button disabled={(page + 1) * perPage >= totalCount} onClick={() => setPage(page + 1)} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: (page + 1) * perPage >= totalCount ? "not-allowed" : "pointer", opacity: (page + 1) * perPage >= totalCount ? 0.4 : 1 }}>Next</button>
         </div>
       </div>
     </div>

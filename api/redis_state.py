@@ -109,4 +109,5 @@ class RedisBackedDict:
         return len(self._local)
 
     def _persist(self):
+        # Note: Persists entire dict on every write for simplicity. For high-write workloads, consider per-key storage.
         redis_set(self._prefix, self._local)

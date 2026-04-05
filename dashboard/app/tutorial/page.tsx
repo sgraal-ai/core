@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { getItem, setItem, getApiUrl } from "../lib/storage";
 const DEMO_KEY = "sg_demo_playground";
+// Client-side rate limit for demo UX — server-side rate limiting is the primary control
 const MAX_CALLS = 20;
 
 const STEPS = [
@@ -42,7 +43,7 @@ export default function TutorialPage() {
       const r = await fetch(`${getApiUrl()}/v1/preflight`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${DEMO_KEY}` },
-        body: JSON.stringify({ memory_state: [entry] }),
+        body: JSON.stringify({ memory_state: [entry], action_type: entry === RISKY_ENTRY ? "irreversible" : "read", domain: entry === RISKY_ENTRY ? "legal" : "general" }),
       });
       if (!r.ok) return;
       const data = await r.json();
