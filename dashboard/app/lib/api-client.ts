@@ -30,16 +30,14 @@ export async function fetchPreflight(
   const data = await res.json();
 
   return {
+    ...data,
+    // Override with agent metadata and safe defaults
     id: agent.id,
     name: agent.name,
-    omega_mem_final: data.omega_mem_final,
-    recommended_action: data.recommended_action,
-    assurance_score: data.assurance_score,
     domain: agent.domain,
     last_preflight: new Date().toISOString(),
     healing_counter: data.healing_counter ?? 0,
     gsv: data.gsv ?? 0,
-    component_breakdown: data.component_breakdown,
     repair_plan: data.repair_plan ?? [],
     at_risk_warnings: data.at_risk_warnings ?? [],
     compliance_result: data.compliance_result ?? {
@@ -48,16 +46,10 @@ export async function fetchPreflight(
       audit_required: false,
       profile_applied: "GENERAL",
     },
-    calibration: data.calibration,
-    hawkes_intensity: data.hawkes_intensity,
-    copula_analysis: data.copula_analysis,
-    mewma: data.mewma,
     poisoning_suspected: data.poisoning_suspected ?? false,
     tamper_detected: data.tamper_detected ?? false,
     hallucination_risk: data.hallucination_risk ?? "low",
-    outcome_id: data.outcome_id,
     r_total_normalized: data.r_total_normalized ?? 0,
-    stability_score: data.stability_score,
   };
 }
 
