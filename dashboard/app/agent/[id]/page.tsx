@@ -210,7 +210,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             <span>Assurance: <strong className="text-foreground">{agent.assurance_score}%</strong></span>
             <span className="flex items-center gap-2">Profile:
               <select value={complianceProfile} onChange={(e) => rerunWithProfile(e.target.value)} disabled={reloading}
-                className="bg-surface border border-surface-light rounded px-2 py-0.5 text-xs font-mono text-foreground disabled:opacity-50" style={{ cursor: "pointer" }}>
+                className="bg-surface border border-surface-light rounded px-2 py-1 text-sm font-mono text-foreground disabled:opacity-50" style={{ cursor: "pointer" }}>
                 {["GENERAL", "EU_AI_ACT", "HIPAA", "MIFID2", "FDA_510K", "GDPR"].map(p => <option key={p} value={p}>{p}</option>)}
               </select>
               {reloading && <span className="text-xs text-muted">Reloading...</span>}
