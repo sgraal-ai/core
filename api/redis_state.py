@@ -43,6 +43,16 @@ def redis_set(key: str, value, ttl: int = 0):
     except Exception as e:
         logger.debug("redis_set %s failed: %s", key, e)
 
+def redis_delete(key: str):
+    """Delete a key from Redis. Silent on failure."""
+    if not redis_available():
+        return
+    try:
+        import requests
+        requests.post(f"{UPSTASH_REDIS_URL}/DEL/{key}", headers=_headers(), timeout=2)
+    except Exception as e:
+        logger.debug("redis_delete %s failed: %s", key, e)
+
 def redis_setnx(key: str, value, ttl: int = 0):
     """Set only if not exists (SETNX). Never overwrites persisted state."""
     if not redis_available():

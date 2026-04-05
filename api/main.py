@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 import stripe
 import requests as http_requests
 import resend
-from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx
+from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx, redis_delete
 
 
 def _persist_store(key: str, value, ttl: int = 0):
@@ -123,9 +123,19 @@ def verify_api_key(
     if api_key in API_KEYS:
         return {"customer_id": API_KEYS[api_key], "tier": "test", "calls_this_month": 0, "key_hash": None}
 
-    # Fall back to Supabase hash lookup
+    # Fall back to Supabase hash lookup (with Redis cache)
+    key_hash = _hash_key(api_key)
+    cache_key = f"api_key_valid:{key_hash[:16]}"
+
+    # Check Redis cache first
+    try:
+        cached = redis_get(cache_key)
+        if cached and isinstance(cached, dict) and cached.get("valid"):
+            return {"key_hash": key_hash, "customer_id": cached["user_id"], "tier": cached["plan"], "calls_this_month": 0}
+    except Exception:
+        pass  # Redis down — fall through to Supabase
+
     if supabase_service_client:
-        key_hash = _hash_key(api_key)
         result = (
             supabase_service_client.table("api_keys")
             .select("key_hash, customer_id, tier, calls_this_month")
@@ -133,6 +143,11 @@ def verify_api_key(
             .execute()
         )
         if result.data:
+            # Cache valid key in Redis (TTL 300s)
+            try:
+                redis_set(cache_key, {"valid": True, "user_id": result.data[0].get("customer_id", ""), "plan": result.data[0].get("tier", "free")}, ttl=300)
+            except Exception:
+                pass
             return result.data[0]
 
     raise HTTPException(status_code=401, detail="Invalid API key")
@@ -1556,6 +1571,11 @@ def revoke_dev_key(key_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     for kh, v in _dev_keys.items():
         if kh[:16] == key_id: v["active"] = False; break
+    # Invalidate Redis cache for this key
+    try:
+        redis_delete(f"api_key_valid:{key_id}")
+    except Exception:
+        pass
     return {"revoked": key_id}
 
 @app.post("/v1/api-keys/{key_id}/rotate")
