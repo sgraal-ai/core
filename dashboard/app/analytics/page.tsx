@@ -9,6 +9,7 @@ interface Summary {
   block_rate: number;
   avg_omega: number;
   trend: string | null;
+  first_preflight_at?: string;
 }
 
 interface WastefulEntry {
@@ -39,6 +40,8 @@ export default function AnalyticsPage() {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [timeAgo, setTimeAgo] = useState("just now");
   const [auditEntries, setAuditEntries] = useState<Array<Record<string, unknown>>>([]);
+  const [memTypes, setMemTypes] = useState<Record<string, number> | null>(null);
+  const [repairEff, setRepairEff] = useState<Record<string, unknown> | null>(null);
 
   const load = useCallback(async () => {
     setMounted(true);
@@ -59,6 +62,15 @@ export default function AnalyticsPage() {
     try {
       const aR = await fetch(`${apiUrl}/v1/audit-log?limit=500`, { headers: h });
       if (aR.ok) { const d = await aR.json(); setAuditEntries(d.entries ?? []); }
+    } catch {}
+    // Fetch memory type distribution and repair effectiveness
+    try {
+      const [mtR, reR] = await Promise.all([
+        fetch(`${apiUrl}/v1/analytics/memory-types`, { headers: h }),
+        fetch(`${apiUrl}/v1/repair/effectiveness`, { headers: h }),
+      ]);
+      if (mtR.ok) { const d = await mtR.json(); setMemTypes(d.distribution ?? null); }
+      if (reR.ok) setRepairEff(await reR.json());
     } catch {}
     setLoading(false);
     setLastUpdated(new Date());
@@ -320,6 +332,106 @@ export default function AnalyticsPage() {
           </div>
         );
       })()}
+      {/* Memory Type Distribution */}
+      {memTypes && Object.keys(memTypes).length > 0 && (() => {
+        const total = Object.values(memTypes).reduce((s, v) => s + v, 0);
+        const maxCount = Math.max(...Object.values(memTypes), 1);
+        return (
+          <div style={{ ...CARD, marginTop: "24px" }}>
+            <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Memory Type Distribution</h2>
+            <p className="text-sm text-muted mb-4">Shows what kinds of memory your agents use most. High tool_state usage may indicate agents relying on volatile data.</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {Object.entries(memTypes).filter(([, v]) => v > 0).sort(([, a], [, b]) => b - a).map(([type, count]) => (
+                <div key={type} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <span style={{ width: "120px", fontSize: "13px", fontFamily: "monospace" }}>{type}</span>
+                  <div style={{ flex: 1, height: "16px", background: "#f5f4f0", borderRadius: "4px", overflow: "hidden" }}>
+                    <div style={{ width: `${(count / maxCount) * 100}%`, height: "100%", background: "#c9a962", borderRadius: "4px", transition: "width 0.6s ease" }} />
+                  </div>
+                  <span style={{ width: "60px", fontSize: "13px", fontWeight: 600, textAlign: "right" }}>{count}</span>
+                  <span style={{ width: "40px", fontSize: "12px", color: "#6b7280", textAlign: "right" }}>{total > 0 ? Math.round((count / total) * 100) : 0}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Repair Effectiveness */}
+      {repairEff && (
+        <div style={{ ...CARD, marginTop: "24px" }}>
+          <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Repair Effectiveness</h2>
+          <p className="text-sm text-muted mb-4">How often suggested repairs are actually applied, and whether they improve memory health.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "16px" }}>
+            <div>
+              <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Adoption Rate</p>
+              <p style={{ fontSize: "28px", fontWeight: 700, color: Number(repairEff.avg_adoption_rate ?? 0) > 0.5 ? "#16a34a" : "#c9a962" }}>
+                {Math.round(Number(repairEff.avg_adoption_rate ?? 0) * 100)}%
+              </p>
+            </div>
+            <div>
+              <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Outcomes Tracked</p>
+              <p style={{ fontSize: "28px", fontWeight: 700 }}>{Number(repairEff.count ?? 0)}</p>
+            </div>
+          </div>
+          {Number(repairEff.count ?? 0) === 0 && (
+            <p className="text-sm text-muted mt-3">Submit outcomes via the agent detail page to begin tracking repair effectiveness.</p>
+          )}
+        </div>
+      )}
+
+      {/* Per-Module Latency */}
+      {auditEntries.length > 0 && (() => {
+        // Get per_module_latency from the most recent audit entry that has it
+        const latestWithLatency = auditEntries.find(e => e.per_module_latency && typeof e.per_module_latency === "object");
+        if (!latestWithLatency) return null;
+        const latency = latestWithLatency.per_module_latency as Record<string, number>;
+        return (
+          <div style={{ ...CARD, marginTop: "24px" }}>
+            <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Per-Module Latency</h2>
+            <p className="text-sm text-muted mb-4">Which scoring modules take the most time. High latency modules are candidates for optimization.</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              {Object.entries(latency).sort(([, a], [, b]) => b - a).map(([mod, ms]) => (
+                <div key={mod} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <span style={{ width: "160px", fontSize: "13px", fontFamily: "monospace" }}>{mod}</span>
+                  <div style={{ flex: 1, height: "12px", background: "#f5f4f0", borderRadius: "3px", overflow: "hidden" }}>
+                    <div style={{ width: `${Math.min((ms / Math.max(...Object.values(latency), 1)) * 100, 100)}%`, height: "100%", background: ms > 500 ? "#dc2626" : ms > 100 ? "#c9a962" : "#16a34a", borderRadius: "3px" }} />
+                  </div>
+                  <span style={{ width: "60px", fontSize: "13px", fontWeight: 600, textAlign: "right", color: ms > 500 ? "#dc2626" : "#6b7280" }}>{ms}ms</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Activation Funnel */}
+      {summary?.first_preflight_at && (
+        <div style={{ ...CARD, marginTop: "24px" }}>
+          <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Activation Funnel</h2>
+          <p className="text-sm text-muted mb-4">Time from API key creation to first preflight call. Track how quickly new users integrate.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+            <div>
+              <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>First Preflight</p>
+              <p style={{ fontSize: "14px", fontFamily: "monospace" }}>{new Date(String(summary.first_preflight_at)).toLocaleString()}</p>
+            </div>
+            <div>
+              <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Time Active</p>
+              <p style={{ fontSize: "14px", fontWeight: 600 }}>
+                {(() => {
+                  const diff = Date.now() - new Date(String(summary.first_preflight_at)).getTime();
+                  const days = Math.floor(diff / 86400000);
+                  const hours = Math.floor((diff % 86400000) / 3600000);
+                  return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+                })()}
+              </p>
+            </div>
+            <div>
+              <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Total Decisions</p>
+              <p style={{ fontSize: "14px", fontWeight: 600 }}>{fmt(totalDecisions)}</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
