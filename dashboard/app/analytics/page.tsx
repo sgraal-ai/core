@@ -74,11 +74,22 @@ export default function AnalyticsPage() {
     </div>
   );
 
-  if (loading || !summary || !waste) return (
+  if (loading) return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Analytics</h1>
       <p className="text-muted text-sm mb-6">Fleet-wide decision analytics and token waste tracking.</p>
       <LoadingSkeleton rows={5} />
+    </div>
+  );
+
+  if (!summary || !waste) return (
+    <div>
+      <h1 className="text-2xl font-bold mb-1">Analytics</h1>
+      <p className="text-muted text-sm mb-6">Fleet-wide decision analytics and token waste tracking.</p>
+      <div style={{ textAlign: "center", padding: "60px 0" }}>
+        <p style={{ fontSize: "36px", color: "#6b7280" }}>&#x2014;</p>
+        <p className="text-sm text-muted mt-2">Analytics data unavailable. Make preflight calls to generate statistics.</p>
+      </div>
     </div>
   );
 

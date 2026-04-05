@@ -6,12 +6,10 @@ export function ComponentBreakdown({ breakdown }: { breakdown: Record<string, nu
     return <p className="text-xs text-muted">No component data available.</p>;
   }
 
-  const maxVal = Math.max(...entries.map(([, v]) => v), 1);
-
   return (
     <div className="space-y-2">
       {entries.map(([key, value]) => {
-        const pct = (value / maxVal) * 100;
+        const pct = Math.min(value, 100);
         const color =
           value < 25 ? "bg-green-400" : value < 50 ? "bg-yellow-400" : value < 75 ? "bg-orange-400" : "bg-red-400";
 

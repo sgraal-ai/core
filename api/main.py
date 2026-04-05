@@ -4456,12 +4456,10 @@ def list_approvals(key_record: dict = Depends(verify_api_key)):
         preflight_ids = [a.get("preflight_id", "") for a in _approvals.values() if a.get("preflight_id")]
         if preflight_ids:
             try:
-                # Fetch up to 100 matching audit entries
-                for pid in preflight_ids[:100]:
-                    q = _sb.table("audit_log").select("*").eq("request_id", pid).limit(1)
-                    r = q.execute()
-                    if r.data and len(r.data) > 0:
-                        _audit_cache[pid] = r.data[0]
+                r = _sb.table("audit_log").select("*").in_("request_id", preflight_ids[:100]).execute()
+                if r.data:
+                    for row in r.data:
+                        _audit_cache[row["request_id"]] = row
             except Exception:
                 pass
 
@@ -4791,21 +4789,31 @@ def cross_agent_check(req: CrossAgentRequest, key_record: dict = Depends(verify_
 # ---- Audit Log + SIEM Export ----
 
 @app.get("/v1/audit-log")
-def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, decision: Optional[str] = None):
+def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, offset: int = 0,
+                   decision: Optional[str] = None, agent_id: Optional[str] = None, domain: Optional[str] = None,
+                   range: Optional[str] = None):
     if key_record.get("demo"):
         raise HTTPException(status_code=403, detail="Demo key cannot access audit logs")
     entries = []
+    total = 0
     _sb = supabase_service_client or supabase_client
     if _sb:
         try:
             kh = key_record.get("key_hash", "")
-            q = _sb.table("audit_log").select("*").eq("api_key_id", kh).order("created_at", desc=True).limit(limit)
+            q = _sb.table("audit_log").select("*", count="exact").eq("api_key_id", kh).order("created_at", desc=True)
             if decision:
                 q = q.eq("decision", decision)
-            entries = q.execute().data or []
+            if agent_id:
+                q = q.eq("agent_id", agent_id)
+            if domain:
+                q = q.eq("domain", domain)
+            q = q.range(offset, offset + limit - 1)
+            result = q.execute()
+            entries = result.data or []
+            total = result.count if hasattr(result, "count") and result.count is not None else len(entries)
         except Exception as e:
             print(f"AUDIT_LOG_READ_ERROR: {e}", flush=True)
-    return {"entries": entries, "count": len(entries)}
+    return {"entries": entries, "count": total}
 
 @app.get("/v1/audit-log/export")
 def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_api_key), limit: int = 100,
@@ -4824,7 +4832,7 @@ def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_a
         except Exception as e:
             print(f"AUDIT_LOG_EXPORT_ERROR: {e}", flush=True)
     # In-memory fallback filter for firewall_bypassed
-    if firewall_bypassed is True and not entries:
+    if firewall_bypassed is True and entries:
         entries = [e for e in entries if e.get("event_type") == "firewall_bypass"]
 
     if format == "splunk":

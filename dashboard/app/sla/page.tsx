@@ -103,21 +103,24 @@ export default function SlaPage() {
 
       {/* Overview Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "32px" }}>
-        <div style={{ ...CARD, borderTop: "3px solid #16a34a" }}>
+        {(() => { const ok = data.uptime >= 99.9; const c = ok ? "#16a34a" : "#dc2626"; return (
+        <div style={{ ...CARD, borderTop: `3px solid ${c}` }}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Uptime</p>
-          <p style={{ fontSize: "36px", fontWeight: 700, color: "#16a34a", marginTop: "4px" }}>{data.uptime}%</p>
+          <p style={{ fontSize: "36px", fontWeight: 700, color: c, marginTop: "4px" }}>{data.uptime}%</p>
           <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>{data.days_since_incident} days since last incident</p>
-        </div>
-        <div style={{ ...CARD, borderTop: "3px solid #16a34a" }}>
+        </div>); })()}
+        {(() => { const ok = data.p50 < 50; const c = ok ? "#16a34a" : "#dc2626"; return (
+        <div style={{ ...CARD, borderTop: `3px solid ${c}` }}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>P50 Latency</p>
-          <p style={{ fontSize: "36px", fontWeight: 700, color: "#16a34a", marginTop: "4px" }}>{data.p50}ms</p>
+          <p style={{ fontSize: "36px", fontWeight: 700, color: c, marginTop: "4px" }}>{data.p50}ms</p>
           <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>Target: &lt;50ms</p>
-        </div>
-        <div style={{ ...CARD, borderTop: "3px solid #16a34a" }}>
+        </div>); })()}
+        {(() => { const ok = data.p99 < 200; const c = ok ? "#16a34a" : "#dc2626"; return (
+        <div style={{ ...CARD, borderTop: `3px solid ${c}` }}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>P99 Latency</p>
-          <p style={{ fontSize: "36px", fontWeight: 700, color: "#16a34a", marginTop: "4px" }}>{data.p99}ms</p>
+          <p style={{ fontSize: "36px", fontWeight: 700, color: c, marginTop: "4px" }}>{data.p99}ms</p>
           <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>Target: &lt;200ms</p>
-        </div>
+        </div>); })()}
       </div>
 
       {/* SLA Targets Table */}
