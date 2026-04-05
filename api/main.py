@@ -640,6 +640,7 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
         })
         if len(_firewall_violations[kh]) > 1000:
             _firewall_violations[kh] = _firewall_violations[kh][-1000:]
+        _dispatch_security_event("firewall_violation", {"entry_id": mem_id, "reason": _block_reason}, kh)
         return {"id": mem_id, "content": req.content, "metadata": req.metadata or {}, "score": omega, "blocked": True,
                 "write_firewall_triggered": True, "firewall_checks": _firewall_checks,
                 "block_reason": _block_reason, "uri": None,
@@ -3368,9 +3369,23 @@ def autonomous_heal(req: AutonomousHealRequest, key_record: dict = Depends(verif
                 try: http_requests.post(wh["url"], json={"event": "AUTONOMOUS_HEAL_TRIGGERED",
                     "agent_id": req.agent_id, "actions": len(actions)}, timeout=2)
                 except Exception: pass
+    # Auto-prune: delete entries with action DELETE
+    auto_pruned = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY and not req.dry_run:
+        for act in actions:
+            if act.get("action") == "DELETE" and act.get("entry_id"):
+                try:
+                    http_requests.delete(
+                        f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{act['entry_id']}&api_key_hash=eq.{kh}",
+                        headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                        timeout=5)
+                    auto_pruned.append(act["entry_id"])
+                except Exception:
+                    pass
+
     return {"auto_healed": not req.dry_run, "actions_taken": actions, "omega_before": round(omega_before, 1),
             "omega_after": round(omega_after, 1), "improvement": improvement,
-            "dry_run": req.dry_run, "snapshot_id": snap_id}
+            "dry_run": req.dry_run, "snapshot_id": snap_id, "auto_pruned": auto_pruned}
 
 @app.post("/v1/memory/quarantine/{entry_id}/release")
 def release_quarantine(entry_id: str, key_record: dict = Depends(verify_api_key)):
@@ -5802,6 +5817,25 @@ def _dispatch_webhooks(decision: str, request_id: str, omega: float, entry_ids: 
         threading.Thread(target=_send, daemon=True).start()
 
 
+def _dispatch_security_event(event_type: str, details: dict, key_hash: str):
+    """Dispatch security event to registered webhooks."""
+    for wh in _webhooks:
+        events = wh.get("events", [])
+        if event_type not in events and "security" not in events:
+            continue
+        payload = {"event": event_type, "details": details, "timestamp": datetime.now(timezone.utc).isoformat()}
+        try:
+            sig = _sign_payload(_json.dumps(payload, sort_keys=True), wh.get("secret", ""))
+            def _send_sec(url=wh["url"], data=_json.dumps(payload, sort_keys=True), s=sig):
+                try:
+                    http_requests.post(url, data=data, headers={"Content-Type": "application/json", "X-Sgraal-Signature": s}, timeout=5)
+                except Exception:
+                    pass
+            threading.Thread(target=_send_sec, daemon=True).start()
+        except Exception:
+            pass
+
+
 def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str, omega: float, extra: dict = None):
     """Log audit event to Supabase (requires service role for RLS)."""
     _sb = supabase_service_client or supabase_client
@@ -6059,6 +6093,7 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
             pass
 
     # RL Q-table update
+    _compliance_forced = not outcome.get("compliance_result", {}).get("compliant", True)
     rl_reward = None
     try:
         rl_reward = update_from_outcome(
@@ -6068,6 +6103,8 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
             outcome_status=req.status,
             domain=outcome.get("domain", "general"),
         )
+        if _compliance_forced and rl_reward is not None:
+            rl_reward = rl_reward * 0.5  # Downweight compliance-forced decisions
         # FIX 4: Persist Q-table to Redis after every update
         try:
             from scoring_engine.rl_policy import _q_table
@@ -6272,6 +6309,24 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
     except Exception:
         pass
 
+    # Track repair effectiveness
+    _repair_eff = None
+    try:
+        _suggested = outcome.get("repair_plan", [])
+        _suggested_actions = [r.get("action", "") if isinstance(r, dict) else str(r) for r in _suggested] if _suggested else []
+        _omega_before = outcome.get("omega_mem_final", 0)
+        _omega_improvement = _omega_before * 0.3 if req.status == "success" else 0
+        _repair_eff = {
+            "suggested_actions": _suggested_actions,
+            "executed_actions": req.failure_components if req.status == "failure" else _suggested_actions,
+            "omega_before": _omega_before,
+            "outcome_status": req.status,
+            "estimated_improvement": round(_omega_improvement, 1),
+        }
+        _persist_store(f"repair_eff:{req.outcome_id}", _repair_eff, ttl=604800)
+    except Exception:
+        pass
+
     resp = {
         "outcome_id": req.outcome_id,
         "status": req.status,
@@ -6285,7 +6340,23 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
         resp["pg_temperature_decayed"] = True
     if _weight_calibrated:
         resp["weight_calibration"] = True
+    resp["compliance_forced"] = _compliance_forced
     return resp
+
+
+@app.get("/v1/repair/effectiveness")
+def get_repair_effectiveness(key_record: dict = Depends(verify_api_key), limit: int = 20):
+    """Aggregated repair effectiveness metrics."""
+    results = []
+    _sb = supabase_service_client or supabase_client
+    if _sb:
+        try:
+            q = _sb.table("outcome_log").select("*").eq("status", "success").order("closed_at", desc=True).limit(limit)
+            r = q.execute()
+            results = r.data or []
+        except Exception:
+            pass
+    return {"effectiveness": results, "count": len(results)}
 
 
 # --- Live weights endpoint ---
@@ -6708,6 +6779,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "reason": "Injection pattern detected in memory content",
             "priority": "high", "projected_improvement": 0, "success_probability": 1.0,
         })
+        _dispatch_security_event("poisoning_detected", {"agent_id": req.agent_id, "omega": omega_out}, key_record.get("key_hash", ""))
 
     response = {
         "omega_mem_final": omega_out,
@@ -6744,6 +6816,11 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
     }
+
+    # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
+    if outcome_id in _outcomes:
+        _outcomes[outcome_id]["compliance_result"] = response.get("compliance_result", {})
+        _outcomes[outcome_id]["repair_plan"] = repair_plan_out
 
     # #127 Decision Cost Engine
     if req.cost_config:
@@ -8668,6 +8745,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _override_chain.append({"source": "circuit_breaker", "action": "BLOCK", "applied": True})
         response["recommended_action"] = "BLOCK"
         for _oc in _override_chain[:-1]: _oc["applied"] = False
+        _dispatch_security_event("circuit_breaker_open", {"agent_id": req.agent_id, "omega": omega_out}, key_record.get("key_hash", ""))
     # Check if policy compiler overrode
     if _policy_result and _policy_result.get("override"):
         _override_chain.append({"source": "policy_compiler", "action": _policy_result["override"], "applied": True})

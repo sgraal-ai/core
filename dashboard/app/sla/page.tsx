@@ -13,6 +13,9 @@ interface SlaData {
   error_rate: number;
   block_rate: number;
   latency_buckets: { label: string; pct: number }[];
+  mttr_estimate?: number;
+  mttr_p95?: number;
+  recovery_probability?: number;
 }
 
 const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", padding: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
@@ -180,6 +183,19 @@ export default function SlaPage() {
           </p>
         </div>
       </div>
+
+      {/* MTTR Analysis */}
+      {data.mttr_estimate !== undefined && (
+        <div style={{ ...CARD, marginTop: "32px" }}>
+          <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Mean Time To Recovery</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "16px" }}>
+            {data.mttr_estimate !== undefined && <div><p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>MTTR Estimate</p><p style={{ fontSize: "24px", fontWeight: 700 }}>{data.mttr_estimate} steps</p></div>}
+            {data.mttr_p95 !== undefined && <div><p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>P95 Recovery</p><p style={{ fontSize: "24px", fontWeight: 700 }}>{data.mttr_p95} steps</p></div>}
+            {data.recovery_probability !== undefined && <div><p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Recovery Probability</p><p style={{ fontSize: "24px", fontWeight: 700, color: Number(data.recovery_probability) > 0.8 ? "#16a34a" : "#c9a962" }}>{Math.round(Number(data.recovery_probability) * 100)}%</p></div>}
+          </div>
+          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "8px" }}>Estimated steps to return to USE_MEMORY state after a BLOCK event.</p>
+        </div>
+      )}
     </div>
   );
 }
