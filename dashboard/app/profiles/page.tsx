@@ -78,7 +78,7 @@ export default function ProfilesPage() {
       <p className="text-muted text-sm mb-6">Configure memory governance rules per domain.</p>
 
       {/* Active Profiles Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "40px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "16px", marginBottom: "40px" }}>
         {profiles.map((p) => (
           <div key={p.id} style={{ ...CARD, borderLeft: `4px solid ${p.active ? "#c9a962" : "#d1d5db"}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>

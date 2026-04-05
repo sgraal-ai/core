@@ -102,7 +102,7 @@ export default function SlaPage() {
       </div>
 
       {/* Overview Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "32px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "32px" }}>
         {(() => { const ok = data.uptime >= 99.9; const c = ok ? "#16a34a" : "#dc2626"; return (
         <div style={{ ...CARD, borderTop: `3px solid ${c}` }}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Uptime</p>

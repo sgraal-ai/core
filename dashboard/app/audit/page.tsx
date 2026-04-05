@@ -212,13 +212,17 @@ export default function AuditPage() {
         </table>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px" }}>
-        <p style={{ fontSize: "13px", color: "#6b7280" }}>Showing {page * perPage + 1}-{Math.min((page + 1) * perPage, totalEntries)} of {totalEntries.toLocaleString()} entries</p>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button disabled={page === 0} onClick={() => setPage(page - 1)} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: page === 0 ? "not-allowed" : "pointer", opacity: page === 0 ? 0.4 : 1 }}>Previous</button>
-          <button disabled={(page + 1) * perPage >= totalCount} onClick={() => setPage(page + 1)} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: (page + 1) * perPage >= totalCount ? "not-allowed" : "pointer", opacity: (page + 1) * perPage >= totalCount ? 0.4 : 1 }}>Next</button>
+      {totalCount > 0 ? (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px" }}>
+          <p style={{ fontSize: "13px", color: "#6b7280" }}>Showing {page * perPage + 1}-{Math.min((page + 1) * perPage, totalEntries)} of {totalEntries.toLocaleString()} entries</p>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button disabled={page === 0} onClick={() => setPage(page - 1)} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: page === 0 ? "not-allowed" : "pointer", opacity: page === 0 ? 0.4 : 1 }}>Previous</button>
+            <button disabled={(page + 1) * perPage >= totalCount} onClick={() => setPage(page + 1)} style={{ padding: "6px 14px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "13px", cursor: (page + 1) * perPage >= totalCount ? "not-allowed" : "pointer", opacity: (page + 1) * perPage >= totalCount ? 0.4 : 1 }}>Next</button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <p className="text-sm text-muted text-center mt-4">No audit entries found.</p>
+      )}
     </div>
   );
 }

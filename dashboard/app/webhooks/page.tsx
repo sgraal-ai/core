@@ -5,7 +5,6 @@ import { getApiKey, getApiUrl } from "../lib/storage";
 import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface Webhook { id: string; url: string; events: string[]; active: boolean; last_triggered: string; }
-interface Delivery { timestamp: string; event: string; status: number; response_time: string; }
 
 const ALL_EVENTS = ["decision.block", "decision.warn", "decision.ask_user", "memory.healed", "sleeper.detected", "poisoning.suspected", "atc.conflict"];
 const DEFAULT_CHECKED = ["decision.block", "decision.warn"];
@@ -18,7 +17,6 @@ const BTN_GOLD: React.CSSProperties = { background: "#c9a962", color: "#0B0F14",
 export default function WebhooksPage() {
   const [mounted, setMounted] = useState(false);
   const [hooks, setHooks] = useState<Webhook[]>([]);
-  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [hasKey, setHasKey] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -150,29 +148,9 @@ export default function WebhooksPage() {
       </div>
 
       {/* Delivery Log */}
-      <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "16px" }}>Delivery Log</h2>
-      <div style={{ ...CARD, padding: 0, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              {["Timestamp", "Event", "Status", "Response Time"].map((h) => <th key={h} style={TH}>{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {deliveries.map((d, i) => (
-              <tr key={i}>
-                <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px" }}>{d.timestamp}</td>
-                <td style={TD}><span style={{ background: "rgba(201,169,98,0.1)", color: "#c9a962", borderRadius: "20px", padding: "2px 8px", fontSize: "11px" }}>{d.event}</span></td>
-                <td style={TD}>
-                  <span style={{ background: d.status === 200 ? "#dcfce7" : "#fee2e2", color: d.status === 200 ? "#16a34a" : "#dc2626", borderRadius: "20px", padding: "2px 10px", fontSize: "12px", fontWeight: 600 }}>
-                    {d.status === 0 ? "timeout" : d.status}
-                  </span>
-                </td>
-                <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{d.response_time}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div style={CARD}>
+        <h2 style={{ fontSize: "18px", fontWeight: 700, marginBottom: "12px" }}>Delivery Log</h2>
+        <p className="text-sm text-muted">Delivery logs available via API — <code className="text-gold font-mono text-xs">GET /v1/webhooks/delivery-log</code></p>
       </div>
 
       {/* Add Webhook Modal */}
