@@ -417,8 +417,10 @@ export default function ScalePage() {
                 const res = await fetch(`${base()}/v1/weights/current?domain=${domain}`, { headers: headers() });
                 if (res.ok) setCurrentWeights(await res.json());
               } catch {}
-            }} className="bg-surface border border-surface-light rounded px-2 py-1 text-sm font-mono" style={{ cursor: "pointer" }}>
-              {["general", "legal", "fintech", "medical", "coding", "customer_support"].map(d => <option key={d} value={d}>{d}</option>)}
+            }} className="border border-surface-light rounded px-2 py-1 text-sm bg-surface text-foreground cursor-pointer">
+              {["general", "legal", "fintech", "medical", "coding", "customer_support"].map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
             </select>
             {currentWeights && (
               <span className="text-xs font-mono px-2 py-1 rounded" style={{
