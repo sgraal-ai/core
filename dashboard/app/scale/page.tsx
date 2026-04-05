@@ -27,6 +27,7 @@ export default function ScalePage() {
   const [lineageData, setLineageData] = useState<Record<string, { count: number; format: string }>>({});
   const [fleetAgents, setFleetAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [currentWeights, setCurrentWeights] = useState<Record<string, unknown> | null>(null);
+  const [weightsDomain, setWeightsDomain] = useState("general");
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
@@ -408,14 +409,26 @@ export default function ScalePage() {
       <div className={`${CARD} mb-6`}>
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold">Current Weights</h2>
-          {currentWeights && (
-            <span className="text-xs font-mono px-2 py-1 rounded" style={{
-              background: currentWeights.calibrated ? "rgba(22,163,74,0.1)" : "rgba(107,114,128,0.1)",
-              color: currentWeights.calibrated ? "#16a34a" : "#6b7280",
-            }}>
-              {currentWeights.calibrated ? "Calibrated" : "Baseline"}
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            <select value={weightsDomain} onChange={async (e) => {
+              const domain = e.target.value;
+              setWeightsDomain(domain);
+              try {
+                const res = await fetch(`${base()}/v1/weights/current?domain=${domain}`, { headers: headers() });
+                if (res.ok) setCurrentWeights(await res.json());
+              } catch {}
+            }} className="bg-surface border border-surface-light rounded px-2 py-1 text-sm font-mono" style={{ cursor: "pointer" }}>
+              {["general", "legal", "fintech", "medical", "coding", "customer_support"].map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            {currentWeights && (
+              <span className="text-xs font-mono px-2 py-1 rounded" style={{
+                background: currentWeights.calibrated ? "rgba(22,163,74,0.1)" : "rgba(107,114,128,0.1)",
+                color: currentWeights.calibrated ? "#16a34a" : "#6b7280",
+              }}>
+                {currentWeights.calibrated ? "Calibrated" : "Baseline"}
+              </span>
+            )}
+          </div>
         </div>
         <p className="text-sm text-muted mb-4">Weights adjust automatically as you submit outcomes. Drift shows how much the system has learned.</p>
         {currentWeights && currentWeights.components ? (() => {
