@@ -279,7 +279,7 @@ export default function ConsciousnessPage() {
 
   return (
     <div style={{ position: "relative" }}>
-      <Script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" onLoad={() => setD3Ready(true)} />
+      <Script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" crossOrigin="anonymous" onLoad={() => setD3Ready(true)} />
 
       <div className="flex items-start justify-between mb-4">
         <div>
@@ -347,7 +347,7 @@ export default function ConsciousnessPage() {
 
           {/* Mock component breakdown */}
           <div style={{ marginBottom: "24px" }}>
-            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "8px" }}>Component Breakdown</p>
+            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "8px" }}>Component Breakdown (estimated)</p>
             {(() => {
               const components = ["s_freshness", "s_drift", "s_provenance", "s_interference", "s_propagation", "r_recall", "r_encode", "r_belief", "s_relevance", "r_recovery"];
               const stableValues: Record<string, number> = {};

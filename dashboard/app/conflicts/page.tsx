@@ -31,7 +31,7 @@ export default function ConflictsPage() {
       return;
     }
     fetch(`${apiUrl}/v1/conflicts`, { headers: { Authorization: `Bearer ${apiKey}` } })
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
       .then((d) => setConflicts(d.conflicts || []))
       .catch(() => setConflicts([]))
       .finally(() => setLoading(false));

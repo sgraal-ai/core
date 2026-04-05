@@ -137,7 +137,6 @@ export default function WebhooksPage() {
                 <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{h.last_triggered}</td>
                 <td style={TD}>
                   <div style={{ display: "flex", gap: "8px" }}>
-                    <button style={{ fontSize: "13px", color: "#6b7280", cursor: "pointer", background: "none", border: "none" }}>Edit</button>
                     <button onClick={() => deleteWebhook(h.id)} style={{ fontSize: "13px", color: "#dc2626", cursor: "pointer", background: "none", border: "none" }}>Delete</button>
                   </div>
                 </td>

@@ -41,6 +41,8 @@ export default function ScalePage() {
     const h = { Authorization: `Bearer ${apiKey}` };
     const u = getApiUrl();
 
+    setHealthHistory([]);
+    const healthResults: HealthPoint[] = [];
     await Promise.all([
       fetch(`${u}/v1/learning/qtable-status`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setQtable(d)).catch(() => {}),
       fetch(`${u}/v1/alerts/predictive`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => { if (d) setAlerts(Array.isArray(d) ? d : d.alerts ?? []); }).catch(() => {}),
@@ -48,10 +50,11 @@ export default function ScalePage() {
       ...DEMO_FLEET.map(agent =>
         fetch(`${u}/v1/memory/health-history?agent_id=${agent.id}`, { headers: h })
           .then(r => r.ok ? r.json() : null)
-          .then(d => { if (d) setHealthHistory(prev => [...prev, { ...d, agent_id: agent.id }]); })
+          .then(d => { if (d) healthResults.push({ ...d, agent_id: agent.id }); })
           .catch(() => {})
       ),
     ]);
+    setHealthHistory(healthResults);
     setLoading(false);
   }, []);
 
@@ -248,7 +251,7 @@ export default function ScalePage() {
       </div>
 
       {/* Outcome History */}
-      <div className={CARD}>
+      <div className={`${CARD} mb-6`}>
         <h2 className="text-lg font-semibold mb-3">Outcome Reporting</h2>
         <p className="text-sm text-muted mb-2">Submit outcomes via <code className="text-gold font-mono text-xs">POST /v1/outcome</code> to train the RL model and improve future decisions.</p>
         <p className="text-sm text-muted mb-4">Every reported outcome trains the RL model. The more outcomes you submit, the more accurately Sgraal calibrates thresholds for your specific use case.</p>

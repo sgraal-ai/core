@@ -156,13 +156,16 @@ export default function SlaPage() {
       <div style={{ ...CARD, marginBottom: "32px" }}>
         <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Latency Distribution</h2>
         <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: "160px" }}>
-          {buckets.map((b) => (
+          {buckets.map((b, i) => {
+            const bucketColor = i < 3 ? "#16a34a" : i < 5 ? "#c9a962" : "#dc2626";
+            return (
             <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
               <span style={{ fontSize: "12px", fontWeight: 600, color: "#0B0F14", marginBottom: "4px" }}>{b.pct}%</span>
-              <div style={{ width: "100%", height: `${(b.pct / maxBucket) * 120}px`, background: b.pct > 10 ? "#16a34a" : b.pct > 3 ? "#c9a962" : "#e5e7eb", borderRadius: "4px 4px 0 0", transition: "height 0.6s ease" }} />
+              <div style={{ width: "100%", height: `${(b.pct / maxBucket) * 120}px`, background: bucketColor, borderRadius: "4px 4px 0 0", transition: "height 0.6s ease" }} />
               <span style={{ fontSize: "11px", color: "#6b7280", marginTop: "6px", textAlign: "center" }}>{b.label}</span>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

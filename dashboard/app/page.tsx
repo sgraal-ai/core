@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import type { Agent } from "./lib/mock-data";
 import type { DemoAgent } from "./lib/demo-fleet";
 import { DEMO_FLEET } from "./lib/demo-fleet";
@@ -180,8 +181,8 @@ export default function DashboardHome() {
       </div>
 
       <div className="flex gap-3 mb-6">
-        <a href="/tutorial" className="bg-gold text-background text-sm font-semibold px-4 py-2 rounded hover:bg-gold-dim transition">Start Tutorial</a>
-        <a href="/code-generator" className="bg-surface border border-surface-light text-sm px-4 py-2 rounded hover:bg-surface-light transition">Code Generator</a>
+        <Link href="/tutorial" className="bg-gold text-background text-sm font-semibold px-4 py-2 rounded hover:bg-gold-dim transition">Start Tutorial</Link>
+        <Link href="/code-generator" className="bg-surface border border-surface-light text-sm px-4 py-2 rounded hover:bg-surface-light transition">Code Generator</Link>
       </div>
 
       {(() => {

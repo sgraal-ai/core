@@ -362,7 +362,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                 const memoryState = demo?.memory_state ?? [{
                   id: `mem_${agent.id}`,
                   content: `Memory for ${agent.name}`,
-                  type: "fact",
+                  type: "semantic",
                   domain: agent.domain,
                   timestamp_age_days: 30,
                 }];
