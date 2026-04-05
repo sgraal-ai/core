@@ -70,11 +70,21 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       return;
     }
 
-    const demo = DEMO_FLEET.find((d) => d.id === id);
-    if (!demo) {
-      setLoading(false);
-      return;
-    }
+    const demo = DEMO_FLEET.find((d) => d.id === id) ?? {
+      id,
+      name: id.replace(/^agent-/, "").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      domain: "general",
+      action_type: "reversible",
+      memory_state: [{
+        id: `mem_${id}`,
+        content: `Memory for ${id}`,
+        type: "semantic",
+        timestamp_age_days: 1,
+        source_trust: 0.8,
+        source_conflict: 0.1,
+        downstream_count: 2,
+      }],
+    };
 
     fetchPreflight(demo, apiKey, apiUrl)
       .then(async (liveAgent) => {
