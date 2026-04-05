@@ -8550,13 +8550,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if not _is_dry_run:
         # Audit log
         _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out,
-                   {"agent_id": req.agent_id, "domain": req.domain, "action_type": req.action_type,
-                    "feature_flags": {
-                        "use_pagerank": bool(req.use_pagerank),
-                        "dp_epsilon": req.dp_epsilon is not None,
-                        "compliance_profile": req.compliance_profile or None,
-                        "response_profile": getattr(req, "response_profile", None),
-                    }})
+                   {"agent_id": req.agent_id, "domain": req.domain, "action_type": req.action_type})
 
     # Webhook dispatch (skip in dry_run)
     entry_ids = [e.id for e in entries]
