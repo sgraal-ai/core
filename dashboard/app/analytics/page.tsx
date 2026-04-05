@@ -38,6 +38,7 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [timeAgo, setTimeAgo] = useState("just now");
+  const [auditEntries, setAuditEntries] = useState<Array<Record<string, unknown>>>([]);
 
   const load = useCallback(async () => {
     setMounted(true);
@@ -53,6 +54,11 @@ export default function AnalyticsPage() {
       ]);
       if (sR.ok) setSummary(await sR.json());
       if (wR.ok) setWaste(await wR.json());
+    } catch {}
+    // Fetch audit entries for domain/agent breakdown
+    try {
+      const aR = await fetch(`${apiUrl}/v1/audit-log?limit=500`, { headers: h });
+      if (aR.ok) { const d = await aR.json(); setAuditEntries(d.entries ?? []); }
     } catch {}
     setLoading(false);
     setLastUpdated(new Date());
@@ -213,6 +219,97 @@ export default function AnalyticsPage() {
           </table>
         </div>
       )}
+      {/* Domain Breakdown */}
+      {auditEntries.length > 0 && (() => {
+        const byDomain: Record<string, { total: number; block: number; warn: number; use: number; omegaSum: number }> = {};
+        for (const e of auditEntries) {
+          const d = String(e.domain || "unknown");
+          if (!byDomain[d]) byDomain[d] = { total: 0, block: 0, warn: 0, use: 0, omegaSum: 0 };
+          byDomain[d].total++;
+          if (e.decision === "BLOCK") byDomain[d].block++;
+          else if (e.decision === "WARN" || e.decision === "ASK_USER") byDomain[d].warn++;
+          else byDomain[d].use++;
+          byDomain[d].omegaSum += Number(e.omega_mem_final ?? 0);
+        }
+        const rows = Object.entries(byDomain).map(([domain, s]) => ({
+          domain, total: s.total,
+          blockPct: s.total > 0 ? Math.round((s.block / s.total) * 100) : 0,
+          warnPct: s.total > 0 ? Math.round((s.warn / s.total) * 100) : 0,
+          usePct: s.total > 0 ? Math.round((s.use / s.total) * 100) : 0,
+          avgOmega: s.total > 0 ? Math.round(s.omegaSum / s.total * 10) / 10 : 0,
+        })).sort((a, b) => b.blockPct - a.blockPct);
+        const TH: React.CSSProperties = { fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "8px 16px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em" };
+        const TD: React.CSSProperties = { fontSize: "14px", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" };
+        return (
+          <div style={{ ...CARD, marginTop: "24px" }}>
+            <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Domain Breakdown</h2>
+            <p className="text-sm text-muted mb-4">Domains with highest block rates may need threshold adjustment.</p>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr>
+                {["Domain", "Calls", "BLOCK %", "WARN %", "USE %", "Avg Omega"].map(h => <th key={h} style={TH}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.domain}>
+                    <td style={{ ...TD, fontWeight: 600 }}>{r.domain}</td>
+                    <td style={TD}>{r.total}</td>
+                    <td style={{ ...TD, color: r.blockPct > 20 ? "#dc2626" : "#6b7280", fontWeight: 600 }}>{r.blockPct}%</td>
+                    <td style={{ ...TD, color: r.warnPct > 20 ? "#c9a962" : "#6b7280" }}>{r.warnPct}%</td>
+                    <td style={{ ...TD, color: "#16a34a" }}>{r.usePct}%</td>
+                    <td style={{ ...TD, color: r.avgOmega > 50 ? "#dc2626" : r.avgOmega > 25 ? "#c9a962" : "#16a34a" }}>{r.avgOmega}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+
+      {/* Agent Breakdown */}
+      {auditEntries.length > 0 && (() => {
+        const byAgent: Record<string, { total: number; block: number; omegaSum: number; lastDecision: string }> = {};
+        for (const e of auditEntries) {
+          const a = String(e.agent_id || "unknown");
+          if (!byAgent[a]) byAgent[a] = { total: 0, block: 0, omegaSum: 0, lastDecision: "" };
+          byAgent[a].total++;
+          if (e.decision === "BLOCK") byAgent[a].block++;
+          byAgent[a].omegaSum += Number(e.omega_mem_final ?? 0);
+          byAgent[a].lastDecision = String(e.decision ?? "");
+        }
+        const rows = Object.entries(byAgent).map(([agent, s]) => ({
+          agent, total: s.total,
+          blockPct: s.total > 0 ? Math.round((s.block / s.total) * 100) : 0,
+          avgOmega: s.total > 0 ? Math.round(s.omegaSum / s.total * 10) / 10 : 0,
+          lastDecision: s.lastDecision,
+        })).sort((a, b) => b.blockPct - a.blockPct);
+        const TH: React.CSSProperties = { fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "8px 16px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em" };
+        const TD: React.CSSProperties = { fontSize: "14px", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" };
+        const decisionColor: Record<string, string> = { BLOCK: "#dc2626", WARN: "#c9a962", ASK_USER: "#f97316", USE_MEMORY: "#16a34a" };
+        return (
+          <div style={{ ...CARD, marginTop: "24px" }}>
+            <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Agent Breakdown</h2>
+            <p className="text-sm text-muted mb-4">Agents with consistently high block rates may have stale or misconfigured memory.</p>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr>
+                {["Agent", "Calls", "BLOCK %", "Avg Omega", "Last Decision"].map(h => <th key={h} style={TH}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.agent}>
+                    <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px", fontWeight: 600 }}>{r.agent}</td>
+                    <td style={TD}>{r.total}</td>
+                    <td style={{ ...TD, color: r.blockPct > 20 ? "#dc2626" : "#6b7280", fontWeight: 600 }}>{r.blockPct}%</td>
+                    <td style={{ ...TD, color: r.avgOmega > 50 ? "#dc2626" : r.avgOmega > 25 ? "#c9a962" : "#16a34a" }}>{r.avgOmega}</td>
+                    <td style={TD}>
+                      <span style={{ background: decisionColor[r.lastDecision] ? `${decisionColor[r.lastDecision]}20` : "#f3f4f6", color: decisionColor[r.lastDecision] || "#6b7280", borderRadius: "20px", padding: "2px 10px", fontSize: "12px", fontWeight: 600 }}>{r.lastDecision}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
     </div>
   );
 }
