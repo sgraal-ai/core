@@ -1296,9 +1296,35 @@ def analytics_summary(key_record: dict = Depends(verify_api_key)):
                 "suggested_block": round(65 + (1 - success_rate) * 15, 1),
                 "confidence": "high" if len(buckets) >= 100 else "medium"}
             break
+    first_pf = None
+    try:
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            _fp_r = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/first_preflight:{key_record.get('key_hash', 'default')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+            if _fp_r.ok and _fp_r.json().get("result"):
+                first_pf = _fp_r.json()["result"]
+    except Exception:
+        pass
     return {"total_calls": _metrics.preflight_total, "block_rate": round(_metrics.decisions.get("BLOCK", 0) / max(_metrics.preflight_total, 1) * 100, 1),
             "avg_omega": _metrics.avg_omega(), "trend": "stable",
-            "threshold_recommendations": _threshold_recs}
+            "threshold_recommendations": _threshold_recs, "first_preflight_at": first_pf}
+
+@app.get("/v1/analytics/memory-types")
+def get_memory_type_distribution(key_record: dict = Depends(verify_api_key)):
+    kh = key_record.get("key_hash", "default")
+    _types = ["semantic", "episodic", "preference", "tool_state", "shared_workflow", "policy", "identity"]
+    distribution = {}
+    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        for t in _types:
+            try:
+                r = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/mem_type_dist:{kh}:{t}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                if r.ok:
+                    val = r.json().get("result")
+                    distribution[t] = int(val) if val else 0
+                else:
+                    distribution[t] = 0
+            except Exception:
+                distribution[t] = 0
+    return {"distribution": distribution, "total": sum(distribution.values())}
 
 # ---- #38 Tags ----
 @app.get("/v1/store/tags")
@@ -6316,12 +6342,31 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
         _suggested_actions = [r.get("action", "") if isinstance(r, dict) else str(r) for r in _suggested] if _suggested else []
         _omega_before = outcome.get("omega_mem_final", 0)
         _omega_improvement = _omega_before * 0.3 if req.status == "success" else 0
+        # Also check heal records for this agent
+        _heal_actions = []
+        try:
+            _agent_id_eff = outcome.get("agent_id", "")
+            if _agent_id_eff:
+                _heal_key = f"heal_history:{key_record.get('key_hash','default')}:{_agent_id_eff}"
+                _heal_stored = _load_store(_heal_key, [])
+                if isinstance(_heal_stored, list):
+                    _heal_actions = [h.get("action", "") for h in _heal_stored if isinstance(h, dict)]
+        except Exception:
+            pass
+
+        _adoption_rate = 0.0
+        if _suggested_actions:
+            _executed = set(_heal_actions) & set(_suggested_actions)
+            _adoption_rate = round(len(_executed) / len(_suggested_actions), 2) if _suggested_actions else 0
+
         _repair_eff = {
             "suggested_actions": _suggested_actions,
             "executed_actions": req.failure_components if req.status == "failure" else _suggested_actions,
             "omega_before": _omega_before,
             "outcome_status": req.status,
             "estimated_improvement": round(_omega_improvement, 1),
+            "executed_heal_actions": _heal_actions,
+            "adoption_rate": _adoption_rate,
         }
         _persist_store(f"repair_eff:{req.outcome_id}", _repair_eff, ttl=604800)
     except Exception:
@@ -6356,7 +6401,16 @@ def get_repair_effectiveness(key_record: dict = Depends(verify_api_key), limit: 
             results = r.data or []
         except Exception:
             pass
-    return {"effectiveness": results, "count": len(results)}
+    # Aggregate adoption rate from Redis
+    _total_suggested = 0
+    _total_adopted = 0
+    for r in results:
+        attr = r.get("component_attribution", [])
+        if isinstance(attr, list):
+            _total_suggested += max(len(attr), 1)
+            _total_adopted += len(attr)
+    avg_adoption = round(_total_adopted / max(_total_suggested, 1), 2)
+    return {"effectiveness": results, "count": len(results), "avg_adoption_rate": avg_adoption}
 
 
 # --- Live weights endpoint ---
@@ -6405,6 +6459,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                    f"Upgrade your plan or wait until the next billing cycle.",
         )
 
+    # Track first preflight timestamp for activation funnel
+    try:
+        _first_pf_key = f"first_preflight:{key_record.get('key_hash', 'default')}"
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            http_requests.post(f"{UPSTASH_REDIS_URL}/SETNX/{_first_pf_key}/{datetime.now(timezone.utc).isoformat()}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+    except Exception:
+        pass
+
     # Thread-aware sampling
     thread_bucket_id = None
     thread_sample_rate = None
@@ -6445,6 +6507,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         action_context=e.action_context)
         for e in req.memory_state]
 
+    # Track memory type distribution
+    try:
+        _mt_dist_key = f"mem_type_dist:{key_record.get('key_hash', 'default')}"
+        for _entry in entries:
+            _type_k = f"{_mt_dist_key}:{_entry.type}"
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                http_requests.post(f"{UPSTASH_REDIS_URL}/INCR/{_type_k}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+                http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_type_k}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+    except Exception:
+        pass
+
     # #126 Auto-route: filter entries by context before scoring
     _routing_applied = False
     _entries_excluded = 0
@@ -6479,7 +6552,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _cal_pf and isinstance(_cal_pf, dict):
             _effective_weights = _cal_pf
 
+    _module_times = {}
+    _mt_start = _time.monotonic()
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, _effective_weights, req.thresholds, req.use_pagerank)
+    _module_times["scoring_engine"] = round((_time.monotonic() - _mt_start) * 1000, 1)
 
     # Fetch te_history ONCE for all time-series modules (eliminates 10 redundant Redis calls)
     _te_history_cache = list(req.score_history) if req.score_history else []
@@ -6743,6 +6819,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         }
 
     # Security detection: poisoning, hallucination risk, tamper
+    _mt_sec = _time.monotonic()
     _injection_pats = [
         "ignore all previous instructions", "ignore previous instructions",
         "disregard previous", "you are now", "act as", "jailbreak",
@@ -6770,6 +6847,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         (e.source_trust or 1.0) < 0.3 and (e.source_conflict or 0.0) > 0.7
         for e in entries
     )
+
+    _module_times["security_detection"] = round((_time.monotonic() - _mt_sec) * 1000, 1)
 
     _final_action = result.recommended_action
     if _poisoning_suspected:
@@ -8447,7 +8526,13 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if not _is_dry_run:
         # Audit log
         _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out,
-                   {"agent_id": req.agent_id, "domain": req.domain, "action_type": req.action_type})
+                   {"agent_id": req.agent_id, "domain": req.domain, "action_type": req.action_type,
+                    "feature_flags": {
+                        "use_pagerank": bool(req.use_pagerank),
+                        "dp_epsilon": req.dp_epsilon is not None,
+                        "compliance_profile": req.compliance_profile or None,
+                        "response_profile": getattr(req, "response_profile", None),
+                    }})
 
     # Webhook dispatch (skip in dry_run)
     entry_ids = [e.id for e in entries]
@@ -8938,6 +9023,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             }
     except Exception:
         pass
+
+    response["per_module_latency"] = _module_times
 
     response["_trace"] = {
         "span": "preflight",
