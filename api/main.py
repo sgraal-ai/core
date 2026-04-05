@@ -6332,6 +6332,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Fetch te_history ONCE for all time-series modules (eliminates 10 redundant Redis calls)
     _te_history_cache = list(req.score_history) if req.score_history else []
+
+    # Auto-populate from Redis ring buffer
     if len(_te_history_cache) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
             _te_cache_key = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
@@ -6346,6 +6348,27 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _te_history_cache = [float(x) for x in _te_cache_h]
         except Exception:
             pass
+
+    # Auto-populate from audit_log if Redis has insufficient history
+    if len(_te_history_cache) < 5:
+        _sb_hist = supabase_service_client or supabase_client
+        if _sb_hist:
+            try:
+                _agent_id_filter = req.agent_id or ""
+                _hist_q = _sb_hist.table("audit_log").select("omega_mem_final").eq("api_key_id", key_record.get("key_hash", "")).order("created_at", desc=True).limit(20)
+                if _agent_id_filter:
+                    _hist_q = _hist_q.eq("agent_id", _agent_id_filter)
+                _hist_r = _hist_q.execute()
+                if _hist_r.data:
+                    _audit_scores = [float(r["omega_mem_final"]) for r in _hist_r.data if r.get("omega_mem_final") is not None]
+                    if len(_audit_scores) > len(_te_history_cache):
+                        _te_history_cache = list(reversed(_audit_scores))  # oldest first
+            except Exception:
+                pass
+
+    # Make history available to downstream modules that check req.score_history
+    if _te_history_cache and not req.score_history:
+        req.score_history = _te_history_cache
 
     # Generate IDs for tracking
     request_id = str(uuid.uuid4())
