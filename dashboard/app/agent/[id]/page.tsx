@@ -151,6 +151,8 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           tamper_detected: data.tamper_detected ?? false,
           hallucination_risk: data.hallucination_risk ?? "low",
           outcome_id: data.outcome_id,
+          r_total_normalized: data.r_total_normalized ?? 0,
+          stability_score: data.stability_score,
         });
         setOutcomeSubmitted(false);
       }

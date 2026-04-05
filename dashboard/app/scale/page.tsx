@@ -25,6 +25,7 @@ export default function ScalePage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [weights, setWeights] = useState<Record<string, unknown> | null>(null);
   const [lineageData, setLineageData] = useState<Record<string, { count: number; format: string }>>({});
+  const [fleetAgents, setFleetAgents] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
@@ -41,13 +42,35 @@ export default function ScalePage() {
     const h = { Authorization: `Bearer ${apiKey}` };
     const u = getApiUrl();
 
+    // Discover real agents from audit log, fall back to DEMO_FLEET
+    const demoIds = new Set(DEMO_FLEET.map(d => d.id));
+    let agents: Array<{ id: string; name: string }> = DEMO_FLEET.map(d => ({ id: d.id, name: d.name }));
+    try {
+      const auditRes = await fetch(`${u}/v1/audit-log?limit=50`, { headers: h });
+      if (auditRes.ok) {
+        const auditData = await auditRes.json();
+        const entries = auditData.entries ?? [];
+        const realIds = [...new Set(
+          entries.map((e: Record<string, unknown>) => e.agent_id)
+            .filter((id: unknown): id is string => typeof id === "string" && id.length > 0 && !demoIds.has(id))
+        )] as string[];
+        if (realIds.length > 0) {
+          agents = realIds.map(id => ({
+            id,
+            name: id.replace(/^agent-/, "").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+          }));
+        }
+      }
+    } catch {}
+    setFleetAgents(agents);
+
     setHealthHistory([]);
     const healthResults: HealthPoint[] = [];
     await Promise.all([
       fetch(`${u}/v1/learning/qtable-status`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setQtable(d)).catch(() => {}),
       fetch(`${u}/v1/alerts/predictive`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => { if (d) setAlerts(Array.isArray(d) ? d : d.alerts ?? []); }).catch(() => {}),
       fetch(`${u}/v1/weights/export`, { headers: h }).then(r => r.ok ? r.json() : null).then(d => d && setWeights(d)).catch(() => {}),
-      ...DEMO_FLEET.map(agent =>
+      ...agents.map(agent =>
         fetch(`${u}/v1/memory/health-history?agent_id=${agent.id}`, { headers: h })
           .then(r => r.ok ? r.json() : null)
           .then(d => { if (d) healthResults.push({ ...d, agent_id: agent.id }); })
@@ -83,7 +106,7 @@ export default function ScalePage() {
     try {
       const res = await fetch(`${base()}/v1/heal/batch`, {
         method: "POST", headers: headers(),
-        body: JSON.stringify({ entries: DEMO_FLEET.map(a => ({ entry_id: a.id, agent_id: a.id, action: "REFETCH" })) }),
+        body: JSON.stringify({ entries: fleetAgents.map(a => ({ entry_id: a.id, agent_id: a.id, action: "REFETCH" })) }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -168,7 +191,7 @@ export default function ScalePage() {
         <p className="text-sm text-muted mb-4">Autonomous heal detects memory degradation and applies the optimal repair plan — without manual intervention.</p>
         <p className="text-xs text-muted mb-4">Batch heal runs the full repair sequence across all agents simultaneously.</p>
         <div className="space-y-3">
-          {DEMO_FLEET.map(agent => {
+          {fleetAgents.map(agent => {
             const result = healResults.find(r => r.agent_id === agent.id);
             return (
               <div key={agent.id} className="py-2 border-b border-surface-light last:border-0">
@@ -319,7 +342,7 @@ export default function ScalePage() {
         <h2 className="text-lg font-semibold mb-2">Agent Lineage</h2>
         <p className="text-sm text-muted mb-4">Lineage tracks how each memory entry was created and modified over time.</p>
         <div className="space-y-2">
-          {DEMO_FLEET.map(agent => {
+          {fleetAgents.map(agent => {
             const data = lineageData[agent.id];
             return (
               <div key={agent.id} className="flex items-center justify-between py-2 border-b border-surface-light last:border-0">

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { getApiKey, getItem } from "../lib/storage";
+import { getApiKey, getApiUrl } from "../lib/storage";
 
 interface DropdownItem {
   label: string;
@@ -101,11 +101,20 @@ export function NavBar() {
   useEffect(() => {
     setApiKey(getApiKey());
 
-    // Check for pending ASK_USER approvals
-    try {
-      const stored = getItem("sgraal_pending_approvals");
-      if (stored) setPendingApprovals(parseInt(stored, 10) || 0);
-    } catch {}
+    // Fetch pending approval count from API
+    const key = getApiKey();
+    if (key) {
+      fetch(`${getApiUrl()}/v1/approvals`, { headers: { Authorization: `Bearer ${key}` } })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (d) {
+            const all = Array.isArray(d) ? d : d.approvals ?? [];
+            const pending = all.filter((a: Record<string, unknown>) => a.status === "pending").length;
+            setPendingApprovals(pending);
+          }
+        })
+        .catch(() => {});
+    }
   }, []);
 
   // Close dropdown on outside click or Escape
