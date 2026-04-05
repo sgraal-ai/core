@@ -88,7 +88,7 @@ export default function ConflictsPage() {
           data-testid="strategy-selector"
         >
           {STRATEGIES.map((s) => (
-            <option key={s} value={s}>{s.replace("_", " ")}</option>
+            <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
           ))}
         </select>
       </div>
@@ -127,7 +127,7 @@ export default function ConflictsPage() {
                     className="bg-gold text-black px-3 py-1 rounded text-sm font-medium hover:bg-gold/80 transition"
                     data-testid="resolve-button"
                   >
-                    Resolve ({strategy.replace("_", " ")})
+                    Resolve ({strategy.replace(/_/g, " ")})
                   </button>
                 ) : (
                   <span className="text-green-400 text-sm">Resolved</span>

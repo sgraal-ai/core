@@ -218,8 +218,8 @@ export default function ApprovalsPage() {
           {pending.map((item) => (
             <div
               key={item.id}
+              className="bg-surface"
               style={{
-                background: "#ffffff",
                 borderRadius: "8px",
                 borderLeft: "4px solid #c9a962",
                 padding: "24px",
@@ -229,7 +229,7 @@ export default function ApprovalsPage() {
             >
               {/* Top row */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontFamily: "monospace", fontSize: "14px", color: "#0B0F14", fontWeight: 600 }}>
+                <span className="font-mono text-sm text-foreground font-semibold">
                   {item.agent_id}
                 </span>
                 <span className="text-xs text-muted">{item.timestamp}</span>

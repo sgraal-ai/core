@@ -183,6 +183,7 @@ export default function ConsciousnessPage() {
 
     return () => {
       simulation.stop();
+      d3.selectAll(".sgraal-tooltip").remove();
       tooltip.remove();
     };
   }, [d3Ready, nodes, edges]);
