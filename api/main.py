@@ -4486,6 +4486,7 @@ def get_approval(approval_id: str, key_record: dict = Depends(verify_api_key)):
     if not a: raise HTTPException(status_code=404, detail="Approval not found")
     if _time.time() > a.get("expires_at", 0) and a["status"] == "pending":
         a["status"] = "expired"
+        _approvals[approval_id] = a  # persist expiry to Redis
     return a
 
 @app.post("/v1/approvals/{approval_id}/approve")
@@ -4493,6 +4494,7 @@ def approve(approval_id: str, key_record: dict = Depends(verify_api_key)):
     a = _approvals.get(approval_id)
     if not a: raise HTTPException(status_code=404, detail="Approval not found")
     a["status"] = "approved"
+    _approvals[approval_id] = a  # persist to Redis
     return {"approval_id": approval_id, "status": "approved"}
 
 @app.post("/v1/approvals/{approval_id}/reject")
@@ -4500,6 +4502,7 @@ def reject(approval_id: str, key_record: dict = Depends(verify_api_key)):
     a = _approvals.get(approval_id)
     if not a: raise HTTPException(status_code=404, detail="Approval not found")
     a["status"] = "rejected"
+    _approvals[approval_id] = a  # persist to Redis
     return {"approval_id": approval_id, "status": "rejected"}
 
 # ---- #93 Benchmark ----

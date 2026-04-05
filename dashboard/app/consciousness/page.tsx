@@ -279,7 +279,7 @@ export default function ConsciousnessPage() {
 
   return (
     <div style={{ position: "relative" }}>
-      <Script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" crossOrigin="anonymous" onLoad={() => setD3Ready(true)} />
+      <Script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" integrity="sha384-su5kReKyYlIFrI62mbQRKXHzFobMa7BHp1cK6julLPbnYcCW9NIZKJiTODjLPeDh" crossOrigin="anonymous" onLoad={() => setD3Ready(true)} />
 
       <div className="flex items-start justify-between mb-4">
         <div>

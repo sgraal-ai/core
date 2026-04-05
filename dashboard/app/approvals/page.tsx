@@ -83,11 +83,11 @@ export default function ApprovalsPage() {
         const histData = await histRes.json();
         const auditEntries = Array.isArray(histData) ? histData : histData.entries ?? [];
         const mapped: HistoryRow[] = auditEntries.map((entry: Record<string, unknown>) => ({
-          agent_id: entry.agent_id as string,
-          action_type: entry.action_type as string,
-          omega: entry.omega_mem_final as number ?? entry.omega as number ?? 0,
+          agent_id: String(entry.agent_id ?? ""),
+          action_type: String(entry.action_type ?? ""),
+          omega: Number(entry.omega_mem_final ?? entry.omega ?? 0),
           decision: entry.decision === "BLOCK" ? "Rejected" as const : "Approved" as const,
-          timestamp: entry.created_at as string ?? entry.timestamp as string ?? "",
+          timestamp: String(entry.created_at ?? entry.timestamp ?? ""),
         }));
         setHistory(mapped);
       }
