@@ -400,8 +400,9 @@ export default function ScalePage() {
               if (!file) return;
               try {
                 const text = await file.text();
-                const data = JSON.parse(text);
-                const res = await fetch(`${base()}/v1/store/import`, { method: "POST", headers: headers(), body: JSON.stringify(data) });
+                const parsed = JSON.parse(text);
+                const entries = parsed.data ?? parsed.entries ?? (Array.isArray(parsed) ? parsed : []);
+                const res = await fetch(`${base()}/v1/store/import`, { method: "POST", headers: headers(), body: JSON.stringify(entries) });
                 if (res.ok) setToast({ message: "Store imported", type: "success" });
                 else setToast({ message: `Import failed: ${res.status}`, type: "error" });
               } catch { setToast({ message: "Invalid JSON file", type: "error" }); }
