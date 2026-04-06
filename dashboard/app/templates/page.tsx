@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { SyntaxPre } from "../components/SyntaxPre";
 
 interface Template {
   id: string;
@@ -349,9 +350,9 @@ export default function TemplatesPage() {
               </div>
             </div>
             {expanded === t.id && (
-              <pre style={{ background: "#0B0F14", color: "#e2e8f0", padding: "20px 24px", fontSize: "13px", fontFamily: "monospace", lineHeight: 1.6, overflowX: "auto", margin: 0, borderTop: "1px solid #e5e7eb" }}>
-                {t.code}
-              </pre>
+              <div style={{ borderTop: "1px solid #e5e7eb" }}>
+                <SyntaxPre code={t.code} />
+              </div>
             )}
           </div>
         ))}

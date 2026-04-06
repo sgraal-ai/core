@@ -1,6 +1,7 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl, removeApiKey, removeApiUrl, getItem, setItem, removeItem } from "../lib/storage";
+import { SyntaxPre } from "../components/SyntaxPre";
 
 const FRAMEWORKS = ["Python (requests)", "Python (sgraal)", "Node.js", "LangChain", "LangGraph", "CrewAI", "AutoGen", "Vercel AI", "Claude MCP", "Vanilla JS"] as const;
 type Framework = typeof FRAMEWORKS[number];
@@ -80,15 +81,22 @@ function gen(fw: Framework, domain: string, action: string, entries: number, hea
 }
 
 export default function CodeGeneratorPage() {
-  const [fw, setFw] = useState<Framework>("Python (requests)");
+  const [fw, setFw] = useState<Framework>("Python (sgraal)");
   const [domain, setDomain] = useState("fintech");
   const [action, setAction] = useState("irreversible");
   const [entries, setEntries] = useState(3);
   const [heal, setHeal] = useState(false);
   const [batch, setBatch] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [keyInserted, setKeyInserted] = useState(false);
+  const [insertedCode, setInsertedCode] = useState<string | null>(null);
 
-  const code = useMemo(() => gen(fw, domain, action, entries, heal, batch), [fw, domain, action, entries, heal, batch]);
+  const rawCode = useMemo(() => gen(fw, domain, action, entries, heal, batch), [fw, domain, action, entries, heal, batch]);
+  const code = insertedCode && insertedCode !== rawCode ? insertedCode : rawCode;
+
+  // Reset inserted code when raw changes
+  const prevRaw = useRef(rawCode);
+  if (prevRaw.current !== rawCode) { prevRaw.current = rawCode; if (insertedCode) setInsertedCode(null); }
 
   const apiKey = getApiKey();
 
@@ -161,12 +169,21 @@ export default function CodeGeneratorPage() {
       </div>
 
       <div className="relative">
-        <button onClick={copyCode} className="absolute top-3 right-3 text-xs bg-gold text-background px-3 py-1 rounded font-semibold hover:bg-gold-dim transition z-10">
-          {copied ? "Copied!" : "Copy"}
-        </button>
-        <pre className="bg-surface border border-surface-light rounded-xl p-5 text-xs font-mono text-foreground/80 overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap">
-          {code}
-        </pre>
+        <div className="absolute top-3 right-3 flex gap-2 z-10">
+          <button onClick={() => {
+            const key = getApiKey();
+            if (!key) { alert("No API key found — get one at sgraal.com"); return; }
+            setInsertedCode(rawCode.replace(/sg_live_\.\.\./g, key));
+            setKeyInserted(true);
+            setTimeout(() => setKeyInserted(false), 2000);
+          }} className="text-xs px-3 py-1 rounded font-semibold transition" style={{ background: keyInserted ? "#16a34a" : "#ffffff", color: keyInserted ? "#ffffff" : "#6b7280", border: keyInserted ? "none" : "1px solid #e5e7eb" }}>
+            {keyInserted ? "\u2713 Key inserted" : "Insert my API key"}
+          </button>
+          <button onClick={copyCode} className="text-xs bg-gold text-background px-3 py-1 rounded font-semibold hover:bg-gold-dim transition">
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
+        <SyntaxPre code={code} className="max-h-96 overflow-y-auto" />
       </div>
 
       <div className="mt-4 flex gap-3">

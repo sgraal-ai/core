@@ -265,7 +265,27 @@ export default function ComplyPage() {
           const profileMap = (profiles.profiles ?? profiles) as Record<string, unknown>;
           const profileKeys = Object.keys(profileMap).filter(k => typeof profileMap[k] === "object" && profileMap[k] !== null);
           const tabs = profileKeys.length > 0 ? profileKeys : ["EU_AI_ACT", "GDPR", "FDA_510K", "HIPAA"];
-          const active = profileMap[activeProfile] as Record<string, unknown> | undefined;
+          const fallbackProfiles: Record<string, Record<string, unknown>> = {
+            FDA_510K: {
+              description: "FDA 510K — Software as Medical Device (SaMD)",
+              status: "Monitored",
+              articles: [
+                "21 CFR Part 11: Electronic records — all preflight decisions logged with tamper-evident audit trail",
+                "IEC 62304: Software lifecycle — memory governance integrated into agent decision pipeline",
+                "FDA AI/ML Action Plan: Predetermined change control — threshold changes logged and versioned",
+              ],
+            },
+            HIPAA: {
+              description: "HIPAA — Health Insurance Portability",
+              status: "Monitored",
+              articles: [
+                "§164.312(a): Access controls — API key authentication on all memory governance decisions",
+                "§164.312(b): Audit controls — complete preflight audit log with cryptographic integrity",
+                "§164.312(c): Integrity — omega score validates memory integrity before PHI-adjacent actions",
+              ],
+            },
+          };
+          const active = (profileMap[activeProfile] as Record<string, unknown> | undefined) ?? fallbackProfiles[activeProfile];
           return (
             <div>
               <div className="flex gap-2 mb-4 flex-wrap">
