@@ -31,6 +31,7 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [teamKeys, setTeamKeys] = useState<Array<Record<string, unknown>>>([]);
   const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyFull, setNewKeyFull] = useState<string | null>(null);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
 
@@ -201,7 +202,7 @@ export default function TeamPage() {
                   const d = await res.json();
                   setTeamKeys(prev => [...prev, { id: d.id, name: d.name, key_truncated: d.key_truncated, created: d.created, active: true }]);
                   setNewKeyName("");
-                  setToast({ message: `Key "${d.name}" created`, type: "success" });
+                  setNewKeyFull(d.api_key ?? d.key ?? null);
                 } else { setToast({ message: `Failed: ${res.status}`, type: "error" }); }
               } catch { setToast({ message: "Failed to create key", type: "error" }); }
             }} style={{ ...BTN_GOLD, padding: "6px 14px", fontSize: "13px" }}>Create Key</button>
@@ -291,6 +292,25 @@ export default function TeamPage() {
             <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
               <button onClick={() => setShowInviteModal(false)} style={{ padding: "8px 20px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "14px", cursor: "pointer", background: "#ffffff" }}>Cancel</button>
               <button onClick={sendInvite} style={BTN_GOLD}>Send Invite</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Key Modal — shows full key once, then never again */}
+      {newKeyFull && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+          <div style={{ background: "#ffffff", borderRadius: "12px", padding: "32px", width: "520px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }}>
+            <h3 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "8px" }}>API Key Created</h3>
+            <p style={{ fontSize: "13px", color: "#dc2626", fontWeight: 600, marginBottom: "16px" }}>Save this key now — it won't be shown again.</p>
+            <div style={{ background: "#faf9f6", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "14px 16px", fontFamily: "monospace", fontSize: "14px", color: "#0B0F14", wordBreak: "break-all", marginBottom: "16px" }}>
+              {newKeyFull}
+            </div>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+              <button onClick={() => { try { navigator.clipboard.writeText(newKeyFull); } catch {} setCopied("newkey"); setTimeout(() => setCopied(null), 2000); }} style={{ ...BTN_GOLD, background: copied === "newkey" ? "#16a34a" : "#c9a962", color: copied === "newkey" ? "#ffffff" : "#0B0F14" }}>
+                {copied === "newkey" ? "Copied!" : "Copy Key"}
+              </button>
+              <button onClick={() => { setNewKeyFull(null); setToast({ message: "Key saved. It is now masked in the table.", type: "success" }); }} style={{ padding: "8px 20px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "14px", cursor: "pointer", background: "#ffffff" }}>Done</button>
             </div>
           </div>
         </div>

@@ -201,6 +201,53 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         &larr; Back to fleet
       </Link>
 
+      {/* Executive Summary */}
+      {(() => {
+        const action = agent.recommended_action;
+        const isBlock = action === "BLOCK";
+        const isWarn = action === "WARN" || action === "ASK_USER";
+        const borderColor = isBlock ? "#dc2626" : isWarn ? "#c9a962" : "#16a34a";
+        const statusLabel = isBlock ? "BLOCKED" : isWarn ? "WARNING" : "HEALTHY";
+        const cb = agent.component_breakdown ?? {};
+        const worstKey = Object.entries(cb).sort(([,a],[,b]) => (b as number) - (a as number))[0];
+        const worstReason = worstKey ? worstKey[0].replace(/_/g, " ").replace(/^[sr] /, "") : "unknown factors";
+        const rp = agent.repair_plan ?? [];
+        const firstAction = rp.length > 0 ? (typeof rp[0] === "object" ? (rp[0] as unknown as Record<string,unknown>).action ?? rp[0] : rp[0]) : null;
+        const actionMap: Record<string, string> = {
+          REFETCH: "Refresh stale data from the original source",
+          VERIFY_WITH_SOURCE: "Cross-check conflicting data against a trusted source",
+          REBUILD_WORKING_SET: "Rebuild the agent's working memory from scratch",
+          WAIT: "Wait for the system to self-recover",
+          SLA_WARNING: "Review recovery time — SLA threshold exceeded",
+          CHAOS_WARNING: "Stabilize drift before it spirals further",
+          BANACH_WARNING: "Healing loop is not converging — manual intervention needed",
+          SOFT_HEAL: "Apply a lightweight fix to the most affected entries",
+          FULL_HEAL: "Run a full healing cycle across all entries",
+          EMERGENCY_HEAL: "Immediate emergency healing required",
+        };
+        const actionText = firstAction ? (actionMap[String(firstAction)] ?? String(firstAction)) : "No action needed";
+        const healedOmega = (agent as Record<string, unknown>).expected_omega_after_heal;
+        const resultText = healedOmega != null
+          ? `Risk score expected to drop to ${Number(healedOmega).toFixed(0)} after fix`
+          : isBlock ? "Fix required before this agent can act"
+          : isWarn ? "Agent can proceed with caution after fix"
+          : "Agent is operating normally";
+        return (
+          <div style={{ borderLeft: `4px solid ${borderColor}`, background: "#ffffff", borderRadius: "8px", padding: "20px 24px", marginBottom: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "12px" }}>Executive Summary</p>
+            <p style={{ fontSize: "15px", color: "#0B0F14", marginBottom: "8px" }}>
+              <strong style={{ color: borderColor }}>{statusLabel}</strong> — highest risk from {worstReason} ({Number(worstKey?.[1] ?? 0).toFixed(0)}/100)
+            </p>
+            <p style={{ fontSize: "15px", color: "#0B0F14", marginBottom: "8px" }}>
+              <strong>Recommended fix:</strong> {actionText}
+            </p>
+            <p style={{ fontSize: "15px", color: "#0B0F14" }}>
+              <strong>Expected outcome:</strong> {resultText}
+            </p>
+          </div>
+        );
+      })()}
+
       <div className="flex flex-col sm:flex-row gap-8 mb-10">
         <OmegaMeter value={agent.omega_mem_final} size={140} />
         <div>
