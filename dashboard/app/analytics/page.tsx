@@ -130,11 +130,13 @@ export default function AnalyticsPage() {
   const omegaColor = avgOmega < 30 ? "#16a34a" : avgOmega < 60 ? "#c9a962" : "#dc2626";
   const trendLabel = summary?.trend ?? "stable";
 
+  const askUserCount = auditEntries.filter(e => e.decision === "ASK_USER").length;
+  const askUserPct = totalDecisions > 0 ? Math.round((askUserCount / totalDecisions) * 100) : 0;
   const decisions = [
-    { key: "USE_MEMORY", pct: usePct, color: "#16a34a" },
-    { key: "WARN", pct: warnPct, color: "#eab308" },
-    { key: "ASK_USER", pct: totalDecisions > 0 ? Math.round((auditEntries.filter(e => e.decision === "ASK_USER").length / totalDecisions) * 100) : 0, color: "#f97316" },
-    { key: "BLOCK", pct: blockPct, color: "#dc2626" },
+    { key: "USE_MEMORY", pct: usePct, count: auditUse, color: "#16a34a" },
+    { key: "WARN", pct: warnPct, count: auditWarns - askUserCount, color: "#ca8a04" },
+    { key: "ASK_USER", pct: askUserPct, count: askUserCount, color: "#2563eb" },
+    { key: "BLOCK", pct: blockPct, count: auditBlocks, color: "#dc2626" },
   ];
 
   const wastefulEntries = waste?.top_wasteful_entries ?? [];
@@ -167,9 +169,10 @@ export default function AnalyticsPage() {
           <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>Fleet risk: {omegaLabel}</p>
         </div>
         <div style={CARD}>
-          <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Savings Potential</p>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>{waste ? fmtUsd(waste.savings_if_filtered) : "$0.00"}</p>
-          <p style={{ fontSize: "12px", color: "#c9a962", marginTop: "4px" }}>{waste?.roi_multiple ?? 0}x ROI</p>
+          <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Risk Prevention</p>
+          <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>Prevented {auditBlocks} unsafe</p>
+          <p style={{ fontSize: "12px", color: blockPct > 50 ? "#dc2626" : blockPct > 20 ? "#c9a962" : "#16a34a", fontWeight: 600, marginTop: "4px" }}>Estimated risk avoided: {blockPct > 50 ? "HIGH" : blockPct > 20 ? "MEDIUM" : "LOW"}</p>
+          {waste && <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>Token savings: {fmtUsd(waste.savings_if_filtered)}</p>}
         </div>
       </div>
 
@@ -177,13 +180,13 @@ export default function AnalyticsPage() {
       <div style={{ ...CARD, marginBottom: "24px" }}>
         <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Decision Breakdown</h2>
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          {decisions.map(({ key, pct, color }) => (
+          {decisions.map(({ key, pct, count, color }) => (
             <div key={key} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <span style={{ width: "100px", fontSize: "13px", fontFamily: "monospace", color: "#0B0F14" }}>{key}</span>
               <div style={{ flex: 1, height: "20px", background: "#f5f4f0", borderRadius: "4px", overflow: "hidden" }}>
-                <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: "4px", transition: "width 0.8s ease" }} />
+                <div style={{ width: `${Math.max(pct, 1)}%`, height: "100%", background: color, borderRadius: "4px", transition: "width 0.8s ease" }} />
               </div>
-              <span style={{ width: "40px", fontSize: "13px", fontWeight: 600, textAlign: "right" }}>{pct}%</span>
+              <span style={{ width: "80px", fontSize: "13px", fontWeight: 600, textAlign: "right" }}>{pct}% <span style={{ color: "#6b7280", fontWeight: 400 }}>({count})</span></span>
             </div>
           ))}
         </div>
@@ -275,7 +278,14 @@ export default function AnalyticsPage() {
                   <tr key={r.domain}>
                     <td style={{ ...TD, fontWeight: 600 }}>{r.domain}</td>
                     <td style={TD}>{r.total}</td>
-                    <td style={{ ...TD, color: r.blockPct > 20 ? "#dc2626" : "#6b7280", fontWeight: 600 }}>{r.blockPct}%</td>
+                    <td style={{ ...TD, fontWeight: 600 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ color: r.blockPct > 70 ? "#dc2626" : r.blockPct > 30 ? "#c9a962" : "#16a34a", minWidth: "32px" }}>{r.blockPct}%</span>
+                        <div style={{ width: "60px", height: "8px", background: "#f5f4f0", borderRadius: "4px", overflow: "hidden" }}>
+                          <div style={{ width: `${r.blockPct}%`, height: "100%", background: r.blockPct > 70 ? "#dc2626" : r.blockPct > 30 ? "#c9a962" : "#16a34a", borderRadius: "4px" }} />
+                        </div>
+                      </div>
+                    </td>
                     <td style={{ ...TD, color: r.warnPct > 20 ? "#c9a962" : "#6b7280" }}>{r.warnPct}%</td>
                     <td style={{ ...TD, color: "#16a34a" }}>{r.usePct}%</td>
                     <td style={{ ...TD, color: r.avgOmega > 50 ? "#dc2626" : r.avgOmega > 25 ? "#c9a962" : "#16a34a" }}>{r.avgOmega}</td>
