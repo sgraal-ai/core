@@ -325,7 +325,7 @@ export default function AuditPage() {
           <input type="checkbox" checked={auditMode} onChange={(e) => setAuditMode(e.target.checked)} />
           Audit Mode
         </label>
-        {(debouncedSearch || dateFrom || dateTo || highRiskOnly) && (
+        {(debouncedSearch || dateFrom || dateTo || highRiskOnly || auditMode) && (
           <span style={{ fontSize: "12px", color: "#6b7280" }}>{filtered.length} of {entries.length} shown</span>
         )}
       </div>

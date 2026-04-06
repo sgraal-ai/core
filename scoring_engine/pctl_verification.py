@@ -35,24 +35,24 @@ def compute_pctl(omega: float, n_sims: int = 100, steps: int = 10, seed: str = N
         ef_count, ag_count, eg_count = 0, 0, 0
         _base_seed = seed or f"pctl:{omega}"
         for sim in range(n_sims):
-            seed = f"{_base_seed}:{sim}"
+            sim_seed = f"{_base_seed}:{sim}"
             # EF: reaches SAFE or WARN
             s = s0; ef_ok = s <= 1
             for t in range(steps):
-                s = _sim_next(s, TRANSITIONS, seed+"ef", t)
+                s = _sim_next(s, TRANSITIONS, sim_seed+"ef", t)
                 if s <= 1: ef_ok = True; break
             if ef_ok: ef_count += 1
             # AG: heal always improves
             s = s0; ag_ok = True
             for t in range(steps):
-                sh = _sim_next(s, HEAL_TRANS, seed+"ag", t)
+                sh = _sim_next(s, HEAL_TRANS, sim_seed+"ag", t)
                 if s > 0 and sh >= s: ag_ok = False; break
-                s = _sim_next(s, TRANSITIONS, seed+"ags", t)
+                s = _sim_next(s, TRANSITIONS, sim_seed+"ags", t)
             if ag_ok: ag_count += 1
             # EG: stays below CRITICAL
             s = s0; eg_ok = s < 3
             for t in range(steps):
-                s = _sim_next(s, TRANSITIONS, seed+"eg", t)
+                s = _sim_next(s, TRANSITIONS, sim_seed+"eg", t)
                 if s >= 3: eg_ok = False; break
             if eg_ok: eg_count += 1
         return PCTLResult(p_ef_recovery=round(ef_count/n_sims,4), p_ag_heal_works=round(ag_count/n_sims,4), p_eg_stable=round(eg_count/n_sims,4), simulations=n_sims)

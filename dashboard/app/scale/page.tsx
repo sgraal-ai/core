@@ -337,7 +337,7 @@ export default function ScalePage() {
         {rlOpen && <>
 
       {/* Outcome History */}
-      <div className="mt-4">
+      <div className={`${CARD} mt-4 mb-6`}>
         <h3 className="text-base font-semibold mb-3">Outcome Reporting</h3>
         <p className="text-sm text-muted mb-2">Submit outcomes via <code className="text-gold font-mono text-xs">POST /v1/outcome</code> to train the RL model and improve future decisions.</p>
         <p className="text-sm text-muted mb-4">Every reported outcome trains the RL model. The more outcomes you submit, the more accurately Sgraal calibrates thresholds for your specific use case.</p>
