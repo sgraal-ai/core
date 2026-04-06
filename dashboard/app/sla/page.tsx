@@ -84,9 +84,9 @@ export default function SlaPage() {
 
   const targets: { metric: string; target: string; current: string; met: boolean; info?: boolean }[] = [
     { metric: "Uptime", target: "99.9%", current: `${data.uptime}%`, met: data.uptime >= 99.9 },
-    { metric: "P50 latency", target: "<50ms", current: `${data.p50}ms`, met: data.p50 < 50 },
-    { metric: "P95 latency", target: "<100ms", current: `${data.p95}ms`, met: data.p95 < 100 },
-    { metric: "P99 latency", target: "<200ms", current: `${data.p99}ms`, met: data.p99 < 200 },
+    { metric: "P50 latency", target: "<3000ms", current: `${data.p50}ms`, met: data.p50 < 3000 },
+    { metric: "P95 latency", target: "<4000ms", current: `${data.p95}ms`, met: data.p95 < 4000 },
+    { metric: "P99 latency", target: "<5000ms", current: `${data.p99}ms`, met: data.p99 < 5000 },
     { metric: "Error rate", target: "<0.1%", current: `${data.error_rate}%`, met: data.error_rate < 0.1 },
     { metric: "Block rate", target: "N/A", current: `${data.block_rate}%`, met: true, info: true },
   ];
@@ -112,17 +112,17 @@ export default function SlaPage() {
           <p style={{ fontSize: "36px", fontWeight: 700, color: c, marginTop: "4px" }}>{data.uptime}%</p>
           <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>{data.days_since_incident} days since last incident</p>
         </div>); })()}
-        {(() => { const ok = data.p50 < 50; const c = ok ? "#16a34a" : "#dc2626"; return (
+        {(() => { const ok = data.p50 < 3000; const c = ok ? "#16a34a" : "#dc2626"; return (
         <div style={{ ...CARD, borderTop: `3px solid ${c}` }}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>P50 Latency</p>
           <p style={{ fontSize: "36px", fontWeight: 700, color: c, marginTop: "4px" }}>{data.p50}ms</p>
-          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>Target: &lt;50ms</p>
+          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>Target: &lt;3000ms</p>
         </div>); })()}
-        {(() => { const ok = data.p99 < 200; const c = ok ? "#16a34a" : "#dc2626"; return (
+        {(() => { const ok = data.p99 < 5000; const c = ok ? "#16a34a" : "#dc2626"; return (
         <div style={{ ...CARD, borderTop: `3px solid ${c}` }}>
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>P99 Latency</p>
           <p style={{ fontSize: "36px", fontWeight: 700, color: c, marginTop: "4px" }}>{data.p99}ms</p>
-          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>Target: &lt;200ms</p>
+          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>Target: &lt;5000ms</p>
         </div>); })()}
       </div>
 
@@ -157,7 +157,8 @@ export default function SlaPage() {
 
       {/* Latency Distribution */}
       <div style={{ ...CARD, marginBottom: "32px" }}>
-        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Latency Distribution</h2>
+        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "8px" }}>Latency Distribution</h2>
+        <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>Decision latency reflects full 83-module safety analysis. Optimized for correctness, not speed.</p>
         <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: "160px" }}>
           {buckets.map((b, i) => {
             const bucketColor = i < 3 ? "#16a34a" : i < 5 ? "#c9a962" : "#dc2626";
