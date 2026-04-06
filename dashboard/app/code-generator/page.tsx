@@ -5,19 +5,59 @@ import { getApiKey, getApiUrl, setApiKey as saveApiKey, setApiUrl as saveApiUrl,
 const FRAMEWORKS = ["Python (requests)", "Python (sgraal)", "Node.js", "LangChain", "LangGraph", "CrewAI", "AutoGen", "Vercel AI", "Claude MCP", "Vanilla JS"] as const;
 type Framework = typeof FRAMEWORKS[number];
 
-const DOMAINS = ["general", "fintech", "medical", "legal"] as const;
+const DOMAINS = ["general", "fintech", "medical", "legal", "coding"] as const;
 const ACTIONS = ["reversible", "irreversible", "destructive"] as const;
 
-function generateEntry(i: number) {
-  return `  {"id": "mem_${String(i).padStart(3, "0")}", "content": "Memory entry ${i}", "type": "semantic", "timestamp_age_days": ${i * 5}, "source_trust": 0.9, "source_conflict": 0.1, "downstream_count": ${i}}`;
+const DOMAIN_ENTRIES: Record<string, { content: string; type: string; age: number; trust: number; conflict: number; downstream: number }[]> = {
+  fintech: [
+    { content: "Account balance: $50,000", type: "tool_state", age: 3, trust: 0.92, conflict: 0.08, downstream: 5 },
+    { content: "Transfer approval limit: $25,000", type: "policy", age: 10, trust: 0.88, conflict: 0.12, downstream: 3 },
+    { content: "KYC verified 2025-11-10", type: "semantic", age: 45, trust: 0.95, conflict: 0.05, downstream: 2 },
+    { content: "Portfolio risk rating: moderate", type: "semantic", age: 7, trust: 0.85, conflict: 0.15, downstream: 4 },
+    { content: "Last transaction: wire transfer $12,000 on 2025-12-20", type: "episodic", age: 14, trust: 0.90, conflict: 0.10, downstream: 1 },
+  ],
+  legal: [
+    { content: "Liability clause §7.2 capped at €500K", type: "semantic", age: 30, trust: 0.85, conflict: 0.15, downstream: 4 },
+    { content: "Contract renewal deadline: 2026-06-01", type: "tool_state", age: 5, trust: 0.95, conflict: 0.05, downstream: 3 },
+    { content: "Governing law: EU", type: "policy", age: 60, trust: 0.90, conflict: 0.10, downstream: 6 },
+    { content: "Data processing agreement signed 2025-09-01", type: "semantic", age: 90, trust: 0.80, conflict: 0.20, downstream: 2 },
+    { content: "Non-compete clause: 12 months post-termination", type: "semantic", age: 45, trust: 0.88, conflict: 0.12, downstream: 3 },
+  ],
+  medical: [
+    { content: "Patient allergies: penicillin", type: "semantic", age: 5, trust: 0.95, conflict: 0.05, downstream: 8 },
+    { content: "Last checkup: 2025-09-15", type: "tool_state", age: 120, trust: 0.80, conflict: 0.20, downstream: 3 },
+    { content: "DrugX dosage: 10mg daily", type: "policy", age: 15, trust: 0.90, conflict: 0.10, downstream: 5 },
+    { content: "Blood pressure: 130/85 mmHg", type: "tool_state", age: 30, trust: 0.85, conflict: 0.15, downstream: 2 },
+    { content: "Family history: type 2 diabetes", type: "semantic", age: 200, trust: 0.92, conflict: 0.08, downstream: 1 },
+  ],
+  coding: [
+    { content: "Use React for all frontend", type: "policy", age: 10, trust: 0.90, conflict: 0.10, downstream: 3 },
+    { content: "API rate limit: 1000/min", type: "tool_state", age: 2, trust: 0.95, conflict: 0.05, downstream: 5 },
+    { content: "Database: PostgreSQL 16", type: "semantic", age: 30, trust: 0.92, conflict: 0.08, downstream: 4 },
+    { content: "CI pipeline: pytest with 80% coverage gate", type: "policy", age: 15, trust: 0.88, conflict: 0.12, downstream: 2 },
+    { content: "Docker images tagged with git SHA", type: "tool_state", age: 5, trust: 0.93, conflict: 0.07, downstream: 3 },
+  ],
+  general: [
+    { content: "User preference: email notifications", type: "preference", age: 20, trust: 0.90, conflict: 0.10, downstream: 2 },
+    { content: "Last login: 2025-12-01", type: "tool_state", age: 30, trust: 0.85, conflict: 0.15, downstream: 1 },
+    { content: "Account tier: pro", type: "semantic", age: 60, trust: 0.92, conflict: 0.08, downstream: 3 },
+    { content: "Language: English", type: "preference", age: 90, trust: 0.95, conflict: 0.05, downstream: 1 },
+    { content: "Timezone: UTC+1", type: "preference", age: 45, trust: 0.93, conflict: 0.07, downstream: 1 },
+  ],
+};
+
+function generateEntry(i: number, domain: string) {
+  const pool = DOMAIN_ENTRIES[domain] ?? DOMAIN_ENTRIES.general;
+  const e = pool[(i - 1) % pool.length];
+  return `  {"id": "mem_${String(i).padStart(3, "0")}", "content": "${e.content}", "type": "${e.type}", "timestamp_age_days": ${e.age}, "source_trust": ${e.trust}, "source_conflict": ${e.conflict}, "downstream_count": ${e.downstream}}`;
 }
 
 function gen(fw: Framework, domain: string, action: string, entries: number, heal: boolean, _batch: boolean): string {
-  const e = Array.from({ length: entries }, (_, i) => generateEntry(i + 1)).join(",\n");
+  const e = Array.from({ length: entries }, (_, i) => generateEntry(i + 1, domain)).join(",\n");
   const comment = "# Keep your API key secret — never commit it to source control";
 
   if (fw === "Python (requests)") {
-    let code = `${comment}\nimport requests\n\nAPI_KEY = "sg_live_..."  # Replace with your key\n\nresp = requests.post(\n  "https://api.sgraal.com/v1/preflight",\n  headers={"Authorization": f"Bearer {API_KEY}"},\n  json={\n    "memory_state": [\n${e}\n    ],\n    "domain": "${domain}",\n    "action_type": "${action}"\n  }\n)\nresult = resp.json()\nprint(f"Action: {result['recommended_action']}, Omega: {result['omega_mem_final']}")`;
+    let code = `${comment}\nimport os\nimport requests\n\nAPI_KEY = os.environ.get("SGRAAL_API_KEY", "sg_live_...")  # Set env var: export SGRAAL_API_KEY=your_key\n\nresp = requests.post(\n  "https://api.sgraal.com/v1/preflight",\n  headers={"Authorization": f"Bearer {API_KEY}"},\n  json={\n    "memory_state": [\n${e}\n    ],\n    "domain": "${domain}",\n    "action_type": "${action}"\n  }\n)\nresult = resp.json()\n\n# Handle decision\naction = result.get("recommended_action")\n\nif action == "BLOCK":\n    raise RuntimeError(f"Sgraal blocked execution: omega={result.get('omega_mem_final')}")\nelif action == "WARN":\n    print(f"Warning: proceed with caution. Omega={result.get('omega_mem_final')}")\nelif action == "ASK_USER":\n    print("Human approval required before proceeding.")\nelse:\n    print(f"Safe to proceed. Omega={result.get('omega_mem_final')}")`;
     if (heal) code += `\n\n# Heal a blocked entry\nif result["recommended_action"] == "BLOCK":\n    for repair in result["repair_plan"]:\n        requests.post("https://api.sgraal.com/v1/heal",\n            headers={"Authorization": f"Bearer {API_KEY}"},\n            json={"entry_id": repair["entry_id"], "action": repair["action"]})`;
     return code;
   }
