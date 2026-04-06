@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { getApiKey, getApiUrl } from "../lib/storage";
+import { getApiKey, getApiUrl, removeApiKey } from "../lib/storage";
 
 interface DropdownItem {
   label: string;
@@ -213,6 +213,20 @@ export function NavBar() {
               onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "#6b7280"; }}
             >
               {copied ? "Copied!" : "Copy"}
+            </button>
+            <button
+              onClick={() => {
+                if (confirm("Remove API key from this browser? You can re-enter it anytime.")) {
+                  removeApiKey();
+                  window.location.reload();
+                }
+              }}
+              aria-label="Clear API key"
+              style={{ fontSize: "14px", color: "#9ca3af", cursor: "pointer", lineHeight: 1 }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#dc2626")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "#9ca3af")}
+            >
+              &times;
             </button>
           </div>
         ) : (

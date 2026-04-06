@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getApiKey, getApiUrl } from "../lib/storage";
+import { getApiKey, getApiUrl, removeApiKey } from "../lib/storage";
 import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
 interface Member { email: string; role: string; joined: string; status: string; isYou?: boolean; }
@@ -31,6 +31,7 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [teamKeys, setTeamKeys] = useState<Array<Record<string, unknown>>>([]);
   const [newKeyName, setNewKeyName] = useState("");
+  const [keyRevoked, setKeyRevoked] = useState(false);
   const [newKeyFull, setNewKeyFull] = useState<string | null>(null);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
@@ -255,7 +256,7 @@ export default function TeamPage() {
       {/* Your API Key */}
       <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "4px" }}>Your API Key</h2>
       <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>Use this key to authenticate API requests.</p>
-      {hasKey ? (
+      {hasKey && !keyRevoked ? (
         <div>
           <div style={{
             background: "rgba(201,169,98,0.08)", border: "1px solid rgba(201,169,98,0.2)",
@@ -265,18 +266,46 @@ export default function TeamPage() {
             <span style={{ fontFamily: "monospace", fontSize: "15px", color: "#c9a962" }}>
               {storedKey.length > 16 ? storedKey.slice(0, 12) + "..." + storedKey.slice(-4) : storedKey}
             </span>
-            {storedKey && (
+            <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+              {storedKey && (
+                <button
+                  onClick={() => { try { navigator.clipboard.writeText(storedKey); } catch {} setCopied("apikey"); setTimeout(() => setCopied(null), 2000); }}
+                  style={{ fontSize: "13px", color: copied === "apikey" ? "#c9a962" : "#6b7280", cursor: "pointer", background: "none", border: "none", fontWeight: 500 }}
+                >
+                  {copied === "apikey" ? "Copied!" : "Copy"}
+                </button>
+              )}
               <button
-                onClick={() => { try { navigator.clipboard.writeText(storedKey); } catch {} setCopied("apikey"); setTimeout(() => setCopied(null), 2000); }}
-                style={{ fontSize: "13px", color: copied === "apikey" ? "#c9a962" : "#6b7280", cursor: "pointer", background: "none", border: "none", fontWeight: 500 }}
+                onClick={async () => {
+                  if (!confirm("Revoke this key? It will stop working immediately.")) return;
+                  try {
+                    const kh = storedKey ? await (async () => {
+                      const enc = new TextEncoder();
+                      const buf = await crypto.subtle.digest("SHA-256", enc.encode(storedKey));
+                      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+                    })() : "";
+                    if (kh) await fetch(`${apiUrl()}/v1/api-keys/${kh}`, { method: "DELETE", headers: apiHeaders() });
+                  } catch {}
+                  removeApiKey();
+                  setKeyRevoked(true);
+                  setToast({ message: "Key revoked", type: "success" });
+                }}
+                style={{ fontSize: "13px", color: "#dc2626", cursor: "pointer", background: "none", border: "none", fontWeight: 500 }}
               >
-                {copied === "apikey" ? "Copied!" : "Copy"}
+                Revoke
               </button>
-            )}
+            </div>
           </div>
           <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "10px" }}>
             {"Lost your key? "}
             <a href="https://sgraal.com" style={{ color: "#c9a962" }}>Request a new one at sgraal.com &rarr;</a>
+          </p>
+        </div>
+      ) : keyRevoked ? (
+        <div style={{ ...CARD }}>
+          <p style={{ fontSize: "14px", color: "#dc2626", fontWeight: 600 }}>Key revoked.</p>
+          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "6px" }}>
+            <a href="https://sgraal.com" style={{ color: "#c9a962" }}>Get a new API key at sgraal.com &rarr;</a>
           </p>
         </div>
       ) : (
