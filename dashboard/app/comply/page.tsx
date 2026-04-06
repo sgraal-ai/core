@@ -43,12 +43,16 @@ export default function ComplyPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const [refreshing, setRefreshing] = useState(false);
+
   async function refreshReport() {
+    setRefreshing(true);
     const base = getApiUrl();
     try {
-      const res = await fetch(`${base}/v1/compliance/eu-ai-act/report`, { headers: headers() });
+      const res = await fetch(`${base}/v1/compliance/eu-ai-act/report?force_refresh=true`, { headers: headers() });
       if (res.ok) setReport(await res.json());
     } catch {}
+    setRefreshing(false);
   }
 
   async function fetchDeclaration() {
@@ -90,7 +94,7 @@ export default function ComplyPage() {
       <div className={`${CARD} mb-6`}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">EU AI Act Report</h2>
-          <button onClick={refreshReport} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition">Refresh Report</button>
+          <button onClick={refreshReport} disabled={refreshing} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">{refreshing ? "Refreshing..." : "Refresh Report"}</button>
         </div>
         {report ? (
           <div>
