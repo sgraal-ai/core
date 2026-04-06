@@ -203,10 +203,19 @@ export default function ScalePage() {
                     <p className="text-sm font-semibold">{agent.name}</p>
                     <p className="text-xs text-muted font-mono">{agent.id}</p>
                   </div>
-                  <button onClick={() => runHeal(agent.id)} disabled={healLoading === agent.id}
-                    className="text-xs px-3 py-1 rounded border border-surface-light text-muted hover:text-foreground transition disabled:opacity-50">
-                    {healLoading === agent.id ? <span aria-label="Healing agent">...</span> : "Heal"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {result?.omega_before !== undefined && (() => {
+                      const o = result.omega_before!;
+                      const bg = o > 60 ? "#fee2e2" : o > 30 ? "#fef9c3" : "#dcfce7";
+                      const color = o > 60 ? "#dc2626" : o > 30 ? "#a16207" : "#16a34a";
+                      const label = o > 60 ? "Degraded" : o > 30 ? "At Risk" : "Healthy";
+                      return <span style={{ background: bg, color, borderRadius: "4px", padding: "1px 6px", fontSize: "10px", fontWeight: 600 }}>{label}</span>;
+                    })()}
+                    <button onClick={() => runHeal(agent.id)} disabled={healLoading === agent.id}
+                      className="text-xs px-3 py-1 rounded border border-surface-light text-muted hover:text-foreground transition disabled:opacity-50">
+                      {healLoading === agent.id ? <span aria-label="Healing agent">...</span> : "Heal"}
+                    </button>
+                  </div>
                 </div>
                 {result && (
                   <p className="text-xs mt-1" style={{ color: "#16a34a" }}>

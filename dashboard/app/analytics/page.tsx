@@ -235,7 +235,7 @@ export default function AnalyticsPage() {
             <tbody>
               {wastefulEntries.map((e) => (
                 <tr key={e.entry_id}>
-                  <td style={{ padding: "12px 16px", fontSize: "14px", fontFamily: "monospace", fontWeight: 600, borderBottom: "1px solid #f5f4f0" }}>{e.entry_id}</td>
+                  <td style={{ padding: "12px 16px", fontSize: "14px", fontFamily: "monospace", fontWeight: 600, borderBottom: "1px solid #f5f4f0" }}>{/^high_omega_\d+$/.test(e.entry_id) ? `Memory entry ${Number(e.entry_id.split("_").pop()) + 1}` : e.entry_id.length > 12 ? e.entry_id.slice(0, 12) + "..." : e.entry_id}</td>
                   <td style={{ padding: "12px 16px", fontSize: "14px", borderBottom: "1px solid #f5f4f0" }}>{fmt(e.estimated_tokens)}</td>
                   <td style={{ padding: "12px 16px", fontSize: "14px", fontWeight: 600, borderBottom: "1px solid #f5f4f0", color: e.omega > 60 ? "#dc2626" : e.omega > 30 ? "#c9a962" : "#16a34a" }}>{e.omega}</td>
                 </tr>
@@ -384,7 +384,7 @@ export default function AnalyticsPage() {
             </div>
           </div>
           {Number(repairEff.count ?? 0) === 0 && (
-            <p className="text-sm text-muted mt-3">Submit outcomes via the agent detail page to begin tracking repair effectiveness.</p>
+            <p className="text-sm text-muted mt-3">No repair outcomes tracked yet — submit outcomes via agent detail to activate learning.</p>
           )}
         </div>
       )}

@@ -128,7 +128,7 @@ export default function TeamPage() {
           </thead>
           <tbody>
             {members.length === 0 && (
-              <tr><td colSpan={5} style={{ ...TD, textAlign: "center", color: "#6b7280" }}>No team members loaded. Connect your API key to see your team.</td></tr>
+              <tr><td colSpan={5} style={{ ...TD, textAlign: "center", color: "#6b7280" }}>{hasKey ? "No team members yet. Invite your first team member." : "No team members loaded. Connect your API key to see your team."}</td></tr>
             )}
             {members.map((m) => (
               <tr key={m.email}>
@@ -216,7 +216,7 @@ export default function TeamPage() {
             <tbody>
               {teamKeys.map((k, i) => (
                 <tr key={String(k.id ?? i)}>
-                  <td style={{ ...TD, fontWeight: 600 }}>{String(k.name ?? "Key")}</td>
+                  <td style={{ ...TD, fontWeight: 600 }}>{String(k.name ?? "Key")}{(!k.name || k.name === "New Key") && <span style={{ color: "#9ca3af", fontWeight: 400, fontStyle: "italic", marginLeft: "8px", fontSize: "12px" }}>e.g. Production, Staging, CI-CD</span>}</td>
                   <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px", color: "#c9a962" }}>{String(k.key_truncated ?? "")}</td>
                   <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{String(k.created ?? k.created_at ?? "")}</td>
                   <td style={TD}>
