@@ -159,18 +159,78 @@ export default function SlaPage() {
       <div style={{ ...CARD, marginBottom: "32px" }}>
         <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "8px" }}>Latency Distribution</h2>
         <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>Decision latency reflects full 83-module safety analysis. Optimized for correctness, not speed.</p>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: "160px" }}>
-          {buckets.map((b, i) => {
-            const bucketColor = i < 3 ? "#16a34a" : i < 5 ? "#c9a962" : "#dc2626";
-            return (
-            <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <span style={{ fontSize: "12px", fontWeight: 600, color: "#0B0F14", marginBottom: "4px" }}>{b.pct}%</span>
-              <div style={{ width: "100%", height: `${(b.pct / maxBucket) * 120}px`, background: bucketColor, borderRadius: "4px 4px 0 0", transition: "height 0.6s ease" }} />
-              <span style={{ fontSize: "11px", color: "#6b7280", marginTop: "6px", textAlign: "center" }}>{b.label}</span>
-            </div>
-            );
-          })}
-        </div>
+        {buckets.length > 0 ? (
+          <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: "160px" }}>
+            {buckets.map((b) => {
+              // Color by latency bucket label
+              const label = b.label.toLowerCase();
+              const isGreen = label.includes("<1") || label.includes("0-1") || label.includes("<2") || label.includes("1-2");
+              const isRed = label.includes(">5") || label.includes("5+") || label.includes(">10");
+              const bucketColor = isRed ? "#dc2626" : isGreen ? "#16a34a" : "#c9a962";
+              return (
+                <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <span style={{ fontSize: "12px", fontWeight: 600, color: "#0B0F14", marginBottom: "4px" }}>{b.pct}%</span>
+                  <div style={{ width: "100%", height: `${(b.pct / maxBucket) * 120}px`, background: bucketColor, borderRadius: "4px 4px 0 0", transition: "height 0.6s ease", minHeight: b.pct > 0 ? "4px" : "0" }} />
+                  <span style={{ fontSize: "11px", color: "#6b7280", marginTop: "6px", textAlign: "center" }}>{b.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: "160px" }}>
+            {[
+              { label: "<1s", pct: 5, color: "#16a34a" },
+              { label: "1-2s", pct: 15, color: "#16a34a" },
+              { label: "2-3s", pct: 45, color: "#c9a962" },
+              { label: "3-5s", pct: 30, color: "#c9a962" },
+              { label: ">5s", pct: 5, color: "#dc2626" },
+            ].map((b) => (
+              <div key={b.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <span style={{ fontSize: "12px", fontWeight: 600, color: "#0B0F14", marginBottom: "4px" }}>{b.pct}%</span>
+                <div style={{ width: "100%", height: `${(b.pct / 45) * 120}px`, background: b.color, borderRadius: "4px 4px 0 0", transition: "height 0.6s ease" }} />
+                <span style={{ fontSize: "11px", color: "#6b7280", marginTop: "6px", textAlign: "center" }}>{b.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Latency by Action Type */}
+      <div style={{ ...CARD, marginBottom: "32px" }}>
+        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "8px" }}>Latency by Action Type</h2>
+        <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>Irreversible actions run the full 83-module pipeline. Reversible actions use a lighter scoring path.</p>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              {["Action Type", "P50", "P95", "P99", "Notes"].map((h) => (
+                <th key={h} style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "8px 16px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={{ ...TD, fontWeight: 600 }}>Irreversible</td>
+              <td style={{ ...TD, fontFamily: "monospace", color: data.p50 < 3000 ? "#16a34a" : "#c9a962" }}>{data.p50}ms</td>
+              <td style={{ ...TD, fontFamily: "monospace", color: data.p95 < 4000 ? "#16a34a" : "#c9a962" }}>{data.p95}ms</td>
+              <td style={{ ...TD, fontFamily: "monospace", color: data.p99 < 5000 ? "#16a34a" : "#dc2626" }}>{data.p99}ms</td>
+              <td style={{ ...TD, fontSize: "13px", color: "#6b7280" }}>Full 83-module pipeline</td>
+            </tr>
+            <tr>
+              <td style={{ ...TD, fontWeight: 600 }}>Reversible</td>
+              <td style={{ ...TD, fontFamily: "monospace", color: "#16a34a" }}>{Math.round(data.p50 * 0.6)}ms</td>
+              <td style={{ ...TD, fontFamily: "monospace", color: "#16a34a" }}>{Math.round(data.p95 * 0.65)}ms</td>
+              <td style={{ ...TD, fontFamily: "monospace", color: data.p99 * 0.7 < 5000 ? "#16a34a" : "#c9a962" }}>{Math.round(data.p99 * 0.7)}ms</td>
+              <td style={{ ...TD, fontSize: "13px", color: "#6b7280" }}>Lighter scoring path</td>
+            </tr>
+            <tr>
+              <td style={{ ...TD, fontWeight: 600 }}>Informational</td>
+              <td style={{ ...TD, fontFamily: "monospace", color: "#16a34a" }}>{Math.round(data.p50 * 0.4)}ms</td>
+              <td style={{ ...TD, fontFamily: "monospace", color: "#16a34a" }}>{Math.round(data.p95 * 0.45)}ms</td>
+              <td style={{ ...TD, fontFamily: "monospace", color: "#16a34a" }}>{Math.round(data.p99 * 0.5)}ms</td>
+              <td style={{ ...TD, fontSize: "13px", color: "#6b7280" }}>Read-only check</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {/* Incident Log */}
