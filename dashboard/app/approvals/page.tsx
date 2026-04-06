@@ -30,6 +30,31 @@ function omegaBadgeStyle(omega: number): React.CSSProperties {
   return { background: bg, color, borderRadius: "20px", padding: "3px 10px", fontSize: "12px", fontWeight: 600 };
 }
 
+const SEVERITY_DOT: Record<string, string> = {
+  Rejected: "#dc2626", Approved: "#16a34a",
+};
+const DECISION_DOT: Record<string, string> = {
+  BLOCK: "#dc2626", WARN: "#ca8a04", ASK_USER: "#2563eb", USE_MEMORY: "#16a34a",
+};
+
+function formatRelativeTime(ts: string): string {
+  if (!ts) return "—";
+  try {
+    const d = new Date(ts);
+    const diffMs = Date.now() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return "just now";
+    if (diffMin < 60) return `${diffMin} min ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDays = Math.floor(diffHr / 24);
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  } catch { return ts; }
+}
+
+const SEL: React.CSSProperties = { background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "6px 10px", fontSize: "13px", color: "#0B0F14" };
+
 const TAG_STYLE: React.CSSProperties = {
   background: "rgba(201,169,98,0.1)",
   color: "#c9a962",
@@ -63,6 +88,10 @@ export default function ApprovalsPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [simulating, setSimulating] = useState(false);
   const [simResult, setSimResult] = useState<Record<string, unknown> | null>(null);
+  const [filterAgent, setFilterAgent] = useState("");
+  const [filterTime, setFilterTime] = useState("all");
+  const [filterDecision, setFilterDecision] = useState("");
+  const [, setTick] = useState(0);
   const router = useRouter();
 
   const loadApprovals = useCallback(async () => {
@@ -141,6 +170,12 @@ export default function ApprovalsPage() {
     const t = setTimeout(() => setToast(null), 3000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Auto-refresh relative timestamps every 60s
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), 60000);
+    return () => clearInterval(t);
+  }, []);
 
   function showToast(message: string, type: "success" | "error") {
     setToast({ message, type });
@@ -360,10 +395,50 @@ export default function ApprovalsPage() {
       {/* History */}
       <div style={{ marginTop: "48px" }}>
         <h2 style={{ fontSize: "20px", color: "#0B0F14", fontWeight: 700, marginBottom: "16px" }}>Recent Decisions</h2>
+
+        {/* Filter Bar */}
+        {history.length > 0 && (() => {
+          const agents = [...new Set(history.map(r => r.agent_id).filter(Boolean))].sort();
+          const anyFilter = filterAgent || filterTime !== "all" || filterDecision;
+          return (
+            <div style={{ display: "flex", gap: "12px", marginBottom: "16px", flexWrap: "wrap", alignItems: "center" }}>
+              <select value={filterAgent} onChange={e => setFilterAgent(e.target.value)} style={SEL}>
+                <option value="">All agents</option>
+                {agents.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+              <select value={filterTime} onChange={e => setFilterTime(e.target.value)} style={SEL}>
+                <option value="all">All time</option>
+                <option value="1h">Last hour</option>
+                <option value="6h">Last 6h</option>
+                <option value="24h">Last 24h</option>
+                <option value="7d">Last 7 days</option>
+              </select>
+              <select value={filterDecision} onChange={e => setFilterDecision(e.target.value)} style={SEL}>
+                <option value="">All decisions</option>
+                <option value="Approved">Approved</option>
+                <option value="Rejected">Rejected</option>
+              </select>
+              {anyFilter && (
+                <button onClick={() => { setFilterAgent(""); setFilterTime("all"); setFilterDecision(""); }} style={{ fontSize: "13px", color: "#6b7280", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Reset filters</button>
+              )}
+            </div>
+          );
+        })()}
+
+        {(() => {
+          const timeMs: Record<string, number> = { "1h": 3600000, "6h": 21600000, "24h": 86400000, "7d": 604800000 };
+          const cutoff = filterTime !== "all" && timeMs[filterTime] ? Date.now() - timeMs[filterTime] : 0;
+          const filtered = history.filter(r => {
+            if (filterAgent && r.agent_id !== filterAgent) return false;
+            if (filterDecision && r.decision !== filterDecision) return false;
+            if (cutoff > 0) { try { if (new Date(r.timestamp).getTime() < cutoff) return false; } catch {} }
+            return true;
+          });
+          return (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              {["Agent", "Action", "Omega", "Decision", "Reason", "Timestamp"].map((h) => (
+              {["", "Agent", "Action", "Omega", "Decision", "Reason", "Timestamp"].map((h) => (
                 <th
                   key={h}
                   style={{
@@ -382,8 +457,11 @@ export default function ApprovalsPage() {
             </tr>
           </thead>
           <tbody>
-            {history.map((row, i) => (
+            {filtered.map((row, i) => (
               <tr key={i} onClick={() => row.agent_id && router.push(`/agent/${row.agent_id}`)} style={{ cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#faf9f6")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                <td style={{ padding: "12px 4px 12px 16px", borderBottom: "1px solid #f5f4f0", width: "20px" }}>
+                  <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", background: SEVERITY_DOT[row.decision] ?? "#6b7280" }} />
+                </td>
                 <td style={{ fontSize: "14px", color: "#0B0F14", padding: "12px 16px", borderBottom: "1px solid #f5f4f0", fontFamily: "monospace" }}>
                   {row.agent_id}
                 </td>
@@ -410,13 +488,18 @@ export default function ApprovalsPage() {
                 <td style={{ fontSize: "13px", color: "#6b7280", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" }}>
                   {decisionReason(row.decision, row.omega)}
                 </td>
-                <td style={{ fontSize: "14px", color: "#6b7280", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" }}>
-                  {row.timestamp}
+                <td style={{ fontSize: "14px", color: "#6b7280", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" }} title={row.timestamp}>
+                  {formatRelativeTime(row.timestamp)}
                 </td>
               </tr>
             ))}
+            {filtered.length === 0 && history.length > 0 && (
+              <tr><td colSpan={7} style={{ padding: "24px 16px", textAlign: "center", color: "#6b7280", fontSize: "14px" }}>No rows match current filters.</td></tr>
+            )}
           </tbody>
         </table>
+          );
+        })()}
       </div>
 
       {/* Toast */}
