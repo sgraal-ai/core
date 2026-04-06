@@ -1154,17 +1154,17 @@ def sla_report(key_record: dict = Depends(verify_api_key)):
     _sb = supabase_service_client or supabase_client
     if _sb:
         try:
-            q = _sb.table("audit_log").select("created_at").eq("event_type", "incident").order("created_at", desc=True).limit(1)
+            q = _sb.table("audit_log").select("timestamp").eq("event_type", "incident").order("timestamp", desc=True).limit(1)
             result = q.execute()
             if result.data and len(result.data) > 0:
-                last_incident = datetime.fromisoformat(result.data[0]["created_at"].replace("Z", "+00:00"))
+                last_incident = datetime.fromisoformat(result.data[0]["timestamp"].replace("Z", "+00:00"))
                 days_since_incident = (datetime.now(timezone.utc) - last_incident).days
             else:
                 # No incidents recorded — count from first audit entry
-                q2 = _sb.table("audit_log").select("created_at").order("created_at", desc=False).limit(1)
+                q2 = _sb.table("audit_log").select("timestamp").order("timestamp", desc=False).limit(1)
                 r2 = q2.execute()
                 if r2.data and len(r2.data) > 0:
-                    first_entry = datetime.fromisoformat(r2.data[0]["created_at"].replace("Z", "+00:00"))
+                    first_entry = datetime.fromisoformat(r2.data[0]["timestamp"].replace("Z", "+00:00"))
                     days_since_incident = (datetime.now(timezone.utc) - first_entry).days
         except Exception:
             pass
@@ -3602,9 +3602,9 @@ def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_a
     timeline = []
     if supabase_client:
         try:
-            entries = supabase_client.table("audit_log").select("*").eq("api_key_id", kh).order("created_at", desc=True).limit(100).execute().data or []
+            entries = supabase_client.table("audit_log").select("*").eq("api_key_id", kh).order("timestamp", desc=True).limit(100).execute().data or []
             timeline = [{"event": e.get("event_type"), "decision": e.get("decision"),
-                         "omega": e.get("omega_mem_final"), "timestamp": e.get("created_at")} for e in entries]
+                         "omega": e.get("omega_mem_final"), "timestamp": e.get("timestamp")} for e in entries]
         except Exception: pass
     if not timeline:
         result = {"forensics_id": fid, "timeline": [], "root_cause": "insufficient_data",
@@ -4872,7 +4872,7 @@ def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, o
     if _sb:
         try:
             kh = key_record.get("key_hash", "")
-            q = _sb.table("audit_log").select("*", count="exact").eq("api_key_id", kh).order("created_at", desc=True)
+            q = _sb.table("audit_log").select("*", count="exact").eq("api_key_id", kh).order("timestamp", desc=True)
             if decision:
                 q = q.eq("decision", decision)
             if agent_id:
@@ -4881,7 +4881,14 @@ def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, o
                 q = q.eq("domain", domain)
             q = q.range(offset, offset + limit - 1)
             result = q.execute()
-            entries = result.data or []
+            raw = result.data or []
+            # Map Supabase column names to dashboard-expected field names
+            for row in raw:
+                # Schema uses "timestamp" column; fall back to "created_at" for compat
+                if "timestamp" not in row:
+                    row["timestamp"] = row.get("created_at", "")
+                row["omega"] = row.get("omega_mem_final", 0)
+            entries = raw
             total = result.count if hasattr(result, "count") and result.count is not None else len(entries)
         except Exception as e:
             logger.warning("AUDIT_LOG_READ_ERROR: %s", e)
@@ -4897,7 +4904,7 @@ def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_a
     if _sb:
         try:
             kh = key_record.get("key_hash", "")
-            q = _sb.table("audit_log").select("*").eq("api_key_id", kh).order("created_at", desc=True).limit(limit)
+            q = _sb.table("audit_log").select("*").eq("api_key_id", kh).order("timestamp", desc=True).limit(limit)
             if firewall_bypassed is True:
                 q = q.eq("event_type", "firewall_bypass")
             entries = q.execute().data or []
@@ -6617,7 +6624,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _sb_hist:
             try:
                 _agent_id_filter = req.agent_id or ""
-                _hist_q = _sb_hist.table("audit_log").select("omega_mem_final").eq("api_key_id", key_record.get("key_hash", "")).order("created_at", desc=True).limit(20)
+                _hist_q = _sb_hist.table("audit_log").select("omega_mem_final").eq("api_key_id", key_record.get("key_hash", "")).order("timestamp", desc=True).limit(20)
                 if _agent_id_filter:
                     _hist_q = _hist_q.eq("agent_id", _agent_id_filter)
                 _hist_r = _hist_q.execute()

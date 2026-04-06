@@ -1,8 +1,33 @@
 "use client";
 
 import { useState, useEffect, useCallback, Fragment } from "react";
+import { useRouter } from "next/navigation";
 import { getApiKey, getApiUrl } from "../lib/storage";
 import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
+
+function formatTimestamp(ts: string): string {
+  if (!ts) return "—";
+  try {
+    const d = new Date(ts);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return "just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDays = Math.floor(diffHr / 24);
+    if (diffDays === 1) return "yesterday";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  } catch { return ts; }
+}
+
+function omegaBadgeStyle(omega: number): React.CSSProperties {
+  const bg = omega > 60 ? "#fee2e2" : omega > 30 ? "#fef9c3" : "#dcfce7";
+  const color = omega > 60 ? "#dc2626" : omega > 30 ? "#a16207" : "#16a34a";
+  return { background: bg, color, borderRadius: "20px", padding: "2px 10px", fontSize: "12px", fontWeight: 600 };
+}
 
 interface AuditEntry {
   timestamp: string;
@@ -30,6 +55,7 @@ const TD: React.CSSProperties = { fontSize: "14px", color: "#0B0F14", padding: "
 const SEL: React.CSSProperties = { background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "8px 12px", fontSize: "14px", color: "#0B0F14" };
 
 export default function AuditPage() {
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [hasKey, setHasKey] = useState(false);
@@ -161,11 +187,11 @@ export default function AuditPage() {
               return (
                 <Fragment key={entry.request_id}>
                   <tr onClick={() => setExpandedId(isExp ? null : entry.request_id)} style={{ cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#faf9f6")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                    <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px" }}>{entry.timestamp}</td>
-                    <td style={{ ...TD, fontFamily: "monospace", fontWeight: 600 }}>{entry.agent_id}</td>
+                    <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px" }} title={entry.timestamp}>{formatTimestamp(entry.timestamp)}</td>
+                    <td style={{ ...TD, fontFamily: "monospace", fontWeight: 600 }}><a onClick={(e) => { e.stopPropagation(); if (entry.agent_id) router.push(`/agent/${entry.agent_id}`); }} style={{ color: "#c9a962", textDecoration: "underline", cursor: "pointer" }}>{entry.agent_id || "—"}</a></td>
                     <td style={TD}>{entry.domain}</td>
                     <td style={TD}>{entry.action_type}</td>
-                    <td style={{ ...TD, color: entry.omega > 60 ? "#dc2626" : entry.omega > 30 ? "#c9a962" : "#16a34a", fontWeight: 600 }}>{entry.omega}</td>
+                    <td style={TD}><span style={omegaBadgeStyle(entry.omega ?? 0)}>{entry.omega ?? "—"}</span></td>
                     <td style={TD}><span style={{ background: badge.bg, color: badge.color, borderRadius: "20px", padding: "2px 10px", fontSize: "12px", fontWeight: 600 }}>{entry.decision}</span></td>
                     <td style={{ ...TD, fontFamily: "monospace", fontSize: "12px", color: "#6b7280" }}>{entry.request_id}</td>
                   </tr>
