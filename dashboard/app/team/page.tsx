@@ -171,6 +171,16 @@ export default function TeamPage() {
         </div>
       </div>
 
+      {/* SSO / SAML */}
+      <div style={{ ...CARD, marginBottom: "32px", background: "#faf9f6" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <h3 style={{ fontSize: "14px", fontWeight: 700 }}>SSO / SAML</h3>
+          <span style={{ background: "#f3f4f6", color: "#6b7280", borderRadius: "4px", padding: "1px 8px", fontSize: "11px", fontWeight: 600 }}>Not configured</span>
+          <span style={{ fontSize: "11px", color: "#c9a962" }}>Enterprise</span>
+        </div>
+        <p style={{ fontSize: "13px", color: "#6b7280" }}>Enable SSO via SAML 2.0 for centralized identity management. Contact hello@sgraal.com to activate.</p>
+      </div>
+
       {/* Pending Invites */}
       {members.some((m) => m.status === "Pending") ? (
         <div style={{ ...CARD, marginBottom: "32px" }}>
@@ -217,7 +227,10 @@ export default function TeamPage() {
             <tbody>
               {teamKeys.map((k, i) => (
                 <tr key={String(k.id ?? i)}>
-                  <td style={{ ...TD, fontWeight: 600 }}>{String(k.name ?? "Key")}{(!k.name || k.name === "New Key") && <span style={{ color: "#9ca3af", fontWeight: 400, fontStyle: "italic", marginLeft: "8px", fontSize: "12px" }}>e.g. Production, Staging, CI-CD</span>}</td>
+                  <td style={{ ...TD, fontWeight: 600 }}>
+                    <div>{String(k.name ?? "Key")}{(!k.name || k.name === "New Key") && <span style={{ color: "#9ca3af", fontWeight: 400, fontStyle: "italic", marginLeft: "8px", fontSize: "12px" }}>e.g. Production, Staging, CI-CD</span>}</div>
+                    <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>Scope: All domains · All agents</div>
+                  </td>
                   <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px", color: "#c9a962" }}>{String(k.key_truncated ?? "")}</td>
                   <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{k.calls_this_month != null ? `${Number(k.calls_this_month).toLocaleString()} calls` : "— calls"}</td>
                   <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{String(k.created ?? k.created_at ?? "")}</td>

@@ -106,6 +106,7 @@ export default function AuditPage() {
   const [dateTo, setDateTo] = useState("");
   const [highRiskOnly, setHighRiskOnly] = useState(false);
   const [expandedIncidents, setExpandedIncidents] = useState<Set<string>>(new Set());
+  const [auditMode, setAuditMode] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce search
@@ -204,7 +205,7 @@ export default function AuditPage() {
     const isExp = expandedId === entry.request_id;
     return (
       <Fragment key={entry.request_id}>
-        <tr onClick={() => setExpandedId(isExp ? null : entry.request_id)} style={{ cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#faf9f6")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+        <tr onClick={() => setExpandedId(isExp ? null : entry.request_id)} style={{ cursor: "pointer", background: auditMode && entry.decision === "BLOCK" ? "#fef2f2" : auditMode && entry.decision === "WARN" ? "#fffbeb" : "transparent" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#faf9f6")} onMouseLeave={(e) => (e.currentTarget.style.background = auditMode && entry.decision === "BLOCK" ? "#fef2f2" : auditMode && entry.decision === "WARN" ? "#fffbeb" : "transparent")}>
           <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px" }} title={entry.timestamp}>{formatTimestamp(entry.timestamp)}</td>
           <td style={{ ...TD, fontFamily: "monospace", fontWeight: 600 }}><a onClick={(e) => { e.stopPropagation(); if (entry.agent_id) router.push(`/agent/${entry.agent_id}`); }} style={{ color: "#c9a962", textDecoration: "underline", cursor: "pointer" }}>{entry.agent_id || "—"}</a></td>
           <td style={TD}>{entry.domain}</td>
@@ -320,6 +321,10 @@ export default function AuditPage() {
           <input type="checkbox" checked={highRiskOnly} onChange={(e) => setHighRiskOnly(e.target.checked)} />
           High risk only (&Omega; &gt; 80)
         </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", color: auditMode ? "#c9a962" : "#6b7280", cursor: "pointer", fontWeight: auditMode ? 600 : 400 }}>
+          <input type="checkbox" checked={auditMode} onChange={(e) => setAuditMode(e.target.checked)} />
+          Audit Mode
+        </label>
         {(debouncedSearch || dateFrom || dateTo || highRiskOnly) && (
           <span style={{ fontSize: "12px", color: "#6b7280" }}>{filtered.length} of {entries.length} shown</span>
         )}
@@ -338,24 +343,34 @@ export default function AuditPage() {
             </tr>
           </thead>
           <tbody>
-            {grouped.map((item, idx) => {
-              if (isIncident(item)) {
-                const key = `incident-${item.agent_id}-${idx}`;
-                const open = expandedIncidents.has(key);
-                return (
-                  <Fragment key={key}>
-                    <tr onClick={() => toggleIncident(key)} style={{ cursor: "pointer", background: "#fef2f2" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")} onMouseLeave={(e) => (e.currentTarget.style.background = "#fef2f2")}>
-                      <td colSpan={7} style={{ padding: "12px 16px", borderBottom: "1px solid #fecaca", fontSize: "14px", fontWeight: 600, color: "#b91c1c" }}>
-                        <span style={{ marginRight: "8px" }}>{open ? "\u25BC" : "\u25B6"}</span>
-                        Incident — {item.agent_id} — {item.entries.length} blocks — {formatTimestamp(item.startTs)} to {formatTimestamp(item.endTs)}
-                      </td>
-                    </tr>
-                    {open && item.entries.map(e => renderRow(e))}
-                  </Fragment>
-                );
-              }
-              return renderRow(item);
-            })}
+            {(() => {
+              const useMemCount = auditMode ? sorted.filter(e => !isIncident(e) && (e as AuditEntry).decision === "USE_MEMORY").length : 0;
+              return (<>
+                {auditMode && useMemCount > 0 && (
+                  <tr><td colSpan={7} style={{ padding: "8px 16px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", fontSize: "13px", color: "#6b7280", textAlign: "center" }}>{useMemCount} USE_MEMORY decisions hidden</td></tr>
+                )}
+                {grouped.map((item, idx) => {
+                  if (isIncident(item)) {
+                    const key = `incident-${item.agent_id}-${idx}`;
+                    const open = expandedIncidents.has(key);
+                    return (
+                      <Fragment key={key}>
+                        <tr onClick={() => toggleIncident(key)} style={{ cursor: "pointer", background: auditMode ? "#fde8e8" : "#fef2f2" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")} onMouseLeave={(e) => (e.currentTarget.style.background = auditMode ? "#fde8e8" : "#fef2f2")}>
+                          <td colSpan={7} style={{ padding: "12px 16px", borderBottom: "1px solid #fecaca", fontSize: "14px", fontWeight: 600, color: "#b91c1c" }}>
+                            <span style={{ marginRight: "8px" }}>{open ? "\u25BC" : "\u25B6"}</span>
+                            Incident — {item.agent_id} — {item.entries.length} blocks — {formatTimestamp(item.startTs)} to {formatTimestamp(item.endTs)}
+                          </td>
+                        </tr>
+                        {open && item.entries.map(e => renderRow(e))}
+                      </Fragment>
+                    );
+                  }
+                  const entry = item as AuditEntry;
+                  if (auditMode && entry.decision === "USE_MEMORY") return null;
+                  return renderRow(entry);
+                })}
+              </>);
+            })()}
           </tbody>
         </table>
       </div>
