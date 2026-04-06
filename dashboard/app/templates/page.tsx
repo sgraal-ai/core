@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface Template {
   id: string;
@@ -219,6 +219,54 @@ def safe_memory_hook(memory_entries: list, agent_name: str) -> list:
         return []  # Return empty, agent proceeds without memory
     return memory_entries`,
   },
+  {
+    id: "async-python", title: "Async Python Preflight", language: "python", category: "Production Patterns", maturity: "production",
+    description: "Non-blocking preflight for high-throughput async agent pipelines.",
+    code: `import asyncio, aiohttp, os
+
+async def preflight_async(memory_state: list) -> dict:
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            "https://api.sgraal.com/v1/preflight",
+            headers={"Authorization": f"Bearer {os.environ['SGRAAL_API_KEY']}"},
+            json={"memory_state": memory_state,
+                  "action_type": "irreversible", "domain": "fintech"}
+        ) as resp:
+            return await resp.json()
+
+async def main():
+    result = await preflight_async([
+        {"id": "mem_001", "content": "Account balance: $50,000",
+         "type": "tool_state", "timestamp_age_days": 3, "source_trust": 0.92}
+    ])
+    print(result["recommended_action"])
+
+asyncio.run(main())`,
+  },
+  {
+    id: "llamaindex", title: "LlamaIndex Memory Guard", language: "python", category: "Production Patterns", maturity: "production",
+    description: "Validate LlamaIndex retrieved nodes with Sgraal before passing to the query engine.",
+    code: `import os
+from llama_index.core import VectorStoreIndex
+from sgraal import SgraalClient
+
+client = SgraalClient(api_key=os.environ["SGRAAL_API_KEY"])
+
+def safe_query(index: VectorStoreIndex, query: str) -> str:
+    nodes = index.as_retriever().retrieve(query)
+    memory_state = [
+        {"id": f"node_{i}", "content": node.text, "type": "semantic",
+         "timestamp_age_days": 7, "source_trust": node.score or 0.8}
+        for i, node in enumerate(nodes)
+    ]
+    result = client.preflight(
+        memory_state=memory_state,
+        action_type="reversible", domain="general"
+    )
+    if result["recommended_action"] == "BLOCK":
+        return "[Blocked by Sgraal — retrieved context is unsafe]"
+    return str(index.as_query_engine().query(query))`,
+  },
 ];
 
 const CATEGORIES = ["All", "Getting Started", "Production Patterns", "Advanced / Multi-Agent"];
@@ -228,8 +276,24 @@ export default function TemplatesPage() {
   const [category, setCategory] = useState("All");
   const [copied, setCopied] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const filtered = category === "All" ? TEMPLATES : TEMPLATES.filter((t) => t.category === category);
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [search]);
+
+  const filtered = TEMPLATES.filter((t) => {
+    if (category !== "All" && t.category !== category) return false;
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase();
+      if (!t.title.toLowerCase().includes(q) && !t.description.toLowerCase().includes(q) && !t.language.toLowerCase().includes(q) && !t.category.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
 
   function copyCode(id: string, code: string) {
     try { navigator.clipboard.writeText(code); } catch {}
@@ -242,6 +306,12 @@ export default function TemplatesPage() {
       <h1 className="text-2xl font-bold mb-1">Code Templates</h1>
       <p className="text-muted text-sm mb-6">Copy-paste integration snippets for Python, TypeScript, cURL, and more.</p>
 
+      <div style={{ position: "relative", marginBottom: "16px" }}>
+        <input type="text" placeholder="Search templates..." value={search} onChange={e => setSearch(e.target.value)}
+          style={{ width: "100%", maxWidth: "360px", background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "8px 32px 8px 12px", fontSize: "14px", color: "#0B0F14" }} />
+        {search && <button onClick={() => setSearch("")} style={{ position: "absolute", left: "332px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: "16px", color: "#6b7280" }} aria-label="Clear search">&times;</button>}
+      </div>
+
       <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
         {CATEGORIES.map((c) => (
           <button key={c} onClick={() => setCategory(c)} style={{
@@ -253,6 +323,7 @@ export default function TemplatesPage() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        {filtered.length === 0 && <p style={{ textAlign: "center", color: "#6b7280", padding: "40px 0", fontSize: "14px" }}>No templates found.</p>}
         {filtered.map((t) => (
           <div key={t.id} style={{ ...CARD, position: "relative" }}>
             {(() => { const m = MATURITY_BADGE[t.maturity]; return m ? <span style={{ position: "absolute", top: "12px", right: "12px", background: m.bg, color: m.color, borderRadius: "4px", padding: "1px 8px", fontSize: "10px", fontWeight: 600 }}>{m.label}</span> : null; })()}

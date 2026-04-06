@@ -124,6 +124,25 @@ export default function SlaPage() {
           <p style={{ fontSize: "36px", fontWeight: 700, color: c, marginTop: "4px" }}>{data.p99}ms</p>
           <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>Target: &lt;5000ms</p>
         </div>); })()}
+        {(() => {
+          const mttr = data.mttr_estimate;
+          const hasMttr = mttr !== undefined && mttr > 0;
+          const c = hasMttr ? (mttr < 5 ? "#16a34a" : mttr < 15 ? "#c9a962" : "#dc2626") : "#6b7280";
+          return (
+            <div style={{ ...CARD, borderTop: `3px solid ${c}` }}>
+              <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: "4px" }}>
+                MTTR
+                <span title="Mean Time To Recover — average time from BLOCK to next USE_MEMORY for the same agent" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "14px", height: "14px", borderRadius: "50%", border: "1px solid #9ca3af", fontSize: "9px", fontWeight: 700, color: "#9ca3af", cursor: "help" }}>i</span>
+              </p>
+              {hasMttr ? (
+                <p style={{ fontSize: "36px", fontWeight: 700, color: c, marginTop: "4px" }}>{mttr} steps</p>
+              ) : (
+                <p style={{ fontSize: "36px", fontWeight: 700, color: "#6b7280", marginTop: "4px" }}>&mdash;</p>
+              )}
+              <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>{hasMttr ? "Avg recovery time" : "Submit more outcomes to unlock"}</p>
+            </div>
+          );
+        })()}
       </div>
 
       {/* SLA Targets Table */}

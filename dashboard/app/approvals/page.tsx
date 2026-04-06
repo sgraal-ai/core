@@ -394,7 +394,41 @@ export default function ApprovalsPage() {
 
       {/* History */}
       <div style={{ marginTop: "48px" }}>
-        <h2 style={{ fontSize: "20px", color: "#0B0F14", fontWeight: 700, marginBottom: "16px" }}>Recent Decisions</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h2 style={{ fontSize: "20px", color: "#0B0F14", fontWeight: 700 }}>Recent Decisions</h2>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button onClick={() => {
+              const rows = history.filter(r => {
+                const timeMs: Record<string, number> = { "1h": 3600000, "6h": 21600000, "24h": 86400000, "7d": 604800000 };
+                const cutoff = filterTime !== "all" && timeMs[filterTime] ? Date.now() - timeMs[filterTime] : 0;
+                if (filterAgent && r.agent_id !== filterAgent) return false;
+                if (filterDecision && r.decision !== filterDecision) return false;
+                if (cutoff > 0) { try { if (new Date(r.timestamp).getTime() < cutoff) return false; } catch {} }
+                return true;
+              });
+              const csv = "timestamp,agent,action,omega,decision,reason\n" + rows.map(r => `${r.timestamp},${r.agent_id},${r.action_type},${r.omega},${r.decision},"${decisionReason(r.decision, r.omega)}"`).join("\n");
+              const blob = new Blob([csv], { type: "text/csv" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = `sgraal-approvals-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }} style={{ padding: "4px 12px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "12px", cursor: "pointer", background: "#ffffff", color: "#6b7280" }}>Export CSV</button>
+            <button onClick={() => {
+              const rows = history.filter(r => {
+                const timeMs: Record<string, number> = { "1h": 3600000, "6h": 21600000, "24h": 86400000, "7d": 604800000 };
+                const cutoff = filterTime !== "all" && timeMs[filterTime] ? Date.now() - timeMs[filterTime] : 0;
+                if (filterAgent && r.agent_id !== filterAgent) return false;
+                if (filterDecision && r.decision !== filterDecision) return false;
+                if (cutoff > 0) { try { if (new Date(r.timestamp).getTime() < cutoff) return false; } catch {} }
+                return true;
+              });
+              const json = JSON.stringify(rows.map(r => ({ ...r, reason: decisionReason(r.decision, r.omega) })), null, 2);
+              const blob = new Blob([json], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = `sgraal-approvals-${new Date().toISOString().slice(0,10)}.json`; a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }} style={{ padding: "4px 12px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "12px", cursor: "pointer", background: "#ffffff", color: "#6b7280" }}>Export JSON</button>
+          </div>
+        </div>
 
         {/* Filter Bar */}
         {history.length > 0 && (() => {

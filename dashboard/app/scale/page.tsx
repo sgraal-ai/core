@@ -178,6 +178,15 @@ export default function ScalePage() {
                 ? "Learning not active yet. Sgraal already blocks unsafe decisions without learning. Submit outcomes via agent detail to activate self-improvement."
                 : `The system has learned from ${episodes} decision outcomes. Thresholds are calibrating automatically.`}
             </p>
+            <div style={{ marginTop: "12px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#6b7280", marginBottom: "4px" }}>
+                <span>{episodes >= 10 ? "\u2713 Calibration active — thresholds improving" : "Progress to first calibration"}</span>
+                <span>{Math.min(episodes, 10)} / 10 outcomes</span>
+              </div>
+              <div style={{ height: "8px", background: "#f5f4f0", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ width: `${Math.min(100, (episodes / 10) * 100)}%`, height: "100%", background: episodes >= 10 ? "#16a34a" : "#c9a962", borderRadius: "4px", transition: "width 0.6s ease" }} />
+              </div>
+            </div>
           </div>
         ) : (
           <p className="text-sm text-muted">Learning status unavailable.</p>
