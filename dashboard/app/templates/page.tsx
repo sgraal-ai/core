@@ -172,8 +172,12 @@ export default function TemplatesPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#0B0F14" }}>{t.title}</h3>
                   <span style={{ background: "rgba(201,169,98,0.1)", color: "#c9a962", borderRadius: "20px", padding: "2px 8px", fontSize: "11px" }}>{t.language}</span>
+                  {t.id === "python-basic" && <span style={{ background: "#16a34a", color: "#ffffff", borderRadius: "4px", padding: "2px 8px", fontSize: "11px", fontWeight: 600 }}>Start here</span>}
                 </div>
                 <p style={{ fontSize: "13px", color: "#6b7280" }}>{t.description}</p>
+                <pre style={{ background: "#f8f8f8", borderRadius: "6px", padding: "10px 12px", fontSize: "12px", fontFamily: "monospace", color: "#6b7280", lineHeight: 1.5, marginTop: "8px", overflow: "hidden", whiteSpace: "pre", maxHeight: "90px" }}>
+                  {t.code.split("\n").slice(0, 5).join("\n")}{t.code.split("\n").length > 5 ? "\n..." : ""}
+                </pre>
               </div>
               <div style={{ display: "flex", gap: "8px", marginLeft: "16px" }}>
                 <button onClick={() => copyCode(t.id, t.code)} style={{ background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "6px 16px", borderRadius: "6px", fontSize: "13px", border: "none", cursor: "pointer" }}>
