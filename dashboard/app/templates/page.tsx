@@ -336,9 +336,12 @@ export default function TemplatesPage() {
                   {t.id === "python-basic" && <span style={{ background: "#16a34a", color: "#ffffff", borderRadius: "4px", padding: "2px 8px", fontSize: "11px", fontWeight: 600 }}>Start here</span>}
                 </div>
                 <p style={{ fontSize: "13px", color: "#6b7280" }}>{t.description}</p>
-                <pre style={{ background: "#f8f8f8", borderRadius: "6px", padding: "10px 12px", fontSize: "12px", fontFamily: "monospace", color: "#6b7280", lineHeight: 1.5, marginTop: "8px", overflow: "hidden", whiteSpace: "pre", maxHeight: "90px" }}>
-                  {t.code.split("\n").slice(0, 5).join("\n")}{t.code.split("\n").length > 5 ? "\n..." : ""}
-                </pre>
+                <div style={{ position: "relative", marginTop: "8px" }}>
+                  <pre style={{ background: "#f8f8f8", borderRadius: "6px", padding: "12px 14px", fontSize: "13px", fontFamily: "monospace", color: "#4b5563", lineHeight: 1.6, overflow: "hidden", whiteSpace: "pre", minHeight: "100px", maxHeight: "110px" }}>
+                    {t.code.split("\n").slice(0, 5).join("\n")}
+                  </pre>
+                  {t.code.split("\n").length > 5 && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "28px", background: "linear-gradient(transparent, #f8f8f8)", borderRadius: "0 0 6px 6px" }} />}
+                </div>
               </div>
               <div style={{ display: "flex", gap: "8px", marginLeft: "16px" }}>
                 <button onClick={() => copyCode(t.id, t.code)} style={{ background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "6px 16px", borderRadius: "6px", fontSize: "13px", border: "none", cursor: "pointer" }}>
