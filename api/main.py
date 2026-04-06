@@ -4713,15 +4713,16 @@ def eu_ai_act_report(key_record: dict = Depends(verify_api_key), force_refresh: 
         except Exception:
             pass
 
-    # Generate report
+    # Generate report from audit log (service client for RLS, filtered by api_key_id)
     total_calls = 0
     block_count = 0
     heal_count = 0
-    if supabase_client:
+    _sb = supabase_service_client or supabase_client
+    if _sb:
         try:
-            al = supabase_client.table("audit_log").select("decision", count="exact").execute()
+            al = _sb.table("audit_log").select("decision", count="exact").eq("api_key_id", kh).execute()
             total_calls = al.count or 0
-            blocks = supabase_client.table("audit_log").select("decision", count="exact").eq("decision", "BLOCK").execute()
+            blocks = _sb.table("audit_log").select("decision", count="exact").eq("api_key_id", kh).eq("decision", "BLOCK").execute()
             block_count = blocks.count or 0
         except Exception:
             pass
@@ -4913,11 +4914,11 @@ def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_a
         entries = [e for e in entries if e.get("event_type") == "firewall_bypass"]
 
     if format == "splunk":
-        lines = [f'{e.get("created_at","")} decision={e.get("decision","")} omega={e.get("omega_score","")} key={e.get("api_key_id","")}' for e in entries]
+        lines = [f'{e.get("created_at","")} decision={e.get("decision","")} omega={e.get("omega_mem_final","")} key={e.get("api_key_id","")}' for e in entries]
         return {"format": "splunk", "data": lines}
     elif format == "datadog":
-        events = [{"timestamp": e.get("created_at"), "tags": [f"decision:{e.get('decision','')}", f"omega:{e.get('omega_score','')}"],
-                   "message": f"Sgraal preflight: {e.get('decision','')} omega={e.get('omega_score','')}"} for e in entries]
+        events = [{"timestamp": e.get("created_at"), "tags": [f"decision:{e.get('decision','')}", f"omega:{e.get('omega_mem_final','')}"],
+                   "message": f"Sgraal preflight: {e.get('decision','')} omega={e.get('omega_mem_final','')}"} for e in entries]
         return {"format": "datadog", "events": events}
     elif format == "elastic":
         docs = [{"_index": "sgraal-audit", "_source": e} for e in entries]
