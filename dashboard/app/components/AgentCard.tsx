@@ -29,8 +29,14 @@ export function AgentCard({ agent }: { agent: Agent }) {
   return (
     <Link
       href={`/agent/${agent.id}`}
-      className="border border-surface-light bg-surface rounded-xl p-6 hover:border-gold/30 transition flex gap-5 items-center"
+      className="border border-surface-light bg-surface rounded-xl p-6 hover:border-gold/30 hover:shadow-md transition flex gap-5 items-center relative"
     >
+      {agent.omega_mem_final > 70 && (
+        <span style={{ position: "absolute", top: "10px", right: "12px", background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca", borderRadius: "4px", padding: "1px 8px", fontSize: "11px", fontWeight: 700 }}>CRITICAL</span>
+      )}
+      {agent.omega_mem_final >= 40 && agent.omega_mem_final <= 70 && (
+        <span style={{ position: "absolute", top: "10px", right: "12px", background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", borderRadius: "4px", padding: "1px 8px", fontSize: "11px", fontWeight: 700 }}>WARNING</span>
+      )}
       <OmegaMeter value={agent.omega_mem_final} size={90} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-3 mb-1">
@@ -71,6 +77,7 @@ export function AgentCard({ agent }: { agent: Agent }) {
             <span className="text-orange-400 font-semibold">&#x26A0; HALLUCINATION RISK</span>
           )}
         </div>
+        <p className="text-xs mt-2" style={{ color: "#c9a962" }}>View details &rarr;</p>
       </div>
     </Link>
   );
