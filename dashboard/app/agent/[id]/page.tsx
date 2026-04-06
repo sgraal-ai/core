@@ -262,8 +262,8 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             <span className="text-sm font-mono px-3 py-1 rounded bg-surface-light text-muted">
               {agent.domain}
             </span>
-            <span className="text-sm font-mono px-3 py-1 rounded bg-surface-light text-muted">
-              GSV: {agent.gsv}
+            <span className="text-sm font-mono px-3 py-1 rounded bg-surface-light text-muted" title="Global Stability Value — composite score combining memory freshness, source trust, conflict rate, and propagation risk. Range: 0–100. Lower is safer.">
+              GSV: {agent.gsv} <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-[9px] font-bold text-muted cursor-help">?</span>
             </span>
             <span className="text-sm font-mono px-3 py-1 rounded bg-surface-light text-muted">
               Healed: {agent.healing_counter}x
@@ -399,9 +399,10 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Decision Twin */}
+      <hr className="border-surface-light mb-8" />
       <div className="mb-8">
-        <div className="flex items-center gap-4 mb-4">
-          <h2 className="text-lg font-semibold">Decision Twin</h2>
+        <div className="flex items-center gap-4 mb-2">
+          <h2 className="text-lg font-semibold">Decision Twin — What would Sgraal decide?</h2>
           <button
             onClick={async () => {
               setTwinLoading(true);
@@ -457,11 +458,16 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             {twinLoading ? "Simulating..." : "Run Decision Twin"}
           </button>
         </div>
+        <p className="text-sm text-muted mb-4">Simulate how Sgraal would evaluate this agent's memory under different conditions.</p>
         {twinError && <p className="text-sm text-red-400 mb-2">{twinError}</p>}
         {twinResult && (
           <div className="bg-surface border border-surface-light rounded-xl overflow-hidden">
             <button onClick={() => setTwinOpen(!twinOpen)} className="w-full text-left px-5 py-3 flex justify-between items-center text-sm font-semibold hover:bg-surface-light transition">
-              <span>Twin Result: {String((twinResult as Record<string, unknown>).recommended_action ?? (twinResult as Record<string, unknown>).decision ?? "—")}</span>
+              {(() => {
+                const action = String((twinResult as Record<string, unknown>).recommended_action ?? (twinResult as Record<string, unknown>).decision ?? "—");
+                const colors: Record<string, string> = { BLOCK: "#dc2626", WARN: "#a16207", ASK_USER: "#c2410c", USE_MEMORY: "#16a34a" };
+                return <span>Twin Result: <span style={{ color: colors[action] ?? "#0B0F14" }}>{action}</span></span>;
+              })()}
               <span className="text-muted">{twinOpen ? "▲" : "▼"}</span>
             </button>
             {twinOpen && (() => {
@@ -519,7 +525,12 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                         </tbody>
                       </table>
                       {recommended && (
-                        <p className="mt-4 text-sm font-semibold" style={{ color: "#c9a962" }}>Recommended path: {recommended}</p>
+                        <>
+                          <p className="mt-4 text-sm font-semibold" style={{ color: "#c9a962" }}>Recommended path: {recommended}</p>
+                          {recommended === "no_memory" && (
+                            <p className="text-sm text-muted italic mt-1">This agent should not act on current memory. All memory entries are either stale, conflicting, or low-trust. Recommended action: rebuild working set before next execution.</p>
+                          )}
+                        </>
                       )}
                     </>
                   ) : (
@@ -528,7 +539,12 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                         {JSON.stringify(twinResult, null, 2)}
                       </pre>
                       {recommended && (
-                        <p className="mt-4 text-sm font-semibold" style={{ color: "#c9a962" }}>Recommended path: {recommended}</p>
+                        <>
+                          <p className="mt-4 text-sm font-semibold" style={{ color: "#c9a962" }}>Recommended path: {recommended}</p>
+                          {recommended === "no_memory" && (
+                            <p className="text-sm text-muted italic mt-1">This agent should not act on current memory. All memory entries are either stale, conflicting, or low-trust. Recommended action: rebuild working set before next execution.</p>
+                          )}
+                        </>
                       )}
                     </>
                   )}
