@@ -29,12 +29,13 @@ def _sim_next(state: int, trans: list, seed: str, step: int) -> int:
         if u < cum: return j
     return 3
 
-def compute_pctl(omega: float, n_sims: int = 100, steps: int = 10) -> Optional[PCTLResult]:
+def compute_pctl(omega: float, n_sims: int = 100, steps: int = 10, seed: str = None) -> Optional[PCTLResult]:
     try:
         s0 = _state_idx(omega)
         ef_count, ag_count, eg_count = 0, 0, 0
+        _base_seed = seed or f"pctl:{omega}"
         for sim in range(n_sims):
-            seed = f"pctl:{sim}:{omega}"
+            seed = f"{_base_seed}:{sim}"
             # EF: reaches SAFE or WARN
             s = s0; ef_ok = s <= 1
             for t in range(steps):

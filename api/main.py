@@ -6576,6 +6576,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _cal_pf and isinstance(_cal_pf, dict):
             _effective_weights = _cal_pf
 
+    # Deterministic seed from input — ensures identical input produces identical stochastic output
+    _seed_payload = _json.dumps(
+        {"memory_state": [{"id": e.id, "content": e.content, "type": e.type,
+                           "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust,
+                           "source_conflict": e.source_conflict, "downstream_count": e.downstream_count}
+                          for e in entries],
+         "domain": req.domain, "action_type": req.action_type},
+        sort_keys=True)
+    _deterministic_seed = int(hashlib.sha256(_seed_payload.encode()).hexdigest()[:16], 16)
+    _deterministic_seed_str = str(_deterministic_seed)
+
     _module_times = {}
     _mt_start = _time.monotonic()
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, _effective_weights, req.thresholds, req.use_pagerank)
@@ -7987,7 +7998,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _pfd = _json.loads(_pfr.json()["result"])
                     _pf_parts = _pfd.get("particles"); _pf_weights = _pfd.get("weights")
             except Exception: pass
-        pf = compute_particle_filter(omega_out, _pf_parts, _pf_weights, seed=request_id)
+        pf = compute_particle_filter(omega_out, _pf_parts, _pf_weights, seed=_deterministic_seed_str)
         if pf:
             response["particle_filter"] = {"state_estimate": pf.state_estimate, "uncertainty": pf.uncertainty,
                                            "effective_sample_size": pf.effective_sample_size, "resampled": pf.resampled}
@@ -7995,7 +8006,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # PCTL Verification (ADV-05)
     try:
-        pctl = compute_pctl(omega_out)
+        pctl = compute_pctl(omega_out, seed=_deterministic_seed_str)
         if pctl:
             response["pctl_verification"] = {"p_ef_recovery": pctl.p_ef_recovery, "p_ag_heal_works": pctl.p_ag_heal_works,
                                               "p_eg_stable": pctl.p_eg_stable, "simulations": pctl.simulations}
@@ -9003,6 +9014,22 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _lv = response.get("lyapunov_stability")
     response["stability_gauge"] = _ss["score"] if _ss and isinstance(_ss, dict) and "score" in _ss else (_lv["V"] if _lv and isinstance(_lv, dict) and "V" in _lv else 0.0)
 
+    # Hysteresis: suppress small stochastic-only omega jitter
+    _prev_omega = _te_history_cache[-1] if _te_history_cache else None
+    if _prev_omega is not None:
+        _omega_delta = abs(response["omega_mem_final"] - _prev_omega)
+        # Check if delta comes only from stochastic modules (particle_filter, pctl)
+        _stochastic_only = (
+            response.get("particle_filter") is not None or response.get("pctl_verification") is not None
+        ) and _omega_delta < 3.0
+        if _stochastic_only and response["recommended_action"] == (
+            "USE_MEMORY" if _prev_omega <= 30 else "WARN" if _prev_omega <= 60 else "ASK_USER" if _prev_omega <= 80 else "BLOCK"
+        ):
+            response["omega_mem_final"] = round(_prev_omega, 2)
+            response["hysteresis_applied"] = True
+    if "hysteresis_applied" not in response:
+        response["hysteresis_applied"] = False
+
     response["response_profile_used"] = _profile
     if _profile == "compact":
         _compact_keys = {"omega_mem_final", "omega_adjusted", "recommended_action", "assurance_score",
@@ -9018,7 +9045,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "forecast_available", "prune_recommended",
                          "divergence_check_available", "persona_conflict", "persona_violation",
                          "decision_based_on", "degraded_mode", "degraded_features",
-                         "auto_inference_suppressed", "heal_decision", "stability_gauge"}
+                         "auto_inference_suppressed", "heal_decision", "stability_gauge",
+                         "hysteresis_applied"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
