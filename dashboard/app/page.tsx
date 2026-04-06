@@ -194,7 +194,8 @@ export default function DashboardHome() {
         const avgStability = total > 0 ? agents.reduce((s, a) => s + (a.stability_score?.score ?? 0), 0) / total : 0;
         const avgRTotal = total > 0 ? agents.reduce((s, a) => s + (a.r_total_normalized ?? 0), 0) / total : 0;
         const stabColor = avgStability > 0.7 ? "text-green-400" : avgStability >= 0.4 ? "text-yellow-400" : "text-red-400";
-        const rColor = avgRTotal > 3 ? "bg-red-400" : avgRTotal > 1.5 ? "bg-yellow-400" : "bg-green-400";
+        const rColor = avgRTotal > 3 ? "bg-green-400" : avgRTotal > 1.5 ? "bg-yellow-400" : "bg-red-400";
+        const rTextColor = avgRTotal > 3 ? "text-green-400" : avgRTotal > 1.5 ? "text-yellow-400" : "text-red-400";
         return (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
             <div className="bg-surface border border-surface-light rounded-xl p-5">
@@ -207,10 +208,10 @@ export default function DashboardHome() {
                 R_total (fleet avg, 0-5 scale)
                 <span className="relative group cursor-help">
                   <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-[9px] font-bold text-muted">?</span>
-                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-52 bg-surface-light text-foreground text-[11px] leading-tight rounded-md px-2.5 py-2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity shadow-lg z-10">Reliability score across all memory entries. Scale: 0 (unreliable) to 5 (fully reliable).</span>
+                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-56 bg-surface-light text-foreground text-[11px] leading-tight rounded-md px-2.5 py-2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity shadow-lg z-10">Reliability score across all memory entries. Scale: 0 (unreliable) to 5 (fully reliable). Below 1.5 = high risk. 1.5–3.0 = moderate. Above 3.0 = healthy.</span>
                 </span>
               </p>
-              <p className="text-2xl font-bold font-mono mb-2">{avgRTotal.toFixed(2)}</p>
+              <p className={`text-2xl font-bold font-mono mb-2 ${rTextColor}`}>{avgRTotal.toFixed(2)}</p>
               <div className="w-full h-2 bg-surface-light rounded-full overflow-hidden">
                 <div className={`h-full ${rColor} rounded-full transition-all`} style={{ width: `${Math.min(100, avgRTotal / 5 * 100)}%` }} />
               </div>

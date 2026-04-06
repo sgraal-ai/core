@@ -54,6 +54,8 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
 
   // Compliance profile
   const [complianceProfile, setComplianceProfile] = useState("GENERAL");
+  // Advanced analytics toggle
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [reloading, setReloading] = useState(false);
 
   // Outcome
@@ -315,7 +317,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         <div className="bg-surface border border-surface-light rounded-xl p-5 mb-8">
           <h2 className="text-lg font-semibold mb-4">Forensics</h2>
           {String(forensicsData.root_cause ?? "") === "insufficient_data" ? (
-            <p className="text-sm text-muted">Forensics requires more preflight history to generate a full incident trace.</p>
+            <p className="text-sm text-muted">Run 5 more preflights on this agent to unlock full forensic trace.</p>
           ) : (
             <div className="space-y-3">
               {!!forensicsData.forensics_id && (
@@ -782,21 +784,24 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <div className="mb-10">
-        <h2 className="text-lg font-semibold mb-2">Advanced Analytics</h2>
-        {(agent.calibration || agent.hawkes_intensity || agent.copula_analysis || agent.mewma) && (
-          <p className="text-sm text-muted mb-4">Multiple risk signals detected simultaneously — review recommended.</p>
+        <button onClick={() => setAdvancedOpen(!advancedOpen)} className="flex items-center gap-2 text-lg font-semibold mb-2 bg-transparent border-none cursor-pointer p-0">
+          Advanced Analysis <span className="text-xs text-muted font-normal">{advancedOpen ? "▲" : "▼"}</span>
+        </button>
+        {advancedOpen && (
+          <>
+            {(agent.calibration || agent.hawkes_intensity || agent.copula_analysis || agent.mewma) && (
+              <p className="text-sm text-muted mb-4">Multiple risk signals detected simultaneously — review recommended.</p>
+            )}
+            <AdvancedAnalytics
+              calibration={agent.calibration}
+              hawkes={agent.hawkes_intensity}
+              copula={agent.copula_analysis}
+              mewma={agent.mewma}
+            />
+            <h3 className="text-base font-semibold mt-6 mb-4">Deep Analysis <span className="text-xs text-muted font-normal">(click sections to expand)</span></h3>
+            <DeepAnalytics data={agent as unknown as Record<string, unknown>} />
+          </>
         )}
-        <AdvancedAnalytics
-          calibration={agent.calibration}
-          hawkes={agent.hawkes_intensity}
-          copula={agent.copula_analysis}
-          mewma={agent.mewma}
-        />
-      </div>
-
-      <div className="mb-10">
-        <h2 className="text-lg font-semibold mb-4">Deep Analysis <span className="text-xs text-muted font-normal">(click to expand)</span></h2>
-        <DeepAnalytics data={agent as unknown as Record<string, unknown>} />
       </div>
     </div>
   );

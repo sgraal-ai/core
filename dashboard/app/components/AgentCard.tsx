@@ -2,6 +2,20 @@ import Link from "next/link";
 import type { Agent } from "../lib/mock-data";
 import { OmegaMeter } from "./OmegaMeter";
 
+const COMPONENT_LABELS: Record<string, string> = {
+  s_freshness: "stale memory", s_drift: "memory drift", s_provenance: "untrusted source",
+  r_recall: "recall failure", s_propagation: "high dependency risk", r_encode: "encoding issue",
+  s_interference: "data conflict", s_recovery: "slow recovery", r_belief: "low confidence",
+  s_relevance: "intent drift",
+};
+const REPAIR_LABELS: Record<string, string> = {
+  REFETCH: "Refresh from source", VERIFY_WITH_SOURCE: "Verify with source",
+  REBUILD_WORKING_SET: "Rebuild memory set", WAIT: "Wait for self-recovery",
+  SLA_WARNING: "Review SLA", CHAOS_WARNING: "Stabilize drift",
+  SOFT_HEAL: "Apply light fix", FULL_HEAL: "Full healing cycle",
+  EMERGENCY_HEAL: "Emergency heal",
+};
+
 const ACTION_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   USE_MEMORY: { bg: "bg-green-400/10", text: "text-green-400", label: "USE" },
   WARN:       { bg: "bg-yellow-400/10", text: "text-yellow-400", label: "WARN" },
@@ -26,6 +40,18 @@ export function AgentCard({ agent }: { agent: Agent }) {
           </span>
         </div>
         <p className="text-xs text-muted font-mono mb-2">{agent.id}</p>
+        {agent.recommended_action === "BLOCK" && (() => {
+          const cb = agent.component_breakdown ?? {};
+          const top = Object.entries(cb).sort(([,a],[,b]) => b - a)[0];
+          const reason = top ? (COMPONENT_LABELS[top[0]] ?? top[0].replace(/_/g, " ")) : "high risk";
+          const rp = agent.repair_plan ?? [];
+          const fix = rp.length > 0 ? (REPAIR_LABELS[rp[0].action] ?? rp[0].action) : "Review manually";
+          return (
+            <p className="text-xs mb-2" style={{ color: "#6b7280" }}>
+              Reason: <span style={{ color: "#dc2626" }}>{reason}</span> → Fix: <span style={{ color: "#c9a962" }}>{fix}</span>
+            </p>
+          );
+        })()}
         <div className="flex gap-4 text-xs text-muted">
           <span>Assurance: {agent.assurance_score}%</span>
           <span>Domain: {agent.domain}</span>
