@@ -25,6 +25,8 @@ export default function ProtectPage() {
   const [redTeamLoading, setRedTeamLoading] = useState(false);
   const [redTeamError, setRedTeamError] = useState("");
   const [redTeamGrade, setRedTeamGrade] = useState("");
+  const [zkLoading, setZkLoading] = useState(false);
+  const [zkResult, setZkResult] = useState<Record<string, unknown> | null>(null);
 
   function authHeaders() {
     return { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" };
@@ -345,6 +347,39 @@ export default function ProtectPage() {
         </div>
         <p className="text-sm text-muted">Detects agents with no recent activity that suddenly execute high-risk actions.</p>
         <p className="text-xs text-muted mt-2">Last scan: {new Date().toLocaleDateString()} — no sleeper patterns detected.</p>
+      </div>
+
+      {/* Zero-Knowledge Preflight */}
+      <div className={`${CARD} mt-6`}>
+        <div className="flex items-center gap-3 mb-2">
+          <h2 className="text-lg font-semibold">Zero-Knowledge Mode</h2>
+          <span style={{ background: "#dbeafe", color: "#1e40af", borderRadius: "4px", padding: "1px 8px", fontSize: "11px", fontWeight: 600 }}>Privacy-preserving</span>
+        </div>
+        <p className="text-sm text-muted mb-2">Run preflight without exposing memory content. Only the omega score and proof hash leave your system. Compliant with strictest data residency requirements.</p>
+        <p className="text-xs text-muted mb-4" style={{ color: "#a16207" }}>&#x26A0; entry_shapley unavailable · conflict detection hash-based only · explainability reduced to metadata-level</p>
+        <button onClick={async () => {
+          setZkLoading(true); setZkResult(null);
+          try {
+            const res = await fetch(`${apiBase()}/v1/preflight/zk`, {
+              method: "POST", headers: authHeaders(),
+              body: JSON.stringify({ memory_state: [{ id: "zk_demo", content: "test entry", type: "semantic", timestamp_age_days: 5, source_trust: 0.8, source_conflict: 0.1, downstream_count: 2 }], action_type: "reversible", domain: "general" }),
+            });
+            if (res.ok) setZkResult(await res.json());
+            else setZkResult({ error: `HTTP ${res.status}`, omega_mem_final: 0, recommended_action: "—", zk_mode: true });
+          } catch { setZkResult({ error: "Request failed", omega_mem_final: 0, recommended_action: "—", zk_mode: true }); }
+          setZkLoading(false);
+        }} disabled={zkLoading} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">
+          {zkLoading ? "Running ZK Preflight..." : "Test ZK Preflight"}
+        </button>
+        {zkResult && (
+          <div style={{ marginTop: "12px", display: "flex", gap: "16px", fontSize: "13px", flexWrap: "wrap", alignItems: "center" }}>
+            <span>Omega: <strong style={{ color: Number(zkResult.omega_mem_final) > 60 ? "#dc2626" : "#16a34a" }}>{String(zkResult.omega_mem_final)}</strong></span>
+            <span>Decision: <strong>{String(zkResult.recommended_action)}</strong></span>
+            {!!zkResult.zk_mode && <span style={{ background: "#dbeafe", color: "#1e40af", borderRadius: "4px", padding: "1px 8px", fontSize: "11px" }}>zk_mode: true</span>}
+            {!!zkResult.hash_algorithm && <span style={{ fontSize: "11px", color: "#6b7280" }}>hash: {String(zkResult.hash_algorithm)}</span>}
+            {!!zkResult.error && <span style={{ color: "#dc2626" }}>{String(zkResult.error)}</span>}
+          </div>
+        )}
       </div>
 
       {/* Real Attack Example */}

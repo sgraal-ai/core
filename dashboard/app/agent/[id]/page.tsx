@@ -613,7 +613,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Memory Passport */}
-      <div className="bg-surface border border-surface-light rounded-xl p-5 mb-10">
+      <div style={{ borderLeft: "4px solid #c9a962" }} className="bg-surface border border-surface-light rounded-xl p-5 mb-10">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold">Memory Passport</h2>
           <div className="flex items-center gap-2">
@@ -653,14 +653,32 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         </div>
         {passportImportMsg === "success" && <p className="text-sm mb-3" style={{ color: "#16a34a" }}>&#x2713; Passport imported successfully</p>}
         {passportImportMsg && passportImportMsg !== "success" && <p className="text-sm text-red-400 mb-3">{passportImportMsg}</p>}
-        <p className="text-sm text-muted mb-3">Cryptographically signed snapshot of this agent{"'"}s memory state. Valid for 30 days.</p>
+        <p className="text-sm text-muted mb-3">Cryptographically signed snapshot of this agent{"'"}s memory state. Portable across systems, verifiable by any Sgraal instance.</p>
         {passport && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            {!!passport.passport_id && <div><p className="text-xs text-muted uppercase mb-1">Passport ID</p><p className="font-mono text-xs">{String(passport.passport_id)}</p></div>}
-            {!!passport.issued_at && <div><p className="text-xs text-muted uppercase mb-1">Issued</p><p className="text-xs">{String(passport.issued_at)}</p></div>}
-            {!!passport.valid_until && <div><p className="text-xs text-muted uppercase mb-1">Valid Until</p><p className="text-xs">{String(passport.valid_until)}</p></div>}
-            {passport.assurance !== undefined && <div><p className="text-xs text-muted uppercase mb-1">Assurance</p><p className="text-xs font-semibold">{String(passport.assurance)}%</p></div>}
-            {!!passport.signature && <div className="col-span-2"><p className="text-xs text-muted uppercase mb-1">Signature</p><p className="font-mono text-xs">{String(passport.signature).slice(0, 16)}...</p></div>}
+          <div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-3">
+              {!!passport.passport_id && <div><p className="text-xs text-muted uppercase mb-1">Passport ID</p><p className="font-mono text-xs">{String(passport.passport_id)}</p></div>}
+              {!!passport.issued_at && <div><p className="text-xs text-muted uppercase mb-1">Issued</p><p className="text-xs">{String(passport.issued_at)}</p></div>}
+              {!!passport.valid_until && <div><p className="text-xs text-muted uppercase mb-1">Valid Until</p><p className="text-xs">{String(passport.valid_until)}</p></div>}
+              {passport.assurance !== undefined && <div><p className="text-xs text-muted uppercase mb-1">Assurance</p><p className="text-xs font-semibold">{String(passport.assurance)}%</p></div>}
+              <div><p className="text-xs text-muted uppercase mb-1">Issuer</p><p className="text-xs font-semibold" style={{ color: "#c9a962" }}>sgraal.com</p></div>
+              {!!passport.signature && <div className="col-span-2"><p className="text-xs text-muted uppercase mb-1">Signature</p><p className="font-mono text-xs">{String(passport.signature).slice(0, 16)}...</p></div>}
+            </div>
+            <div className="flex gap-3 flex-wrap text-xs mb-2">
+              {passport.conflict_summary !== undefined && <span style={{ background: "#fef3c7", color: "#92400e", borderRadius: "4px", padding: "1px 8px" }}>Conflicts: {String(passport.conflict_summary)}</span>}
+              {passport.freshness_summary !== undefined && <span style={{ background: "#dcfce7", color: "#166534", borderRadius: "4px", padding: "1px 8px" }}>Freshness: {String(passport.freshness_summary)}</span>}
+            </div>
+            {!!passport.passport_id && (
+              <button onClick={async () => {
+                try {
+                  const res = await fetch(`${getApiUrl()}/v1/memory/passport/${String(passport.passport_id)}/verify`, { headers: { Authorization: `Bearer ${getApiKey()}` } });
+                  if (res.ok) { const d = await res.json(); alert(d.valid ? "Passport verified — signature valid." : "Verification failed — passport may be tampered."); }
+                  else alert(`Verification error: ${res.status}`);
+                } catch { alert("Verification request failed"); }
+              }} className="text-xs" style={{ color: "#c9a962", cursor: "pointer", background: "none", border: "none", textDecoration: "underline" }}>
+                Verify Passport
+              </button>
+            )}
           </div>
         )}
       </div>
