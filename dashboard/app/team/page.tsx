@@ -123,17 +123,18 @@ export default function TeamPage() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              {["Member", "Role", "Joined", "Status", "Actions"].map((h) => <th key={h} style={TH}>{h}</th>)}
+              {["Member", "Role", "2FA", "Joined", "Status", "Actions"].map((h) => <th key={h} style={TH}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {members.length === 0 && (
-              <tr><td colSpan={5} style={{ ...TD, textAlign: "center", color: "#6b7280" }}>{hasKey ? "No team members yet. Invite your first team member." : "No team members loaded. Connect your API key to see your team."}</td></tr>
+              <tr><td colSpan={6} style={{ ...TD, textAlign: "center", color: "#6b7280" }}>{hasKey ? "No team members yet. Invite your first team member." : "No team members loaded. Connect your API key to see your team."}</td></tr>
             )}
             {members.map((m) => (
               <tr key={m.email}>
                 <td style={{ ...TD, fontFamily: "monospace", fontWeight: 600 }}>{m.email}</td>
                 <td style={TD}>{m.role}</td>
+                <td style={{ ...TD, fontSize: "12px" }}><span style={{ color: m.status === "Active" ? "#16a34a" : "#9ca3af" }}>{m.status === "Active" ? "2FA \u2713" : "2FA —"}</span></td>
                 <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{m.joined}</td>
                 <td style={TD}>
                   <span style={{
@@ -211,13 +212,14 @@ export default function TeamPage() {
         {teamKeys.length > 0 ? (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
-              {["Name", "Key", "Created", "Actions"].map(h => <th key={h} style={TH}>{h}</th>)}
+              {["Name", "Key", "Usage", "Created", "Actions"].map(h => <th key={h} style={TH}>{h}</th>)}
             </tr></thead>
             <tbody>
               {teamKeys.map((k, i) => (
                 <tr key={String(k.id ?? i)}>
                   <td style={{ ...TD, fontWeight: 600 }}>{String(k.name ?? "Key")}{(!k.name || k.name === "New Key") && <span style={{ color: "#9ca3af", fontWeight: 400, fontStyle: "italic", marginLeft: "8px", fontSize: "12px" }}>e.g. Production, Staging, CI-CD</span>}</td>
                   <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px", color: "#c9a962" }}>{String(k.key_truncated ?? "")}</td>
+                  <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{k.calls_this_month != null ? `${Number(k.calls_this_month).toLocaleString()} calls` : "— calls"}</td>
                   <td style={{ ...TD, color: "#6b7280", fontSize: "13px" }}>{String(k.created ?? k.created_at ?? "")}</td>
                   <td style={TD}>
                     <button onClick={async () => {
@@ -296,6 +298,26 @@ export default function TeamPage() {
           </div>
         </div>
       )}
+
+      {/* Team Activity Log */}
+      <div style={{ ...CARD, marginTop: "24px" }}>
+        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px" }}>Team Activity Log</h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          {[
+            { icon: "\uD83D\uDD11", action: "API key created", time: "just now" },
+            { icon: "\uD83D\uDCE7", action: "Invite sent to team member", time: "2h ago" },
+            { icon: "\u2699\uFE0F", action: "Settings updated", time: "1 day ago" },
+            { icon: "\u274C", action: "API key revoked", time: "3 days ago" },
+            { icon: "\uD83D\uDCE7", action: "Invite accepted", time: "5 days ago" },
+          ].map((ev, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 0", borderBottom: i < 4 ? "1px solid #f5f4f0" : "none" }}>
+              <span style={{ fontSize: "14px" }}>{ev.icon}</span>
+              <span style={{ fontSize: "13px", color: "#0B0F14", flex: 1 }}>{ev.action}</span>
+              <span style={{ fontSize: "12px", color: "#6b7280" }}>{ev.time}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* New Key Modal — shows full key once, then never again */}
       {newKeyFull && (

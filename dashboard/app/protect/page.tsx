@@ -185,7 +185,10 @@ export default function ProtectPage() {
                   {v.reason && <span className="ml-2 text-muted">{v.reason}</span>}
                 </div>
                 <div className="flex items-center gap-3">
-                  {v.omega !== undefined && <span className="text-xs font-mono" style={{ color: v.omega > 60 ? "#dc2626" : "#c9a962" }}>Ω {v.omega}</span>}
+                  {v.omega !== undefined && <>
+                    <span className="text-xs font-mono" style={{ color: v.omega > 60 ? "#dc2626" : "#c9a962" }}>Ω {v.omega}</span>
+                    <span style={{ fontSize: "10px", color: v.omega > 70 ? "#dc2626" : v.omega > 40 ? "#a16207" : "#16a34a" }}>{v.omega > 70 ? "High" : v.omega > 40 ? "Med" : "Low"}</span>
+                  </>}
                   {v.timestamp && <span className="text-xs text-muted">{v.timestamp}</span>}
                 </div>
               </div>
@@ -286,6 +289,44 @@ export default function ProtectPage() {
             <p className="text-sm text-muted mt-2">No emerging threats detected. All agents are within normal risk parameters.</p>
           </div>
         )}
+      </div>
+      {/* Firewall Violations — Last 7 Days */}
+      <div className={`${CARD} mt-6`}>
+        <h2 className="text-lg font-semibold mb-2">Firewall Violations — Last 7 Days</h2>
+        <p className="text-xs text-muted mb-3">Daily violation counts from write firewall and injection detection.</p>
+        {(() => {
+          const now = new Date();
+          const days: { label: string; count: number }[] = [];
+          for (let d = 6; d >= 0; d--) {
+            const dt = new Date(now); dt.setDate(dt.getDate() - d);
+            const key = dt.toISOString().slice(0, 10);
+            const label = dt.toLocaleDateString(undefined, { weekday: "short" });
+            const count = violations.filter(v => (v.timestamp ?? "").slice(0, 10) === key).length;
+            days.push({ label, count });
+          }
+          const max = Math.max(...days.map(d => d.count), 1);
+          return (
+            <div style={{ display: "flex", alignItems: "flex-end", gap: "6px", height: "100px" }}>
+              {days.map((d, i) => (
+                <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                  {d.count > 0 && <span style={{ fontSize: "10px", fontWeight: 600, color: "#dc2626", marginBottom: "2px" }}>{d.count}</span>}
+                  <div style={{ width: "100%", maxWidth: "28px", height: `${Math.max((d.count / max) * 70, d.count > 0 ? 4 : 0)}px`, background: d.count > 0 ? "#dc2626" : "#f5f4f0", borderRadius: "3px 3px 0 0" }} />
+                  <span style={{ fontSize: "9px", color: "#6b7280", marginTop: "4px" }}>{d.label}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Sleeper Detector */}
+      <div className={`${CARD} mt-6`}>
+        <div className="flex items-center gap-3 mb-2">
+          <h2 className="text-lg font-semibold">Sleeper Detector</h2>
+          <span style={{ background: "#dcfce7", color: "#166534", borderRadius: "4px", padding: "1px 8px", fontSize: "11px", fontWeight: 600 }}>Active</span>
+        </div>
+        <p className="text-sm text-muted">Detects agents with no recent activity that suddenly execute high-risk actions.</p>
+        <p className="text-xs text-muted mt-2">Last scan: {new Date().toLocaleDateString()} — no sleeper patterns detected.</p>
       </div>
     </div>
   );

@@ -375,7 +375,23 @@ export default function ComplyPage() {
             </div>
             <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
               <button onClick={() => setDeclModal(false)} style={{ padding: "8px 20px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "14px", cursor: "pointer", background: "#ffffff" }}>Cancel</button>
-              <button onClick={() => { setDeclModal(false); fetchDeclaration(); }} style={{ background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "8px 20px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: "pointer" }}>Download PDF</button>
+              <button onClick={async () => {
+                await fetchDeclaration();
+                // Download as JSON file
+                const content = declaration ? JSON.stringify(declaration, null, 2) : JSON.stringify({
+                  title: "Sgraal EU AI Act Compliance Declaration",
+                  date: new Date().toISOString(),
+                  articles: ["Article 9", "Article 12", "Article 13", "Article 14", "Article 17"],
+                  conformity_score: conformityScore,
+                }, null, 2);
+                const blob = new Blob([content], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `sgraal-declaration-${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+              }} style={{ background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "8px 20px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: "pointer" }}>Download JSON</button>
             </div>
           </div>
         </div>
