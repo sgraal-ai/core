@@ -6499,6 +6499,70 @@ def get_current_weights(key_record: dict = Depends(verify_api_key), domain: str 
     }
 
 
+# ---- Grok Comparison Layer ----
+class GrokCompareRequest(BaseModel):
+    sgraal_decision: str
+    grok_decision: str
+    omega: float
+    domain: str = "general"
+
+@app.post("/v1/compare/grok")
+def compare_grok(req: GrokCompareRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    aligned = req.sgraal_decision == req.grok_decision
+    diff_reason = ""
+    risk = ""
+    contradiction = False
+    if not aligned:
+        if req.sgraal_decision == "BLOCK" and req.grok_decision in ("USE_MEMORY", "USE"):
+            diff_reason = f"Sgraal detected risk (omega={req.omega}) that Grok did not flag"
+            risk = f"Proceeding with Grok decision may expose {req.domain} domain to unvalidated memory"
+            contradiction = req.omega > 60
+        elif req.grok_decision == "BLOCK" and req.sgraal_decision in ("USE_MEMORY", "USE"):
+            diff_reason = "Grok flagged risk that Sgraal scored as safe"
+            risk = "Low — Sgraal's 83-module analysis found no significant risk"
+        else:
+            diff_reason = f"Decision mismatch: Sgraal={req.sgraal_decision} vs Grok={req.grok_decision}"
+            risk = "Moderate — review component breakdown for root cause"
+    rec = "trust_sgraal" if req.omega > 60 or contradiction else "re_verify" if 35 <= req.omega <= 55 else "trust_grok" if aligned else "trust_sgraal"
+    return {
+        "decisions_aligned": aligned,
+        "difference_reason": diff_reason,
+        "risk_if_grok_wins": risk,
+        "formal_contradiction_present": contradiction,
+        "confidence_irrelevant": req.omega > 70 or req.omega < 20,
+        "recommendation": rec,
+    }
+
+# ---- Propagation Trace ----
+class PropagationTraceRequest(BaseModel):
+    agent_id: str
+    memory_state: list[dict] = []
+    domain: str = "general"
+
+@app.post("/v1/propagation/trace")
+def propagation_trace(req: PropagationTraceRequest, key_record: dict = Depends(verify_api_key)):
+    _check_rate_limit(key_record)
+    total_downstream = sum(e.get("downstream_count", 0) for e in req.memory_state)
+    max_dc = max((e.get("downstream_count", 0) for e in req.memory_state), default=0)
+    # Estimate cascade depth from downstream topology
+    _depth = min(max_dc, 5)
+    _chain = [req.agent_id] + [f"downstream-{i+1}" for i in range(_depth)]
+    # Risk assessment
+    _domain_mult = {"medical": 2.0, "fintech": 1.8, "legal": 1.5}.get(req.domain, 1.0)
+    _risk_score = total_downstream * _domain_mult
+    _cascade = "CRITICAL" if _risk_score > 50 else "HIGH" if _risk_score > 20 else "MEDIUM" if _risk_score > 5 else "LOW"
+    _containment = "FAILED" if _cascade == "CRITICAL" else "PARTIAL" if _cascade == "HIGH" else "SUCCESS"
+    return {
+        "affected_agents": total_downstream,
+        "cascade_risk": _cascade,
+        "containment": _containment,
+        "propagation_chain": _chain,
+        "max_depth": _depth,
+        "estimated_impact": f"{total_downstream} downstream agents across {_depth} hops in {req.domain} domain",
+    }
+
+
 @app.post("/v1/preflight")
 def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
     _t_start = _time.monotonic()
@@ -9053,6 +9117,24 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _lv = response.get("lyapunov_stability")
     response["stability_gauge"] = _ss["score"] if _ss and isinstance(_ss, dict) and "score" in _ss else (_lv["V"] if _lv and isinstance(_lv, dict) and "V" in _lv else 0.0)
 
+    # Forecast → Decision Hook
+    response["forecast_integrated"] = False
+    try:
+        _koop = response.get("koopman", {})
+        _pred5 = _koop.get("prediction_5") if isinstance(_koop, dict) else None
+        if _pred5 is not None and float(_pred5) > 60:
+            _steps_to_block = 5 if float(_pred5) > 80 else 3 if float(_pred5) > 70 else 5
+            response["forecast_warning"] = True
+            response["forecast_horizon"] = _steps_to_block
+            response["forecast_integrated"] = True
+            if _steps_to_block <= 3 and response["recommended_action"] == "USE_MEMORY":
+                response["recommended_action"] = "WARN"
+                response["preventive_action"] = "WARN"
+            elif _steps_to_block <= 5 and response["recommended_action"] == "USE_MEMORY":
+                response["preventive_action"] = "ASK_USER"
+    except Exception:
+        pass
+
     # Hysteresis: suppress small stochastic-only omega jitter
     _prev_omega = _te_history_cache[-1] if _te_history_cache else None
     if _prev_omega is not None:
@@ -9068,6 +9150,52 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["hysteresis_applied"] = True
     if "hysteresis_applied" not in response:
         response["hysteresis_applied"] = False
+
+    # Decision Stability Layer
+    _omega_now = response["omega_mem_final"]
+    _prev_decision = None
+    if _prev_omega is not None:
+        _prev_decision = "USE_MEMORY" if _prev_omega <= 30 else "WARN" if _prev_omega <= 60 else "ASK_USER" if _prev_omega <= 80 else "BLOCK"
+    response["decision_stable"] = (_prev_decision == response["recommended_action"]) if _prev_decision else True
+    response["hysteresis_band"] = 35 <= _omega_now <= 55
+    response["stability_window"] = "narrow" if 35 <= _omega_now <= 55 else "wide" if (20 <= _omega_now < 35 or 55 < _omega_now <= 70) else "clear"
+
+    # Enhanced hysteresis: keep previous decision in boundary zone
+    if _prev_decision and response["hysteresis_band"]:
+        if _prev_decision == "BLOCK" and _omega_now < 55:
+            response["recommended_action"] = "BLOCK"
+            response["hysteresis_applied"] = True
+        elif _prev_decision == "USE_MEMORY" and _omega_now > 35:
+            response["recommended_action"] = "USE_MEMORY"
+            response["hysteresis_applied"] = True
+        # Override only if clearly crosses threshold
+        if _omega_now > 70:
+            response["recommended_action"] = "BLOCK" if _omega_now > 80 else "ASK_USER"
+            response["hysteresis_applied"] = False
+        elif _omega_now < 20:
+            response["recommended_action"] = "USE_MEMORY"
+            response["hysteresis_applied"] = False
+
+    # Boundary Explainer
+    if 35 <= _omega_now <= 55:
+        response["boundary_decision"] = True
+        _boundary_reasons = []
+        cb = response.get("component_breakdown", {})
+        if cb.get("s_drift", 0) > 20 and cb.get("s_drift", 0) < 60:
+            _boundary_reasons.append("drift signal present but below critical threshold")
+        if cb.get("s_interference", 0) < 30:
+            _boundary_reasons.append("no formal contradiction detected")
+        _dc = sum(1 for e in entries if e.downstream_count > 1) if entries else 0
+        if _dc > 0:
+            _boundary_reasons.append(f"propagation risk moderate — {_dc} downstream agent{'s' if _dc > 1 else ''} affected")
+        if cb.get("s_freshness", 0) > 30:
+            _boundary_reasons.append("memory freshness approaching stale threshold")
+        if not _boundary_reasons:
+            _boundary_reasons.append("omega score in boundary zone — decision could shift with small changes")
+        response["boundary_explanation"] = _boundary_reasons
+        response["decision_confidence"] = round(max(0.1, min(1.0, 1.0 - abs(_omega_now - 45) / 45)), 2)
+    else:
+        response["boundary_decision"] = False
 
     response["response_profile_used"] = _profile
     if _profile == "compact":
@@ -9085,7 +9213,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "divergence_check_available", "persona_conflict", "persona_violation",
                          "decision_based_on", "degraded_mode", "degraded_features",
                          "auto_inference_suppressed", "heal_decision", "stability_gauge",
-                         "hysteresis_applied", "input_hash", "deterministic", "reproducible", "proof_version"}
+                         "hysteresis_applied", "input_hash", "deterministic", "reproducible", "proof_version",
+                         "decision_stable", "hysteresis_band", "stability_window",
+                         "boundary_decision", "forecast_integrated", "forecast_warning"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
