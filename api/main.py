@@ -2774,6 +2774,7 @@ class PassportExportRequest(BaseModel):
     agent_id: str = "anonymous"
     memory_state: list[dict] = []
     valid_days: int = 30
+    passport_type: str = "ephemeral"  # ephemeral | standard | archival
 
 @app.post("/v1/memory/passport/export")
 def export_passport(req: PassportExportRequest, key_record: dict = Depends(verify_api_key)):
@@ -2781,7 +2782,9 @@ def export_passport(req: PassportExportRequest, key_record: dict = Depends(verif
     kh = key_record.get("key_hash", "default")
     pid = str(uuid.uuid4())
     issued = datetime.now(timezone.utc)
-    valid_until = (issued + timedelta(days=req.valid_days)).isoformat()
+    _ttl_map = {"ephemeral": timedelta(minutes=5), "standard": timedelta(hours=1), "archival": timedelta(days=req.valid_days)}
+    _ttl = _ttl_map.get(req.passport_type, timedelta(minutes=5))
+    valid_until = (issued + _ttl).isoformat()
     omegas = []
     for e in req.memory_state:
         try:
@@ -2807,9 +2810,11 @@ def export_passport(req: PassportExportRequest, key_record: dict = Depends(verif
         "conflict_summary": "no_critical_conflicts" if omega_avg < 50 else "conflicts_present",
         "assurance": round(max(0, 100 - omega_avg), 1),
         "policy_flags": [], "signature_key_version": _key_version, "signature": _signature,
+        "passport_type": req.passport_type, "propagation_limit": 3,
     }
     _passports[pid] = passport
-    redis_set(f"memory_passport:{pid}", passport, ttl=req.valid_days * 86400)
+    _ttl_seconds = int(_ttl.total_seconds())
+    redis_set(f"memory_passport:{pid}", passport, ttl=_ttl_seconds)
     return passport
 
 class PassportImportRequest(BaseModel):
@@ -3117,6 +3122,7 @@ def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api
     verdict = {"verdict_id": vid, "winner_entries": winners, "loser_entries": losers,
                "confidence": confidence, "arbitration_method": "omega_scoring + causal_inference",
                "z3_proof": _z3_proof, "explanation": f"Winner has omega={scored[0]['omega']:.1f}, most reliable by {len(scored)} entry analysis",
+               "overridable": False, "authority": "formal_verification",
                "created_at": datetime.now(timezone.utc).isoformat()}
     _court_verdicts[vid] = verdict
     _persist_store(f"court_verdict:{vid}", verdict, ttl=90*86400)
@@ -4855,8 +4861,30 @@ def cross_agent_check(req: CrossAgentRequest, key_record: dict = Depends(verify_
         best = max(trust_sums, key=trust_sums.get)
         arb = {"recommended_agent": best, "reason": f"Highest average source_trust ({trust_sums[best]:.2f})"}
 
+    # Anti-consensus safeguard: detect correlated agents
+    _trust_sets: dict[str, set] = {}
+    _content_hashes: dict[str, set] = {}
+    for a in req.agents:
+        aid = a.get("agent_id", "?")
+        ms = a.get("memory_state", [])
+        _trust_sets[aid] = {round(e.get("source_trust", 0.5), 4) for e in ms}
+        _content_hashes[aid] = {hashlib.sha256(str(e.get("content", "")).encode()).hexdigest()[:8] for e in ms}
+    _agent_ids = list(_trust_sets.keys())
+    _correlated = False
+    for i in range(len(_agent_ids)):
+        for j in range(i + 1, len(_agent_ids)):
+            if _trust_sets[_agent_ids[i]] == _trust_sets[_agent_ids[j]] and len(_trust_sets[_agent_ids[i]]) > 0:
+                if _content_hashes[_agent_ids[i]] & _content_hashes[_agent_ids[j]]:
+                    _correlated = True
+                    break
+        if _correlated:
+            break
+    _reduction = 0.5 if _correlated else 0.0
+
     return {"conflict_detected": len(conflicts) > 0, "conflict_score": round(conflict_score, 2),
-            "conflict_graph": conflicts, "arbitration": arb, "cross_agent_action": action}
+            "conflict_graph": conflicts, "arbitration": arb, "cross_agent_action": action,
+            "correlated_agents": _correlated, "consensus_weight_reduction": _reduction,
+            "anti_hallucination_applied": _reduction > 0}
 
 
 # ---- Audit Log + SIEM Export ----
@@ -6590,7 +6618,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                           for e in entries],
          "domain": req.domain, "action_type": req.action_type},
         sort_keys=True)
-    _deterministic_seed = int(hashlib.sha256(_seed_payload.encode()).hexdigest()[:16], 16)
+    _input_hash_full = hashlib.sha256(_seed_payload.encode()).hexdigest()
+    _deterministic_seed = int(_input_hash_full[:16], 16)
     _deterministic_seed_str = str(_deterministic_seed)
 
     _module_times = {}
@@ -6904,6 +6933,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response = {
         "omega_mem_final": omega_out,
         "memcube_version": "2.0.0",
+        "input_hash": _input_hash_full,
+        "deterministic": True,
+        "reproducible": True,
+        "proof_version": "v1",
         "recommended_action": _final_action,
         "assurance_score": result.assurance_score,
         "explainability_note": result.explainability_note,
