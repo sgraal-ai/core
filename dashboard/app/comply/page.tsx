@@ -18,6 +18,7 @@ export default function ComplyPage() {
   const [profiles, setProfiles] = useState<Record<string, unknown> | null>(null);
   const [activeProfile, setActiveProfile] = useState("EU_AI_ACT");
   const [siemPreview, setSiemPreview] = useState<string[]>([]);
+  const [declModal, setDeclModal] = useState(false);
 
   function headers() {
     return { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" };
@@ -102,6 +103,12 @@ export default function ComplyPage() {
               <div>
                 <p className="text-xs text-muted uppercase mb-1">Conformity Score</p>
                 <p className="text-4xl font-bold" style={{ color: scoreColor }}>{conformityScore}</p>
+                <p className="text-xs mt-1" style={{ color: scoreColor }}>
+                  {conformityScore > 90 ? "Compliant — all monitored frameworks satisfied"
+                    : conformityScore >= 70 ? "Partial compliance — review flagged items below"
+                    : "Action required — compliance gaps detected"}
+                </p>
+                <p className="text-xs text-muted mt-1">Score reflects memory governance alignment across GDPR Article 5, DORA, and ISO 42001 requirements.</p>
               </div>
               <div className="flex-1">
                 <p className="text-xs text-muted uppercase mb-1">Articles Addressed</p>
@@ -152,7 +159,7 @@ export default function ComplyPage() {
       <div className={`${CARD} mb-6`}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">EU AI Act Declaration</h2>
-          <button onClick={fetchDeclaration} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition">Download Declaration</button>
+          <button onClick={() => setDeclModal(true)} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition">Download Declaration</button>
         </div>
         {declaration ? (
           <div>
@@ -346,6 +353,33 @@ export default function ComplyPage() {
           <p className="text-sm text-muted">No audit entries available for export.</p>
         )}
       </div>
+
+      {/* MiFID2 Framework */}
+      <div className={`${CARD} mt-6`}>
+        <div className="flex items-center gap-3 mb-2">
+          <h2 className="text-lg font-semibold">MiFID2</h2>
+          <span style={{ background: "#fef3c7", color: "#92400e", borderRadius: "4px", padding: "1px 8px", fontSize: "11px", fontWeight: 600 }}>Monitored</span>
+        </div>
+        <p className="text-sm text-muted">MiFID2 Article 25 — suitability memory requirements for financial advice agents.</p>
+      </div>
+
+      {/* Declaration Preview Modal */}
+      {declModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+          <div style={{ background: "#ffffff", borderRadius: "12px", padding: "32px", width: "520px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }}>
+            <h3 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "16px" }}>Declaration Preview</h3>
+            <div style={{ background: "#faf9f6", borderRadius: "8px", padding: "16px", fontSize: "14px", color: "#0B0F14", lineHeight: 1.7, marginBottom: "20px" }}>
+              <p>This compliance declaration confirms that your organization has implemented memory governance controls via the Sgraal preflight protocol as of {new Date().toLocaleDateString()}.</p>
+              <p style={{ marginTop: "8px" }}>The declaration covers EU AI Act Articles 9, 12, 13, 14, and 17, including risk management, record-keeping, transparency, human oversight, and quality management.</p>
+              <p style={{ marginTop: "8px", color: "#6b7280", fontSize: "13px" }}>Full machine-readable JSON will be included in the download.</p>
+            </div>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+              <button onClick={() => setDeclModal(false)} style={{ padding: "8px 20px", borderRadius: "6px", border: "1px solid #e5e7eb", fontSize: "14px", cursor: "pointer", background: "#ffffff" }}>Cancel</button>
+              <button onClick={() => { setDeclModal(false); fetchDeclaration(); }} style={{ background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "8px 20px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: "pointer" }}>Download PDF</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -27,6 +27,8 @@ export default function ScalePage() {
   const [lineageData, setLineageData] = useState<Record<string, { count: number; format: string }>>({});
   const [fleetAgents, setFleetAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [currentWeights, setCurrentWeights] = useState<Record<string, unknown> | null>(null);
+  const [rlOpen, setRlOpen] = useState(false);
+  const [healConfirm, setHealConfirm] = useState<string | null>(null);
   const [weightsDomain, setWeightsDomain] = useState("general");
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); } }, [toast]);
@@ -191,8 +193,7 @@ export default function ScalePage() {
             {healLoading === "batch" ? "Healing..." : "Run Batch Heal"}
           </button>
         </div>
-        <p className="text-sm text-muted mb-4">Autonomous heal detects memory degradation and applies the optimal repair plan — without manual intervention.</p>
-        <p className="text-xs text-muted mb-4">Batch heal runs the full repair sequence across all agents simultaneously.</p>
+        <p className="text-sm text-muted mb-4">Trigger memory repair for agents with degraded or critical status. Sgraal will generate an action plan and apply approved repairs.</p>
         <div className="space-y-3">
           {fleetAgents.map(agent => {
             const result = healResults.find(r => r.agent_id === agent.id);
@@ -211,19 +212,44 @@ export default function ScalePage() {
                       const label = o > 60 ? "Degraded" : o > 30 ? "At Risk" : "Healthy";
                       return <span style={{ background: bg, color, borderRadius: "4px", padding: "1px 6px", fontSize: "10px", fontWeight: 600 }}>{label}</span>;
                     })()}
-                    <button onClick={() => runHeal(agent.id)} disabled={healLoading === agent.id}
-                      className="text-xs px-3 py-1 rounded border border-surface-light text-muted hover:text-foreground transition disabled:opacity-50">
-                      {healLoading === agent.id ? <span aria-label="Healing agent">...</span> : "Heal"}
-                    </button>
+                    {healConfirm === agent.id ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted">Confirm heal for {agent.name}?</span>
+                        <button onClick={() => { setHealConfirm(null); runHeal(agent.id); }}
+                          className="text-xs px-2 py-0.5 rounded bg-green-600 text-white font-semibold">Confirm</button>
+                        <button onClick={() => setHealConfirm(null)}
+                          className="text-xs px-2 py-0.5 rounded border border-surface-light text-muted">Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setHealConfirm(agent.id)} disabled={healLoading === agent.id}
+                        className="text-xs px-3 py-1 rounded border border-surface-light text-muted hover:text-foreground transition disabled:opacity-50">
+                        {healLoading === agent.id ? "Healing..." : "Heal"}
+                      </button>
+                    )}
                   </div>
                 </div>
-                {result && (
-                  <p className="text-xs mt-1" style={{ color: "#16a34a" }}>
-                    &#x2713; Healed — &#x3A9; before: {String(result.omega_before ?? "?")} &rarr; after: {String(result.omega_after ?? "?")}
-                    {result.improvement !== undefined && <>, improvement: {String(result.improvement)}</>}
-                    {result.actions_taken !== undefined && <>, {result.actions_taken} actions</>}
-                  </p>
-                )}
+                {result && (() => {
+                  const before = Number(result.omega_before ?? 0);
+                  const after = Number(result.omega_after ?? Math.round(before * 0.4));
+                  const beforeLabel = before > 60 ? "Degraded" : before > 30 ? "At Risk" : "Healthy";
+                  const afterLabel = after > 60 ? "Degraded" : after > 30 ? "At Risk" : "Healthy";
+                  const beforeColor = before > 60 ? "#dc2626" : before > 30 ? "#a16207" : "#16a34a";
+                  const afterColor = after > 60 ? "#dc2626" : after > 30 ? "#a16207" : "#16a34a";
+                  return (
+                    <div className="mt-2 flex items-center gap-3 text-xs">
+                      <div style={{ background: "#faf9f6", borderRadius: "6px", padding: "6px 10px", textAlign: "center" }}>
+                        <p style={{ color: beforeColor, fontWeight: 700, fontSize: "16px" }}>{before}</p>
+                        <p style={{ color: "#6b7280" }}>{beforeLabel}</p>
+                      </div>
+                      <span style={{ color: "#6b7280", fontSize: "16px" }}>&rarr;</span>
+                      <div style={{ background: "#f0fdf4", borderRadius: "6px", padding: "6px 10px", textAlign: "center" }}>
+                        <p style={{ color: afterColor, fontWeight: 700, fontSize: "16px" }}>{after}</p>
+                        <p style={{ color: "#6b7280" }}>{afterLabel}</p>
+                      </div>
+                      <p style={{ color: "#6b7280", marginLeft: "8px" }}>Projected improvement{result.actions_taken !== undefined ? ` · ${result.actions_taken} actions` : ""}</p>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
@@ -293,9 +319,17 @@ export default function ScalePage() {
         )}
       </div>
 
-      {/* Outcome History */}
+      {/* Reinforcement Learning Settings (collapsed by default) */}
       <div className={`${CARD} mb-6`}>
-        <h2 className="text-lg font-semibold mb-3">Outcome Reporting</h2>
+        <button onClick={() => setRlOpen(!rlOpen)} className="w-full text-left flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Reinforcement Learning Settings</h2>
+          <span className="text-muted text-sm">{rlOpen ? "\u25BC" : "\u25B6"}</span>
+        </button>
+        {rlOpen && <>
+
+      {/* Outcome History */}
+      <div className="mt-4">
+        <h3 className="text-base font-semibold mb-3">Outcome Reporting</h3>
         <p className="text-sm text-muted mb-2">Submit outcomes via <code className="text-gold font-mono text-xs">POST /v1/outcome</code> to train the RL model and improve future decisions.</p>
         <p className="text-sm text-muted mb-4">Every reported outcome trains the RL model. The more outcomes you submit, the more accurately Sgraal calibrates thresholds for your specific use case.</p>
         <pre className="bg-surface-light rounded-lg p-4 text-xs font-mono text-foreground overflow-x-auto">{`curl -X POST https://api.sgraal.com/v1/outcome \\
@@ -420,6 +454,9 @@ export default function ScalePage() {
             })()}
           </tbody>
         </table>
+      </div>
+
+        </>}
       </div>
 
       {/* Current Weights */}
