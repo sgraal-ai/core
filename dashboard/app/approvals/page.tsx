@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { getApiKey, getApiUrl } from "../lib/storage";
 import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
 
@@ -37,6 +38,20 @@ const TAG_STYLE: React.CSSProperties = {
   fontSize: "12px",
 };
 
+function decisionReason(decision: string, omega: number): string {
+  if (decision === "Rejected") {
+    if (omega > 80) return "high risk";
+    if (omega > 60) return "conflict detected";
+    return "stale memory";
+  }
+  if (decision === "Approved") {
+    if (omega > 50) return "human review required";
+    if (omega > 30) return "moderate risk";
+    return "safe";
+  }
+  return "";
+}
+
 export default function ApprovalsPage() {
   const [mounted, setMounted] = useState(false);
   const [pending, setPending] = useState<Approval[]>([]);
@@ -46,6 +61,9 @@ export default function ApprovalsPage() {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [timeAgo, setTimeAgo] = useState("just now");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  const [simResult, setSimResult] = useState<Record<string, unknown> | null>(null);
+  const router = useRouter();
 
   const loadApprovals = useCallback(async () => {
     setMounted(true);
@@ -204,12 +222,45 @@ export default function ApprovalsPage() {
 
       {/* Empty state */}
       {showEmpty && (
-        <div style={{ textAlign: "center", padding: "80px 0" }}>
+        <div style={{ textAlign: "center", padding: "60px 0" }}>
           <p className="text-green-600" style={{ fontSize: "48px" }}>✓</p>
           <h3 className="text-xl font-bold text-foreground" style={{ marginTop: "8px" }}>No pending approvals</h3>
-          <p className="text-sm text-muted" style={{ marginTop: "8px" }}>
-            When an agent receives ASK_USER, it will appear here for your review.
+          <p className="text-sm text-muted" style={{ marginTop: "8px", maxWidth: "400px", margin: "8px auto 0" }}>
+            When an agent requests human approval, it will appear here.
           </p>
+          <button
+            onClick={async () => {
+              setSimulating(true);
+              setSimResult(null);
+              const apiKey = getApiKey();
+              const apiUrl = getApiUrl();
+              if (!apiKey) { setSimulating(false); return; }
+              try {
+                const res = await fetch(`${apiUrl}/v1/preflight`, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    memory_state: [{ id: "sim_ask_user", content: "Account balance snapshot from 3 weeks ago", type: "tool_state", timestamp_age_days: 21, source_trust: 0.65, source_conflict: 0.35, downstream_count: 8 }],
+                    action_type: "irreversible", domain: "fintech", response_profile: "standard",
+                  }),
+                });
+                if (res.ok) setSimResult(await res.json());
+              } catch {}
+              setSimulating(false);
+            }}
+            disabled={simulating}
+            style={{ marginTop: "16px", background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "8px 20px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: simulating ? "not-allowed" : "pointer", opacity: simulating ? 0.6 : 1 }}
+          >
+            {simulating ? "Simulating..." : "Simulate ASK_USER \u2192"}
+          </button>
+          {simResult && (
+            <div style={{ marginTop: "16px", background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "16px", maxWidth: "400px", margin: "16px auto 0", textAlign: "left" }}>
+              <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", marginBottom: "8px" }}>Simulation Result</p>
+              <p style={{ fontSize: "14px" }}><strong>Decision:</strong> {String(simResult.recommended_action)}</p>
+              <p style={{ fontSize: "14px" }}><strong>Omega:</strong> {String(simResult.omega_mem_final)}</p>
+              <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>{String(simResult.explainability_note ?? "")}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -312,7 +363,7 @@ export default function ApprovalsPage() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              {["Agent", "Action", "Omega", "Decision", "Timestamp"].map((h) => (
+              {["Agent", "Action", "Omega", "Decision", "Reason", "Timestamp"].map((h) => (
                 <th
                   key={h}
                   style={{
@@ -332,7 +383,7 @@ export default function ApprovalsPage() {
           </thead>
           <tbody>
             {history.map((row, i) => (
-              <tr key={i}>
+              <tr key={i} onClick={() => row.agent_id && router.push(`/agent/${row.agent_id}`)} style={{ cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#faf9f6")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                 <td style={{ fontSize: "14px", color: "#0B0F14", padding: "12px 16px", borderBottom: "1px solid #f5f4f0", fontFamily: "monospace" }}>
                   {row.agent_id}
                 </td>
@@ -355,6 +406,9 @@ export default function ApprovalsPage() {
                   >
                     {row.decision}
                   </span>
+                </td>
+                <td style={{ fontSize: "13px", color: "#6b7280", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" }}>
+                  {decisionReason(row.decision, row.omega)}
                 </td>
                 <td style={{ fontSize: "14px", color: "#6b7280", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" }}>
                   {row.timestamp}
