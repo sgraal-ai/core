@@ -271,7 +271,7 @@ def safe_query(index: VectorStoreIndex, query: str) -> str:
 ];
 
 const CATEGORIES = ["All", "Getting Started", "Production Patterns", "Advanced / Multi-Agent"];
-const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", overflow: "hidden" };
+const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" };
 
 export default function TemplatesPage() {
   const [category, setCategory] = useState("All");
@@ -350,7 +350,7 @@ export default function TemplatesPage() {
               </div>
             </div>
             {expanded === t.id && (
-              <div style={{ borderTop: "1px solid #e5e7eb" }}>
+              <div style={{ borderTop: "1px solid #e5e7eb", borderRadius: "0 0 8px 8px", overflow: "hidden" }}>
                 <SyntaxPre code={t.code} />
               </div>
             )}
