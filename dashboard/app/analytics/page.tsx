@@ -42,6 +42,7 @@ export default function AnalyticsPage() {
   const [auditEntries, setAuditEntries] = useState<Array<Record<string, unknown>>>([]);
   const [memTypes, setMemTypes] = useState<Record<string, number> | null>(null);
   const [repairEff, setRepairEff] = useState<Record<string, unknown> | null>(null);
+  const [projVolume, setProjVolume] = useState(100000);
 
   const load = useCallback(async () => {
     setMounted(true);
@@ -151,6 +152,46 @@ export default function AnalyticsPage() {
         <p style={{ fontSize: "12px", color: "#6b7280" }}>Updated {timeAgo}</p>
       </div>
 
+      {/* Top Issues */}
+      {totalDecisions > 0 && (() => {
+        const issues: { title: string; desc: string; domain: string; severity: "red" | "amber" }[] = [];
+        // Per-domain analysis
+        const byDom: Record<string, { total: number; block: number; warn: number; askUser: number }> = {};
+        for (const e of auditEntries) {
+          const d = String(e.domain || "unknown");
+          if (!byDom[d]) byDom[d] = { total: 0, block: 0, warn: 0, askUser: 0 };
+          byDom[d].total++;
+          if (e.decision === "BLOCK") byDom[d].block++;
+          if (e.decision === "WARN") byDom[d].warn++;
+          if (e.decision === "ASK_USER") byDom[d].askUser++;
+        }
+        for (const [dom, s] of Object.entries(byDom)) {
+          const br = s.total > 0 ? s.block / s.total : 0;
+          const wr = s.total > 0 ? s.warn / s.total : 0;
+          const ar = s.total > 0 ? s.askUser / s.total : 0;
+          if (br > 0.4) issues.push({ title: `High BLOCK rate in ${dom}`, desc: `${Math.round(br * 100)}% of calls blocked — likely stale or conflicting memory`, domain: dom, severity: br > 0.7 ? "red" : "amber" });
+          else if (wr > 0.3) issues.push({ title: `Elevated WARN rate in ${dom}`, desc: `${Math.round(wr * 100)}% warnings — consider tuning thresholds`, domain: dom, severity: "amber" });
+          if (ar > 0.2) issues.push({ title: `Repeated ASK_USER in ${dom}`, desc: `${Math.round(ar * 100)}% require human review — automate or adjust policies`, domain: dom, severity: "amber" });
+        }
+        if (avgOmega > 50) issues.push({ title: "Fleet-wide high risk", desc: `Average omega ${avgOmega} — systematic memory quality issue`, domain: "all", severity: "red" });
+        const top3 = issues.sort((a, b) => (a.severity === "red" ? 0 : 1) - (b.severity === "red" ? 0 : 1)).slice(0, 3);
+        if (top3.length === 0) return null;
+        return (
+          <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap" }}>
+            {top3.map((issue, i) => (
+              <div key={i} style={{ ...CARD, flex: "1 1 280px", borderLeft: `4px solid ${issue.severity === "red" ? "#dc2626" : "#c9a962"}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                  <span style={{ fontSize: "14px" }}>{issue.severity === "red" ? "\uD83D\uDD34" : "\u26A0\uFE0F"}</span>
+                  <span style={{ fontSize: "14px", fontWeight: 700, color: "#0B0F14" }}>{issue.title}</span>
+                </div>
+                <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "6px" }}>{issue.desc}</p>
+                <span style={{ background: "#f3f4f6", color: "#6b7280", borderRadius: "20px", padding: "2px 8px", fontSize: "11px" }}>{issue.domain}</span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
       {/* KPI Row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", marginBottom: "24px" }}>
         <div style={CARD}>
@@ -174,6 +215,17 @@ export default function AnalyticsPage() {
           <p style={{ fontSize: "12px", color: blockPct > 50 ? "#dc2626" : blockPct > 20 ? "#c9a962" : "#16a34a", fontWeight: 600, marginTop: "4px" }}>Estimated risk avoided: {blockPct > 50 ? "HIGH" : blockPct > 20 ? "MEDIUM" : "LOW"}</p>
           {waste && <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>Token savings: {fmtUsd(waste.savings_if_filtered)}</p>}
         </div>
+        {(() => {
+          const estWaste = auditBlocks * 1200 + (auditWarns - askUserCount) * 400;
+          const wasteColor = estWaste > 200000 ? "#dc2626" : estWaste > 50000 ? "#c9a962" : "#16a34a";
+          return (
+            <div style={CARD}>
+              <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Est. Token Waste</p>
+              <p style={{ fontSize: "28px", fontWeight: 700, color: wasteColor, marginTop: "4px" }}>{fmt(estWaste)}</p>
+              <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>from blocked &amp; warned calls</p>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Decision Breakdown */}
@@ -271,7 +323,7 @@ export default function AnalyticsPage() {
             <p className="text-sm text-muted mb-4">Domains with highest block rates may need threshold adjustment.</p>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr>
-                {["Domain", "Calls", "BLOCK %", "WARN %", "USE %", "Avg Omega"].map(h => <th key={h} style={TH}>{h}</th>)}
+                {["Domain", "Calls", "BLOCK %", "WARN %", "USE %", "Avg Omega", "Rec."].map(h => <th key={h} style={TH}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {rows.map(r => (
@@ -289,10 +341,65 @@ export default function AnalyticsPage() {
                     <td style={{ ...TD, color: r.warnPct > 20 ? "#c9a962" : "#6b7280" }}>{r.warnPct}%</td>
                     <td style={{ ...TD, color: "#16a34a" }}>{r.usePct}%</td>
                     <td style={{ ...TD, color: r.avgOmega > 50 ? "#dc2626" : r.avgOmega > 25 ? "#c9a962" : "#16a34a" }}>{r.avgOmega}</td>
+                    <td style={{ ...TD, fontSize: "12px", color: "#6b7280" }}>
+                      {r.blockPct > 70 ? <span style={{ color: "#dc2626" }}>Immediate attention</span>
+                        : r.blockPct > 40 ? <span style={{ color: "#c9a962" }}>Review memory freshness</span>
+                        : r.warnPct > 30 ? <span style={{ color: "#c9a962" }}>Tune thresholds</span>
+                        : r.blockPct < 10 ? <span style={{ color: "#16a34a" }}>Healthy</span>
+                        : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        );
+      })()}
+
+      {/* Decision Trend — Last 7 Days */}
+      {auditEntries.length > 0 && (() => {
+        const now = new Date();
+        const dayBuckets: { label: string; block: number; warn: number; total: number }[] = [];
+        for (let d = 6; d >= 0; d--) {
+          const date = new Date(now);
+          date.setDate(date.getDate() - d);
+          const key = date.toISOString().slice(0, 10);
+          const label = date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+          const dayEntries = auditEntries.filter(e => {
+            try { const ts = String((e as Record<string, unknown>).timestamp ?? (e as Record<string, unknown>).created_at ?? ""); return ts.slice(0, 10) === key; } catch { return false; }
+          });
+          dayBuckets.push({
+            label, total: dayEntries.length,
+            block: dayEntries.filter(e => e.decision === "BLOCK").length,
+            warn: dayEntries.filter(e => e.decision === "WARN" || e.decision === "ASK_USER").length,
+          });
+        }
+        const maxTotal = Math.max(...dayBuckets.map(b => b.total), 1);
+        const hasDayData = dayBuckets.some(b => b.total > 0);
+        if (!hasDayData) return null;
+        return (
+          <div style={{ ...CARD, marginTop: "24px" }}>
+            <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Decision Trend — Last 7 Days</h2>
+            <p className="text-sm text-muted mb-4">Daily BLOCK and WARN rates across all agents.</p>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: "8px", height: "140px" }}>
+              {dayBuckets.map((b, i) => {
+                const blockH = b.total > 0 ? (b.block / maxTotal) * 120 : 0;
+                const warnH = b.total > 0 ? (b.warn / maxTotal) * 120 : 0;
+                return (
+                  <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", flex: 1 }}>
+                      {blockH > 0 && <div style={{ width: "100%", height: `${blockH}px`, background: "#dc2626", borderRadius: "3px 3px 0 0", minHeight: "2px" }} title={`BLOCK: ${b.block}`} />}
+                      {warnH > 0 && <div style={{ width: "100%", height: `${warnH}px`, background: "#c9a962", minHeight: "2px" }} title={`WARN: ${b.warn}`} />}
+                    </div>
+                    <span style={{ fontSize: "10px", color: "#6b7280", marginTop: "6px", textAlign: "center", lineHeight: 1.2 }}>{b.label.split(",")[0]}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: "16px", marginTop: "12px", fontSize: "12px", color: "#6b7280" }}>
+              <span><span style={{ display: "inline-block", width: "10px", height: "10px", background: "#dc2626", borderRadius: "2px", marginRight: "4px" }} />BLOCK</span>
+              <span><span style={{ display: "inline-block", width: "10px", height: "10px", background: "#c9a962", borderRadius: "2px", marginRight: "4px" }} />WARN</span>
+            </div>
           </div>
         );
       })()}
@@ -442,6 +549,39 @@ export default function AnalyticsPage() {
           </div>
         </div>
       )}
+      {/* ROI Projection */}
+      {totalDecisions > 0 && (() => {
+        const projBlockRate = blockPct / 100;
+        const projWarnRate = warnPct / 100;
+        const projBlocked = Math.round(projVolume * projBlockRate);
+        const estWastePerCall = totalDecisions > 0 ? (auditBlocks * 1200 + (auditWarns - askUserCount) * 400) / totalDecisions : 0;
+        const projTokenSavings = Math.round(estWastePerCall * projVolume);
+        return (
+          <div style={{ ...CARD, marginTop: "24px", borderLeft: "4px solid #c9a962" }}>
+            <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>ROI Projection</h2>
+            <p className="text-sm text-muted mb-4">Estimate impact at scale based on current decision patterns.</p>
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", display: "block", marginBottom: "4px" }}>Monthly call volume</label>
+              <input type="number" value={projVolume} onChange={(e) => setProjVolume(Math.max(0, Number(e.target.value) || 0))}
+                style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "8px 12px", fontSize: "14px", width: "200px" }} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+              <div>
+                <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Blocked Harmful Actions</p>
+                <p style={{ fontSize: "24px", fontWeight: 700, color: "#dc2626" }}>{fmt(projBlocked)}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Token Savings vs Unguarded</p>
+                <p style={{ fontSize: "24px", fontWeight: 700, color: "#c9a962" }}>{fmt(projTokenSavings)}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Compliance Events Prevented</p>
+                <p style={{ fontSize: "24px", fontWeight: 700, color: "#16a34a" }}>{fmt(Math.round(projVolume * projWarnRate + projBlocked))}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
