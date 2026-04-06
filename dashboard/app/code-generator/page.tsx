@@ -133,13 +133,31 @@ export default function CodeGeneratorPage() {
           </select>
         </div>
         <div className="flex items-end gap-4">
-          <label className="text-xs text-muted flex items-center gap-1">
-            <input type="checkbox" checked={heal} onChange={e => setHeal(e.target.checked)} /> Heal
-          </label>
-          <label className="text-xs text-muted flex items-center gap-1">
-            <input type="checkbox" checked={batch} onChange={e => setBatch(e.target.checked)} /> Batch
-          </label>
+          <div>
+            <label className="text-xs text-muted flex items-center gap-1">
+              <input type="checkbox" checked={heal} onChange={e => setHeal(e.target.checked)} /> Heal
+            </label>
+            {heal && <p style={{ fontSize: "10px", color: "#6b7280", fontStyle: "italic", marginTop: "2px" }}>Repair plan for blocked memory: DELETE/REFRESH/VERIFY per entry.</p>}
+          </div>
+          <div>
+            <label className="text-xs text-muted flex items-center gap-1">
+              <input type="checkbox" checked={batch} onChange={e => setBatch(e.target.checked)} /> Batch
+            </label>
+            {batch && <p style={{ fontSize: "10px", color: "#6b7280", fontStyle: "italic", marginTop: "2px" }}>Validate up to 500 entries in one call. Returns portfolio_risk.</p>}
+          </div>
         </div>
+      </div>
+
+      {/* Auth warning */}
+      <p style={{ fontSize: "11px", color: "#a16207", marginBottom: "8px" }}>
+        &#x26A0;&#xFE0F; Never hardcode API keys in source code. Use environment variables: <code style={{ fontFamily: "monospace" }}>os.environ[&apos;SGRAAL_API_KEY&apos;]</code> or <code style={{ fontFamily: "monospace" }}>process.env.SGRAAL_API_KEY</code>
+      </p>
+
+      {/* What this code does */}
+      <div style={{ fontSize: "13px", color: "#6b7280", marginBottom: "12px", lineHeight: 1.6 }}>
+        <p>1. Sends your memory state to Sgraal for preflight validation.</p>
+        <p>2. Returns USE_MEMORY / WARN / ASK_USER / BLOCK with full explanation.</p>
+        <p>3. Act on the decision: block the action, request human approval, or proceed safely.</p>
       </div>
 
       <div className="relative">

@@ -8,12 +8,19 @@ interface Template {
   description: string;
   language: string;
   category: string;
+  maturity: "starter" | "production" | "advanced";
   code: string;
 }
 
+const MATURITY_BADGE: Record<string, { bg: string; color: string; label: string }> = {
+  starter: { bg: "#dcfce7", color: "#166534", label: "Starter" },
+  production: { bg: "#dbeafe", color: "#1e40af", label: "Production" },
+  advanced: { bg: "#f3e8ff", color: "#6b21a8", label: "Advanced" },
+};
+
 const TEMPLATES: Template[] = [
   {
-    id: "python-basic", title: "Python — Basic Preflight", language: "python", category: "Getting Started",
+    id: "python-basic", title: "Python — Basic Preflight", language: "python", category: "Getting Started", maturity: "starter",
     description: "Minimal preflight check before an agent action. Returns omega score and recommended action.",
     code: `from sgraal import SgraalClient
 
@@ -39,7 +46,7 @@ else:
     print(f"Safe to act. Omega: {result.omega_mem_final}")`,
   },
   {
-    id: "python-guard", title: "Python — @guard Decorator", language: "python", category: "Getting Started",
+    id: "python-guard", title: "Python — @guard Decorator", language: "python", category: "Production Patterns", maturity: "production",
     description: "Wrap any function with automatic preflight checks. Blocks execution when memory is unreliable.",
     code: `from sgraal import SgraalClient, guard
 
@@ -54,7 +61,7 @@ def execute_trade(memory, amount):
 execute_trade(memory=my_memory, amount=12500)`,
   },
   {
-    id: "ts-fetch", title: "TypeScript — Fetch API", language: "typescript", category: "Getting Started",
+    id: "ts-fetch", title: "TypeScript — Fetch API", language: "typescript", category: "Getting Started", maturity: "starter",
     description: "Direct HTTP call to the Sgraal API. Works in any Node.js or browser environment.",
     code: `const res = await fetch("https://api.sgraal.com/v1/preflight", {
   method: "POST",
@@ -80,7 +87,7 @@ execute_trade(memory=my_memory, amount=12500)`,
 const { omega_mem_final, recommended_action } = await res.json();`,
   },
   {
-    id: "langchain", title: "LangChain — Memory Guard", language: "typescript", category: "Integrations",
+    id: "langchain", title: "LangChain — Memory Guard", language: "typescript", category: "Production Patterns", maturity: "production",
     description: "Add Sgraal as middleware in your LangChain pipeline. Intercepts tool calls with stale memory.",
     code: `import { createGuard } from "@sgraal/mcp";
 
@@ -98,7 +105,7 @@ const safeTool = guard.wrap(myTool, {
 await safeTool.invoke({ query: "Execute trade" });`,
   },
   {
-    id: "curl", title: "cURL — Quick Test", language: "bash", category: "Getting Started",
+    id: "curl", title: "cURL — Quick Test", language: "bash", category: "Getting Started", maturity: "starter",
     description: "Test the API from your terminal. Great for debugging and exploration.",
     code: `curl -X POST https://api.sgraal.com/v1/preflight \\
   -H "Authorization: Bearer sg_live_..." \\
@@ -118,7 +125,7 @@ await safeTool.invoke({ query: "Execute trade" });`,
   }'`,
   },
   {
-    id: "compliance", title: "EU AI Act — Compliance Check", language: "python", category: "Compliance",
+    id: "compliance", title: "EU AI Act — Compliance Check", language: "python", category: "Production Patterns", maturity: "production",
     description: "Run preflight with EU AI Act compliance profile. Auto-blocks non-compliant irreversible actions.",
     code: `result = client.preflight(
     memory_state=[entry],
@@ -131,9 +138,90 @@ if result.compliance_result:
     for v in result.compliance_result.get("violations", []):
         print(f"Violation: {v['article']} — {v['description']}")`,
   },
+  {
+    id: "langchain-memory", title: "LangChain Memory Guard", language: "python", category: "Production Patterns", maturity: "production",
+    description: "Wrap LangChain memory with Sgraal preflight validation.",
+    code: `import os
+from langchain.memory import ConversationBufferMemory
+from sgraal import SgraalClient
+
+client = SgraalClient(api_key=os.environ["SGRAAL_API_KEY"])
+memory = ConversationBufferMemory()
+
+def safe_recall(query: str) -> str:
+    entries = memory.load_memory_variables({})
+    result = client.preflight(
+        memory_state=[{"content": v, "type": "semantic",
+                       "timestamp_age_days": 1, "source_trust": 0.9}
+                      for v in entries.values()],
+        action_type="reversible", domain="general"
+    )
+    if result["recommended_action"] == "BLOCK":
+        return "[Memory blocked by Sgraal — unsafe to recall]"
+    return query`,
+  },
+  {
+    id: "langgraph", title: "LangGraph Agent Guard", language: "python", category: "Advanced / Multi-Agent", maturity: "advanced",
+    description: "Validate memory state before each LangGraph node fires.",
+    code: `import os
+from sgraal import SgraalClient
+
+client = SgraalClient(api_key=os.environ["SGRAAL_API_KEY"])
+
+def preflight_node(state: dict) -> dict:
+    \"\"\"Guard node — runs before any tool or LLM call.\"\"\"
+    result = client.preflight(
+        memory_state=state.get("memory", []),
+        action_type="irreversible", domain="fintech"
+    )
+    if result["recommended_action"] == "BLOCK":
+        raise RuntimeError(f"Sgraal blocked: omega={result['omega_mem_final']}")
+    state["sgraal_decision"] = result["recommended_action"]
+    return state`,
+  },
+  {
+    id: "crewai", title: "CrewAI Memory Validation", language: "python", category: "Production Patterns", maturity: "production",
+    description: "Guard CrewAI agent memory before task execution.",
+    code: `import os
+from crewai import Task
+from sgraal import SgraalClient
+
+client = SgraalClient(api_key=os.environ["SGRAAL_API_KEY"])
+
+def guarded_task(agent, description: str, memory: list) -> Task:
+    result = client.preflight(
+        memory_state=memory,
+        action_type="reversible", domain="general"
+    )
+    if result["recommended_action"] in ("BLOCK", "ASK_USER"):
+        print(f"Task blocked: omega={result['omega_mem_final']}")
+        return None
+    return Task(description=description, agent=agent)`,
+  },
+  {
+    id: "autogen", title: "AutoGen Safe Memory", language: "python", category: "Advanced / Multi-Agent", maturity: "advanced",
+    description: "Intercept AutoGen memory reads with Sgraal validation.",
+    code: `import os
+from sgraal import SgraalClient
+
+client = SgraalClient(api_key=os.environ["SGRAAL_API_KEY"])
+
+def safe_memory_hook(memory_entries: list, agent_name: str) -> list:
+    \"\"\"Called before AutoGen agent reads memory.\"\"\"
+    result = client.preflight(
+        memory_state=memory_entries,
+        action_type="irreversible",
+        domain="coding"
+    )
+    action = result["recommended_action"]
+    if action == "BLOCK":
+        print(f"[{agent_name}] Memory blocked — omega={result['omega_mem_final']}")
+        return []  # Return empty, agent proceeds without memory
+    return memory_entries`,
+  },
 ];
 
-const CATEGORIES = ["All", "Getting Started", "Integrations", "Compliance"];
+const CATEGORIES = ["All", "Getting Started", "Production Patterns", "Advanced / Multi-Agent"];
 const CARD: React.CSSProperties = { background: "#ffffff", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", overflow: "hidden" };
 
 export default function TemplatesPage() {
@@ -166,7 +254,8 @@ export default function TemplatesPage() {
 
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
         {filtered.map((t) => (
-          <div key={t.id} style={CARD}>
+          <div key={t.id} style={{ ...CARD, position: "relative" }}>
+            {(() => { const m = MATURITY_BADGE[t.maturity]; return m ? <span style={{ position: "absolute", top: "12px", right: "12px", background: m.bg, color: m.color, borderRadius: "4px", padding: "1px 8px", fontSize: "10px", fontWeight: 600 }}>{m.label}</span> : null; })()}
             <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div style={{ flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
