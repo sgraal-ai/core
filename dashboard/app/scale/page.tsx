@@ -173,7 +173,7 @@ export default function ScalePage() {
             </div>
             <p className="text-sm text-muted">
               {qtable.cold_start
-                ? "Cold start — submit outcomes to begin training."
+                ? "Learning not active yet. Sgraal already blocks unsafe decisions without learning. Submit outcomes via agent detail to activate self-improvement."
                 : `The system has learned from ${episodes} decision outcomes. Thresholds are calibrating automatically.`}
             </p>
           </div>
@@ -246,7 +246,10 @@ export default function ScalePage() {
             </tbody>
           </table>
         ) : (
-          <p className="text-sm text-muted">No health history yet — requires preflight activity.</p>
+          <>
+            <p className="text-sm text-muted">No health history yet — requires preflight activity.</p>
+            <p className="text-xs text-muted mt-2">Submit 10 outcomes to unlock health trend tracking.</p>
+          </>
         )}
       </div>
 

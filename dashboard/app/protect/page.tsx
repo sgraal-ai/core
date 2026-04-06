@@ -160,7 +160,10 @@ export default function ProtectPage() {
               {cb.failures !== undefined && <span className="text-sm text-muted">Failures: {cb.failures}</span>}
               {cb.last_check && <span className="text-xs text-muted">Last check: {cb.last_check}</span>}
             </div>
-            {cb.state === "CLOSED" && <p className="text-sm text-muted mt-2">No safety blocks triggered — system operating normally.</p>}
+            {cb.state === "CLOSED" && <>
+              <p className="text-sm text-muted mt-2">No safety blocks triggered — system operating normally.</p>
+              <p className="text-xs text-muted mt-1">CLOSED = normal operation. Opens automatically when 5+ consecutive BLOCKs are detected, preventing cascading failures.</p>
+            </>}
             {cb.state === "OPEN" && <p className="text-sm text-red-400 mt-2">Safety block active — repeated high-risk patterns detected. Agents are paused.</p>}
           </div>
         ) : (
@@ -193,6 +196,7 @@ export default function ProtectPage() {
           <div className="text-center py-6">
             <p style={{ fontSize: "36px", color: "#16a34a" }}>&#x2713;</p>
             <p className="text-sm text-muted mt-2">No injection attempts detected. Your write firewall is clean.</p>
+            <p className="text-xs text-muted mt-1">Last 7 days: 0 injection attempts · 0 tamper events · 0 replay attacks</p>
           </div>
         )}
       </div>
@@ -209,7 +213,8 @@ export default function ProtectPage() {
             {redTeamLoading ? "Running..." : "Run Red Team"}
           </button>
         </div>
-        <p className="text-xs text-muted mb-4">6 attack vectors: injection, poisoning, replay, drift, tamper, sleeper.</p>
+        <p className="text-xs text-muted mb-2">6 attack vectors: injection, poisoning, replay, drift, tamper, sleeper.</p>
+        <p className="text-xs text-muted mb-4">Expected output: detected vulnerabilities, block rate per attack vector, risk score delta.</p>
         {redTeamError && <p className="text-sm text-red-400 mb-3">{redTeamError}</p>}
         {redTeamResults && redTeamResults.length > 0 && (
           <>

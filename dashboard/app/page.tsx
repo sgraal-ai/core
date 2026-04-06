@@ -156,7 +156,7 @@ export default function DashboardHome() {
 
       {isLive && !isRealFleet && (
         <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3 mb-6 text-sm text-gold">
-          This is a preview — connect your agents to see your real fleet.
+          Connect your agents to see live decisions.
         </div>
       )}
 
