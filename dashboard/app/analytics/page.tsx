@@ -213,7 +213,6 @@ export default function AnalyticsPage() {
           <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Risk Prevention</p>
           <p style={{ fontSize: "28px", fontWeight: 700, color: "#0B0F14", marginTop: "4px" }}>Prevented {auditBlocks} unsafe</p>
           <p style={{ fontSize: "12px", color: blockPct > 50 ? "#dc2626" : blockPct > 20 ? "#c9a962" : "#16a34a", fontWeight: 600, marginTop: "4px" }}>Estimated risk avoided: {blockPct > 50 ? "HIGH" : blockPct > 20 ? "MEDIUM" : "LOW"}</p>
-          {waste && <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>Token savings: {fmtUsd(waste.savings_if_filtered)}</p>}
         </div>
         {(() => {
           const estWaste = auditBlocks * 1200 + (auditWarns - askUserCount) * 400;
@@ -244,33 +243,6 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {/* Token Waste Widget */}
-      {waste && (
-      <div style={{ ...CARD, marginBottom: "24px", background: "rgba(201,169,98,0.06)", border: "1px solid rgba(201,169,98,0.2)" }}>
-        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px" }}>Token Waste Analysis</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "16px" }}>
-          <div>
-            <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Tokens Wasted</p>
-            <p style={{ fontSize: "24px", fontWeight: 700, color: "#dc2626" }}>{fmt(waste.estimated_tokens_wasted)}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Cost</p>
-            <p style={{ fontSize: "24px", fontWeight: 700, color: "#dc2626" }}>{fmtUsd(waste.estimated_cost_usd)}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Savings if Filtered</p>
-            <p style={{ fontSize: "24px", fontWeight: 700, color: "#16a34a" }}>{fmtUsd(waste.savings_if_filtered)}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>ROI</p>
-            <p style={{ fontSize: "24px", fontWeight: 700, color: "#c9a962" }}>{waste.roi_multiple}x</p>
-          </div>
-        </div>
-        {waste.recommendation && (
-          <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "12px", fontStyle: "italic" }}>{waste.recommendation}</p>
-        )}
-      </div>
-      )}
 
       {/* Top Wasteful Entries */}
       {wastefulEntries.length > 0 && (
