@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, Fragment, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getApiKey, getApiUrl } from "../lib/storage";
 import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
@@ -42,17 +42,45 @@ interface AuditEntry {
   explainability_note?: string;
 }
 
-const DECISION_BADGE: Record<string, { bg: string; color: string }> = {
-  BLOCK: { bg: "#fee2e2", color: "#dc2626" },
-  WARN: { bg: "#fef9c3", color: "#a16207" },
-  ASK_USER: { bg: "#ffedd5", color: "#c2410c" },
-  USE_MEMORY: { bg: "#dcfce7", color: "#16a34a" },
+const DECISION_BADGE: Record<string, { bg: string; color: string; border: string }> = {
+  BLOCK: { bg: "#fee2e2", color: "#b91c1c", border: "#fecaca" },
+  WARN: { bg: "#fef3c7", color: "#92400e", border: "#fde68a" },
+  ASK_USER: { bg: "#dbeafe", color: "#1e40af", border: "#bfdbfe" },
+  USE_MEMORY: { bg: "#dcfce7", color: "#166534", border: "#bbf7d0" },
 };
 
 type SortKey = "timestamp" | "agent_id" | "domain" | "omega" | "decision";
 const TH: React.CSSProperties = { fontSize: "12px", color: "#6b7280", textTransform: "uppercase", padding: "8px 16px", textAlign: "left", borderBottom: "1px solid #e5e7eb", letterSpacing: "0.05em", cursor: "pointer", userSelect: "none" };
 const TD: React.CSSProperties = { fontSize: "14px", color: "#0B0F14", padding: "12px 16px", borderBottom: "1px solid #f5f4f0" };
 const SEL: React.CSSProperties = { background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "8px 12px", fontSize: "14px", color: "#0B0F14" };
+
+// Incident grouping: 3+ consecutive BLOCKs from same agent
+interface IncidentGroup { agent_id: string; entries: AuditEntry[]; startTs: string; endTs: string; }
+
+function groupIncidents(rows: AuditEntry[]): (AuditEntry | IncidentGroup)[] {
+  const result: (AuditEntry | IncidentGroup)[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    if (rows[i].decision === "BLOCK") {
+      const agent = rows[i].agent_id;
+      let j = i;
+      while (j < rows.length && rows[j].decision === "BLOCK" && rows[j].agent_id === agent) j++;
+      if (j - i >= 3) {
+        const group = rows.slice(i, j);
+        result.push({ agent_id: agent, entries: group, startTs: group[group.length - 1].timestamp, endTs: group[0].timestamp });
+        i = j;
+        continue;
+      }
+    }
+    result.push(rows[i]);
+    i++;
+  }
+  return result;
+}
+
+function isIncident(item: AuditEntry | IncidentGroup): item is IncidentGroup {
+  return "entries" in item && Array.isArray(item.entries);
+}
 
 export default function AuditPage() {
   const router = useRouter();
@@ -70,6 +98,22 @@ export default function AuditPage() {
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const perPage = 50;
+
+  // New filters
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [highRiskOnly, setHighRiskOnly] = useState(false);
+  const [expandedIncidents, setExpandedIncidents] = useState<Set<string>>(new Set());
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce search
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQuery]);
 
   const load = useCallback(async () => {
     setMounted(true);
@@ -95,11 +139,34 @@ export default function AuditPage() {
     if (sortKey === key) setSortAsc(!sortAsc); else { setSortKey(key); setSortAsc(true); }
   }
 
-  const sorted = [...entries].sort((a, b) => {
+  // Client-side filtering pipeline
+  const filtered = entries.filter((e) => {
+    // Search filter
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase();
+      if (!(e.request_id ?? "").toLowerCase().includes(q)
+        && !(e.agent_id ?? "").toLowerCase().includes(q)
+        && !(e.domain ?? "").toLowerCase().includes(q)) return false;
+    }
+    // Date range filter
+    if (dateFrom) {
+      try { if (new Date(e.timestamp) < new Date(dateFrom)) return false; } catch {}
+    }
+    if (dateTo) {
+      try { if (new Date(e.timestamp) > new Date(dateTo + "T23:59:59Z")) return false; } catch {}
+    }
+    // High risk filter
+    if (highRiskOnly && (e.omega ?? 0) <= 80) return false;
+    return true;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
     const av = a[sortKey], bv = b[sortKey];
     const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
     return sortAsc ? cmp : -cmp;
   });
+
+  const grouped = groupIncidents(sorted);
 
   const totalEntries = totalCount;
 
@@ -122,6 +189,68 @@ export default function AuditPage() {
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {}
+  }
+
+  function toggleIncident(key: string) {
+    setExpandedIncidents(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  function renderRow(entry: AuditEntry) {
+    const badge = DECISION_BADGE[entry.decision] || { bg: "#f3f4f6", color: "#6b7280", border: "#e5e7eb" };
+    const isExp = expandedId === entry.request_id;
+    return (
+      <Fragment key={entry.request_id}>
+        <tr onClick={() => setExpandedId(isExp ? null : entry.request_id)} style={{ cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#faf9f6")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+          <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px" }} title={entry.timestamp}>{formatTimestamp(entry.timestamp)}</td>
+          <td style={{ ...TD, fontFamily: "monospace", fontWeight: 600 }}><a onClick={(e) => { e.stopPropagation(); if (entry.agent_id) router.push(`/agent/${entry.agent_id}`); }} style={{ color: "#c9a962", textDecoration: "underline", cursor: "pointer" }}>{entry.agent_id || "—"}</a></td>
+          <td style={TD}>{entry.domain}</td>
+          <td style={TD}>{entry.action_type}</td>
+          <td style={TD}><span style={omegaBadgeStyle(entry.omega ?? 0)}>{entry.omega ?? "—"}</span></td>
+          <td style={TD}><span style={{ background: badge.bg, color: badge.color, border: `1px solid ${badge.border}`, borderRadius: "20px", padding: "2px 10px", fontSize: "12px", fontWeight: 600 }}>{entry.decision}</span></td>
+          <td style={{ ...TD, fontFamily: "monospace", fontSize: "12px", color: "#6b7280" }}>{entry.request_id}</td>
+        </tr>
+        {isExp && (
+          <tr>
+            <td colSpan={7} style={{ padding: "16px 24px", background: "#faf9f6", borderBottom: "1px solid #e5e7eb" }}>
+              {entry.component_breakdown && (
+                <div style={{ marginBottom: "12px" }}>
+                  <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "8px" }}>Component Breakdown</p>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "8px" }}>
+                    {Object.entries(entry.component_breakdown).map(([k, v]) => (
+                      <div key={k}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#6b7280", marginBottom: "2px" }}><span>{k}</span><span>{v}</span></div>
+                        <div style={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", overflow: "hidden" }}>
+                          <div style={{ width: `${v}%`, height: "100%", background: v > 60 ? "#dc2626" : v > 30 ? "#c9a962" : "#16a34a", borderRadius: "2px" }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {entry.repair_plan && entry.repair_plan.length > 0 && (
+                <div style={{ marginBottom: "12px" }}>
+                  <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "4px" }}>Repair Plan</p>
+                  <ul style={{ fontSize: "13px", color: "#0B0F14", paddingLeft: "16px" }}>{entry.repair_plan.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                </div>
+              )}
+              {entry.explainability_note && (
+                <div>
+                  <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "4px" }}>Explanation</p>
+                  <p style={{ fontSize: "13px", color: "#0B0F14" }}>{entry.explainability_note}</p>
+                </div>
+              )}
+              {!entry.component_breakdown && !entry.repair_plan && !entry.explainability_note && (
+                <p style={{ fontSize: "13px", color: "#6b7280" }}>No additional details available.</p>
+              )}
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
   }
 
   if (!mounted) return null;
@@ -153,8 +282,8 @@ export default function AuditPage() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap", alignItems: "center" }}>
+      {/* Server-side Filters */}
+      <div style={{ display: "flex", gap: "12px", marginBottom: "12px", flexWrap: "wrap", alignItems: "center" }}>
         <select value={dateRange} onChange={(e) => setDateRange(e.target.value)} style={SEL}>
           <option value="24h">Last 24h</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option>
         </select>
@@ -168,6 +297,34 @@ export default function AuditPage() {
         <button onClick={exportCsv} style={{ background: "#c9a962", color: "#0B0F14", fontWeight: 600, padding: "8px 16px", borderRadius: "6px", fontSize: "14px", border: "none", cursor: "pointer" }}>Export CSV</button>
       </div>
 
+      {/* Client-side Filters: search, date range, omega threshold */}
+      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ position: "relative" }}>
+          <input
+            type="text"
+            placeholder="Search by UUID, agent, or domain..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ ...SEL, width: "280px", paddingRight: searchQuery ? "32px" : "12px" }}
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery("")} style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: "16px", color: "#6b7280", lineHeight: 1 }} aria-label="Clear search">&times;</button>
+          )}
+        </div>
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...SEL, width: "150px" }} title="From date" />
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...SEL, width: "150px" }} title="To date" />
+        {(dateFrom || dateTo) && (
+          <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ fontSize: "13px", color: "#6b7280", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Reset dates</button>
+        )}
+        <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", color: "#6b7280", cursor: "pointer" }}>
+          <input type="checkbox" checked={highRiskOnly} onChange={(e) => setHighRiskOnly(e.target.checked)} />
+          High risk only (&Omega; &gt; 80)
+        </label>
+        {(debouncedSearch || dateFrom || dateTo || highRiskOnly) && (
+          <span style={{ fontSize: "12px", color: "#6b7280" }}>{filtered.length} of {entries.length} shown</span>
+        )}
+      </div>
+
       {/* Table */}
       <div style={{ background: "#ffffff", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -175,64 +332,29 @@ export default function AuditPage() {
             <tr>
               {HEADERS.map(([key, label]) => (
                 <th key={key} style={TH} onClick={() => ["timestamp", "agent_id", "domain", "omega", "decision"].includes(key) ? handleSort(key as SortKey) : null}>
-                  {label} {sortKey === key ? (sortAsc ? "↑" : "↓") : ""}
+                  {label} {sortKey === key ? (sortAsc ? "\u2191" : "\u2193") : ""}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {sorted.map((entry) => {
-              const badge = DECISION_BADGE[entry.decision] || { bg: "#f3f4f6", color: "#6b7280" };
-              const isExp = expandedId === entry.request_id;
-              return (
-                <Fragment key={entry.request_id}>
-                  <tr onClick={() => setExpandedId(isExp ? null : entry.request_id)} style={{ cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#faf9f6")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                    <td style={{ ...TD, fontFamily: "monospace", fontSize: "13px" }} title={entry.timestamp}>{formatTimestamp(entry.timestamp)}</td>
-                    <td style={{ ...TD, fontFamily: "monospace", fontWeight: 600 }}><a onClick={(e) => { e.stopPropagation(); if (entry.agent_id) router.push(`/agent/${entry.agent_id}`); }} style={{ color: "#c9a962", textDecoration: "underline", cursor: "pointer" }}>{entry.agent_id || "—"}</a></td>
-                    <td style={TD}>{entry.domain}</td>
-                    <td style={TD}>{entry.action_type}</td>
-                    <td style={TD}><span style={omegaBadgeStyle(entry.omega ?? 0)}>{entry.omega ?? "—"}</span></td>
-                    <td style={TD}><span style={{ background: badge.bg, color: badge.color, borderRadius: "20px", padding: "2px 10px", fontSize: "12px", fontWeight: 600 }}>{entry.decision}</span></td>
-                    <td style={{ ...TD, fontFamily: "monospace", fontSize: "12px", color: "#6b7280" }}>{entry.request_id}</td>
-                  </tr>
-                  {isExp && (
-                    <tr>
-                      <td colSpan={7} style={{ padding: "16px 24px", background: "#faf9f6", borderBottom: "1px solid #e5e7eb" }}>
-                        {entry.component_breakdown && (
-                          <div style={{ marginBottom: "12px" }}>
-                            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "8px" }}>Component Breakdown</p>
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "8px" }}>
-                              {Object.entries(entry.component_breakdown).map(([k, v]) => (
-                                <div key={k}>
-                                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#6b7280", marginBottom: "2px" }}><span>{k}</span><span>{v}</span></div>
-                                  <div style={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", overflow: "hidden" }}>
-                                    <div style={{ width: `${v}%`, height: "100%", background: v > 60 ? "#dc2626" : v > 30 ? "#c9a962" : "#16a34a", borderRadius: "2px" }} />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {entry.repair_plan && entry.repair_plan.length > 0 && (
-                          <div style={{ marginBottom: "12px" }}>
-                            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "4px" }}>Repair Plan</p>
-                            <ul style={{ fontSize: "13px", color: "#0B0F14", paddingLeft: "16px" }}>{entry.repair_plan.map((r, i) => <li key={i}>{r}</li>)}</ul>
-                          </div>
-                        )}
-                        {entry.explainability_note && (
-                          <div>
-                            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", marginBottom: "4px" }}>Explanation</p>
-                            <p style={{ fontSize: "13px", color: "#0B0F14" }}>{entry.explainability_note}</p>
-                          </div>
-                        )}
-                        {!entry.component_breakdown && !entry.repair_plan && !entry.explainability_note && (
-                          <p style={{ fontSize: "13px", color: "#6b7280" }}>No additional details available.</p>
-                        )}
+            {grouped.map((item, idx) => {
+              if (isIncident(item)) {
+                const key = `incident-${item.agent_id}-${idx}`;
+                const open = expandedIncidents.has(key);
+                return (
+                  <Fragment key={key}>
+                    <tr onClick={() => toggleIncident(key)} style={{ cursor: "pointer", background: "#fef2f2" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")} onMouseLeave={(e) => (e.currentTarget.style.background = "#fef2f2")}>
+                      <td colSpan={7} style={{ padding: "12px 16px", borderBottom: "1px solid #fecaca", fontSize: "14px", fontWeight: 600, color: "#b91c1c" }}>
+                        <span style={{ marginRight: "8px" }}>{open ? "\u25BC" : "\u25B6"}</span>
+                        Incident — {item.agent_id} — {item.entries.length} blocks — {formatTimestamp(item.startTs)} to {formatTimestamp(item.endTs)}
                       </td>
                     </tr>
-                  )}
-                </Fragment>
-              );
+                    {open && item.entries.map(e => renderRow(e))}
+                  </Fragment>
+                );
+              }
+              return renderRow(item);
             })}
           </tbody>
         </table>
