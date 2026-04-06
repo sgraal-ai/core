@@ -226,25 +226,30 @@ export default function ScalePage() {
         <h2 className="text-lg font-semibold mb-2">Health History</h2>
         <p className="text-sm text-muted mb-4">Tracks omega score trends over time. Rising P95 indicates systemic memory degradation across your fleet.</p>
         {healthHistory.length > 0 ? (
-          <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                {["Agent", "P95", "Count", "Data Points"].map(h => (
-                  <th key={h} className="text-xs text-muted uppercase text-left pb-2 pr-4" style={{ borderBottom: "1px solid #e5e7eb" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {healthHistory.map((h, i) => (
-                <tr key={i}>
-                  <td className="py-2 pr-4 font-mono text-xs font-semibold" style={{ borderBottom: "1px solid #f5f4f0" }}>{h.agent_id}</td>
-                  <td className="py-2 pr-4 text-sm" style={{ borderBottom: "1px solid #f5f4f0" }}>{h.p95 !== undefined ? String(h.p95) : "—"}</td>
-                  <td className="py-2 pr-4 text-sm" style={{ borderBottom: "1px solid #f5f4f0" }}>{h.count !== undefined ? String(h.count) : "—"}</td>
-                  <td className="py-2 pr-4 text-sm" style={{ borderBottom: "1px solid #f5f4f0" }}>{Array.isArray(h.points) ? String(h.points.length) : "—"}</td>
+          <>
+            <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  {["Agent", "P95", "Count", "Data Points"].map(h => (
+                    <th key={h} className="text-xs text-muted uppercase text-left pb-2 pr-4" style={{ borderBottom: "1px solid #e5e7eb" }}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {healthHistory.map((h, i) => (
+                  <tr key={i}>
+                    <td className="py-2 pr-4 font-mono text-xs font-semibold" style={{ borderBottom: "1px solid #f5f4f0" }}>{h.agent_id}</td>
+                    <td className="py-2 pr-4 text-sm" style={{ borderBottom: "1px solid #f5f4f0" }}>{h.p95 !== undefined ? String(h.p95) : "—"}</td>
+                    <td className="py-2 pr-4 text-sm" style={{ borderBottom: "1px solid #f5f4f0" }}>{h.count !== undefined ? String(h.count) : "—"}</td>
+                    <td className="py-2 pr-4 text-sm" style={{ borderBottom: "1px solid #f5f4f0" }}>{Array.isArray(h.points) ? String(h.points.length) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {healthHistory.every(h => !h.count && (!Array.isArray(h.points) || h.points.length === 0)) && (
+              <p className="text-xs text-muted mt-3">Submit 10 outcomes to unlock health trend tracking.</p>
+            )}
+          </>
         ) : (
           <>
             <p className="text-sm text-muted">No health history yet — requires preflight activity.</p>
