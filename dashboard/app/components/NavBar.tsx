@@ -158,7 +158,7 @@ export function NavBar() {
     <nav ref={navRef} className="border-b border-surface-light px-6 py-4 flex items-center justify-between">
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2">
-          <a href="https://sgraal.com" target="_blank" rel="noopener noreferrer" className="text-lg font-bold tracking-tighter" style={{ color: "#0B0F14", fontFamily: "'Manrope', sans-serif" }}>Sgraal</a>
+          <a href="/" className="text-lg font-bold tracking-tighter" style={{ color: "#0B0F14", fontFamily: "'Manrope', sans-serif" }}>Sgraal</a>
           <a href="https://sgraal.com" target="_blank" rel="noopener noreferrer" style={{ fontSize: "11px", color: "#9ca3af" }} className="hover:text-[#c9a962] transition-colors">&larr; sgraal.com</a>
         </div>
         <div className="flex items-center gap-5 text-sm">
