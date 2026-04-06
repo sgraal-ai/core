@@ -9085,7 +9085,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "divergence_check_available", "persona_conflict", "persona_violation",
                          "decision_based_on", "degraded_mode", "degraded_features",
                          "auto_inference_suppressed", "heal_decision", "stability_gauge",
-                         "hysteresis_applied"}
+                         "hysteresis_applied", "input_hash", "deterministic", "reproducible", "proof_version"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
