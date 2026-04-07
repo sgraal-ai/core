@@ -9137,7 +9137,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             pass
 
     # Hysteresis: suppress small stochastic-only omega jitter
-    _prev_omega = _te_history_cache[-1] if _te_history_cache else None
+    # Skip for demo keys — shared Redis state causes race conditions in concurrent calls
+    _prev_omega = _te_history_cache[-1] if _te_history_cache and not key_record.get("demo", False) else None
     if _prev_omega is not None:
         _omega_delta = abs(response["omega_mem_final"] - _prev_omega)
         # Check if delta comes only from stochastic modules (particle_filter, pctl)
