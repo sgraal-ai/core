@@ -554,6 +554,46 @@ export default function AnalyticsPage() {
           </div>
         );
       })()}
+
+      {/* Cost Analytics */}
+      <div style={{ ...CARD, marginTop: "24px", borderLeft: "4px solid #c9a962" }}>
+        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Cost Analytics</h2>
+        <p className="text-sm text-muted mb-4">Estimated API cost breakdown by decision type and projected spend.</p>
+        {totalDecisions > 0 ? (() => {
+          const costPerCall = 0.001; // $0.001 per preflight call
+          const totalCost = totalDecisions * costPerCall;
+          const blockCost = auditBlocks * costPerCall;
+          const warnCost = (auditWarns - askUserCount) * costPerCall;
+          const askCost = askUserCount * costPerCall;
+          const useCost = auditUse * costPerCall;
+          const projectedMonthly = totalCost * 30; // rough projection
+          return (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "16px", marginBottom: "16px" }}>
+                <div>
+                  <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>Total Cost</p>
+                  <p style={{ fontSize: "24px", fontWeight: 700, color: "#c9a962" }}>${totalCost.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>BLOCK Cost</p>
+                  <p style={{ fontSize: "18px", fontWeight: 700, color: "#dc2626" }}>${blockCost.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>WARN Cost</p>
+                  <p style={{ fontSize: "18px", fontWeight: 700, color: "#ca8a04" }}>${warnCost.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>USE Cost</p>
+                  <p style={{ fontSize: "18px", fontWeight: 700, color: "#16a34a" }}>${useCost.toFixed(2)}</p>
+                </div>
+              </div>
+              <p style={{ fontSize: "13px", color: "#6b7280" }}>Projected 30-day spend: <strong style={{ color: "#c9a962" }}>${projectedMonthly.toFixed(2)}</strong> at current rate ({fmt(totalDecisions)} calls observed)</p>
+            </div>
+          );
+        })() : (
+          <p className="text-sm text-muted">Submit outcomes to unlock cost analytics.</p>
+        )}
+      </div>
     </div>
   );
 }

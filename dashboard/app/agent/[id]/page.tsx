@@ -56,6 +56,12 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   const [complianceProfile, setComplianceProfile] = useState("GENERAL");
   // Advanced analytics toggle
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Counterfactual
+  const [cfResult, setCfResult] = useState<Record<string, unknown> | null>(null);
+  const [cfLoading, setCfLoading] = useState(false);
+  // Memory Forecast
+  const [forecastResult, setForecastResult] = useState<Record<string, unknown> | null>(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
   const [reloading, setReloading] = useState(false);
 
   // Outcome
@@ -815,6 +821,104 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           )}
         </h2>
         <AtRiskWarnings warnings={agent.at_risk_warnings ?? []} />
+      </div>
+
+      {/* Counterfactual Analysis */}
+      <div style={{ borderLeft: "4px solid #c9a962" }} className="bg-surface border border-surface-light rounded-xl p-5 mb-8">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">Counterfactual — What would have happened?</h2>
+          <button onClick={async () => {
+            setCfLoading(true); setCfResult(null);
+            try {
+              const res = await fetch(`${getApiUrl()}/v1/simulate/counterfactual`, {
+                method: "POST", headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ memory_state: (agent as unknown as Record<string, unknown>).memory_state ?? [{ id: `mem_${agent.id}`, content: `Memory for ${agent.name}`, type: "semantic", timestamp_age_days: 1, source_trust: 0.8 }], decision: agent.recommended_action, action_type: (agent as unknown as Record<string, unknown>).action_type ?? "irreversible", domain: agent.domain }),
+              });
+              if (res.ok) setCfResult(await res.json());
+              else setCfResult({ error: `HTTP ${res.status}` });
+            } catch { setCfResult({ error: "Request failed" }); }
+            setCfLoading(false);
+          }} disabled={cfLoading} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">
+            {cfLoading ? "Simulating..." : "Run Counterfactual"}
+          </button>
+        </div>
+        <p className="text-sm text-muted mb-3">Simulate alternative decision paths for this agent{"'"}s memory state.</p>
+        {cfResult && !cfResult.error && (() => {
+          const paths = (Array.isArray(cfResult.paths) ? cfResult.paths : cfResult.scenarios ?? cfResult.alternatives ?? []) as Array<Record<string, unknown>>;
+          return (
+            <div className="space-y-2">
+              <div style={{ display: "flex", gap: "12px", fontSize: "13px", padding: "8px 12px", background: "#dcfce7", borderRadius: "6px" }}>
+                <strong>Actual:</strong> <span>{agent.recommended_action}</span> <span className="text-muted">omega={agent.omega_mem_final}</span>
+              </div>
+              {paths.map((p, i) => {
+                const decision = String(p.decision ?? p.recommended_action ?? "—");
+                const delta = Number(p.risk_delta ?? p.delta ?? 0);
+                const safer = delta < 0;
+                return (
+                  <div key={i} style={{ display: "flex", gap: "12px", fontSize: "13px", padding: "8px 12px", background: safer ? "#f0fdf4" : "#fef2f2", borderRadius: "6px" }}>
+                    <strong>{String(p.name ?? p.scenario ?? `Path ${i + 1}`)}:</strong>
+                    <span style={{ color: safer ? "#16a34a" : "#dc2626" }}>{decision}</span>
+                    <span className="text-muted">delta={delta > 0 ? `+${delta}` : String(delta)}</span>
+                    {!!p.impact && <span className="text-muted">{String(p.impact)}</span>}
+                  </div>
+                );
+              })}
+              {paths.length === 0 && <p className="text-xs text-muted">No alternative paths returned.</p>}
+            </div>
+          );
+        })()}
+        {!!cfResult?.error && <p className="text-sm text-red-400">{String(cfResult.error)}</p>}
+      </div>
+
+      {/* Memory Forecast */}
+      <div className="bg-surface border border-surface-light rounded-xl p-5 mb-8">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">Memory Forecast</h2>
+          <button onClick={async () => {
+            setForecastLoading(true); setForecastResult(null);
+            try {
+              const res = await fetch(`${getApiUrl()}/v1/memory/forecast`, {
+                method: "POST", headers: { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ agent_id: agent.id, memory_state: (agent as unknown as Record<string, unknown>).memory_state ?? [{ id: `mem_${agent.id}`, content: `Memory for ${agent.name}`, type: "semantic", timestamp_age_days: 1, source_trust: 0.8 }], domain: agent.domain }),
+              });
+              if (res.ok) setForecastResult(await res.json());
+              else setForecastResult({ error: `HTTP ${res.status}` });
+            } catch { setForecastResult({ error: "Request failed" }); }
+            setForecastLoading(false);
+          }} disabled={forecastLoading} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">
+            {forecastLoading ? "Forecasting..." : "Run Forecast"}
+          </button>
+        </div>
+        <p className="text-sm text-muted mb-3">Predicted memory health over the next 10 steps.</p>
+        {forecastResult && !forecastResult.error && (() => {
+          const steps = (Array.isArray(forecastResult.steps) ? forecastResult.steps : forecastResult.forecast ?? forecastResult.predictions ?? []) as Array<Record<string, unknown>>;
+          const firstBlock = steps.findIndex(s => String(s.decision ?? s.action ?? "") === "BLOCK");
+          const actionColor: Record<string, string> = { USE_MEMORY: "#16a34a", WARN: "#ca8a04", ASK_USER: "#2563eb", BLOCK: "#dc2626" };
+          return (
+            <div>
+              {firstBlock >= 0 && firstBlock < 3 && (
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "8px 12px", marginBottom: "12px", fontSize: "13px", color: "#dc2626", fontWeight: 600 }}>
+                  BLOCK predicted at step t+{firstBlock + 1} — preventive action recommended
+                </div>
+              )}
+              <div style={{ display: "flex", gap: "4px", alignItems: "flex-end", height: "80px" }}>
+                {steps.slice(0, 10).map((s, i) => {
+                  const omega = Number(s.omega ?? s.omega_mem_final ?? 50);
+                  const decision = String(s.decision ?? s.action ?? "USE_MEMORY");
+                  const color = actionColor[decision] ?? "#6b7280";
+                  return (
+                    <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                      <div style={{ width: "100%", maxWidth: "24px", height: `${Math.max((omega / 100) * 60, 4)}px`, background: color, borderRadius: "3px 3px 0 0" }} title={`t+${i + 1}: ${decision} omega=${omega}`} />
+                      <span style={{ fontSize: "9px", color: "#6b7280", marginTop: "3px" }}>t+{i + 1}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {steps.length === 0 && <p className="text-xs text-muted">No forecast data returned.</p>}
+            </div>
+          );
+        })()}
+        {!!forecastResult?.error && <p className="text-sm text-red-400">{String(forecastResult.error)}</p>}
       </div>
 
       <div className="mb-10">

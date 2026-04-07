@@ -27,6 +27,10 @@ export default function ProtectPage() {
   const [redTeamGrade, setRedTeamGrade] = useState("");
   const [zkLoading, setZkLoading] = useState(false);
   const [zkResult, setZkResult] = useState<Record<string, unknown> | null>(null);
+  const [propAgent, setPropAgent] = useState("");
+  const [propDomain, setPropDomain] = useState("general");
+  const [propLoading, setPropLoading] = useState(false);
+  const [propResult, setPropResult] = useState<Record<string, unknown> | null>(null);
 
   function authHeaders() {
     return { Authorization: `Bearer ${getApiKey()}`, "Content-Type": "application/json" };
@@ -380,6 +384,60 @@ export default function ProtectPage() {
             {!!zkResult.error && <span style={{ color: "#dc2626" }}>{String(zkResult.error)}</span>}
           </div>
         )}
+      </div>
+
+      {/* Propagation Trace */}
+      <div className={`${CARD} mt-6`}>
+        <h2 className="text-lg font-semibold mb-2">Propagation Trace</h2>
+        <p className="text-sm text-muted mb-4">Track how a compromised memory spreads across your agent fleet.</p>
+        <div style={{ display: "flex", gap: "12px", marginBottom: "12px", alignItems: "center", flexWrap: "wrap" }}>
+          <input type="text" placeholder="Agent ID..." value={propAgent} onChange={e => setPropAgent(e.target.value)}
+            style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "6px 10px", fontSize: "13px", width: "200px" }} />
+          <select value={propDomain} onChange={e => setPropDomain(e.target.value)}
+            style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "6px 10px", fontSize: "13px" }}>
+            {["general","fintech","medical","legal","coding","customer_support"].map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <button onClick={async () => {
+            if (!propAgent.trim()) return;
+            setPropLoading(true); setPropResult(null);
+            try {
+              const res = await fetch(`${apiBase()}/v1/propagation/trace`, {
+                method: "POST", headers: authHeaders(),
+                body: JSON.stringify({ agent_id: propAgent.trim(), memory_state: [{ id: "trace_probe", content: "test entry", downstream_count: 5 }], domain: propDomain }),
+              });
+              if (res.ok) setPropResult(await res.json());
+              else setPropResult({ error: `HTTP ${res.status}` });
+            } catch { setPropResult({ error: "Request failed" }); }
+            setPropLoading(false);
+          }} disabled={propLoading} className="text-sm font-semibold px-4 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition disabled:opacity-50">
+            {propLoading ? "Tracing..." : "Trace"}
+          </button>
+        </div>
+        {propResult && !propResult.error && (() => {
+          const risk = String(propResult.cascade_risk ?? "LOW");
+          const riskColor: Record<string, string> = { LOW: "#16a34a", MEDIUM: "#ca8a04", HIGH: "#dc2626", CRITICAL: "#7f1d1d" };
+          const contColor: Record<string, string> = { SUCCESS: "#16a34a", PARTIAL: "#ca8a04", FAILED: "#dc2626" };
+          const chain = Array.isArray(propResult.propagation_chain) ? propResult.propagation_chain as string[] : [];
+          return (
+            <div>
+              <div style={{ display: "flex", gap: "16px", marginBottom: "12px", flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ textAlign: "center" }}>
+                  <p style={{ fontSize: "28px", fontWeight: 700, color: riskColor[risk] ?? "#6b7280" }}>{String(propResult.affected_agents ?? 0)}</p>
+                  <p style={{ fontSize: "11px", color: "#6b7280" }}>Affected agents</p>
+                </div>
+                <span style={{ background: riskColor[risk] ? `${riskColor[risk]}20` : "#f3f4f6", color: riskColor[risk] ?? "#6b7280", borderRadius: "4px", padding: "2px 10px", fontSize: "12px", fontWeight: 600 }}>{risk}</span>
+                <span style={{ background: contColor[String(propResult.containment)] ? `${contColor[String(propResult.containment)]}20` : "#f3f4f6", color: contColor[String(propResult.containment)] ?? "#6b7280", borderRadius: "4px", padding: "2px 10px", fontSize: "12px", fontWeight: 600 }}>{String(propResult.containment)}</span>
+              </div>
+              {chain.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontFamily: "monospace", flexWrap: "wrap", marginBottom: "8px" }}>
+                  {chain.map((a, i) => (<span key={i}>{i > 0 && <span style={{ color: "#6b7280", margin: "0 2px" }}>&rarr;</span>}<span style={{ color: i === 0 ? "#c9a962" : "#6b7280" }}>{String(a)}</span></span>))}
+                </div>
+              )}
+              <p style={{ fontSize: "12px", color: "#6b7280" }}>Max depth: {String(propResult.max_depth)} · {String(propResult.estimated_impact)}</p>
+            </div>
+          );
+        })()}
+        {!!propResult?.error && <p className="text-sm text-red-400">{String(propResult.error)}</p>}
       </div>
 
       {/* Real Attack Example */}
