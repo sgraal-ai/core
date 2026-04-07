@@ -8877,7 +8877,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["omega_delta"] = _omega_delta
         response["score_version"] = "v2_reconciled"
         # FIX 3: Use omega_adjusted for decisions when delta is significant
-        if abs(_omega_delta) > 5.0:
+        # Guard: reversible/informational with omega < 20 = clean memory, skip adjusted escalation
+        _skip_adjusted = omega_out < 20 and req.action_type in ("reversible", "informational")
+        if abs(_omega_delta) > 5.0 and not _skip_adjusted:
             response["decision_based_on"] = "omega_adjusted"
             _t_warn = req.thresholds.get("warn", 25) if req.thresholds else 25
             _t_ask = req.thresholds.get("ask_user", 45) if req.thresholds else 45
