@@ -9144,7 +9144,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["forecast_horizon"] = _steps_to_block
             response["forecast_integrated"] = True
             # Only escalate WARN or above — never touch USE_MEMORY
-            if _steps_to_block <= 3 and _SEVERITY[_base] >= 1:
+            # Suppress for reversible actions with omega < 20 (genuinely clean memory)
+            _action_type = getattr(req, "action_type", "reversible")
+            _forecast_eligible = _SEVERITY[_base] >= 1 and not (_omega_now < 20 and _action_type in ("reversible", "informational"))
+            if _steps_to_block <= 3 and _forecast_eligible:
                 _fc_sev = min(_SEVERITY[_base] + 1, 2)  # cap at ASK_USER
                 _forecast = _SEV_TO_ACTION[max(_SEVERITY[_base], _fc_sev)]
                 response["preventive_action"] = _forecast
