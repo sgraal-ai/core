@@ -9136,7 +9136,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["forecast_warning"] = True
             response["forecast_horizon"] = _steps_to_block
             response["forecast_integrated"] = True
-            if _steps_to_block <= 3:
+            # Only escalate if omega >= 20 (too-clean memory should not be warned)
+            if _steps_to_block <= 3 and _omega_now >= 20:
                 # Escalate one level, but ASK_USER is the ceiling from forecast alone
                 _fc_sev = min(_SEVERITY[_base] + 1, 2)  # cap at ASK_USER
                 _forecast = _SEV_TO_ACTION[max(_SEVERITY[_base], _fc_sev)]
