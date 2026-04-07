@@ -8831,15 +8831,22 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             delta = omega_out - _prev_omega
             if delta < -10:
                 auto_inferred = "success"
-                try: update_from_outcome(omega_out, result.component_breakdown, result.recommended_action, "success", req.domain)
-                except Exception: pass
             elif delta > 15:
                 auto_inferred = "partial_failure"
-                try: update_from_outcome(omega_out, result.component_breakdown, result.recommended_action, "partial", req.domain)
-                except Exception: pass
         if auto_inferred:
             response["auto_outcome_inferred"] = True
             response["inferred_outcome"] = auto_inferred
+            # Queue inferred outcome for async pickup (preflight stays read-only)
+            try:
+                redis_set(f"pending_outcome:{key_record.get('key_hash', 'default')}:{request_id}", {
+                    "omega": omega_out,
+                    "breakdown": {k: round(v, 2) for k, v in result.component_breakdown.items()},
+                    "action": result.recommended_action,
+                    "status": auto_inferred,
+                    "domain": req.domain,
+                }, ttl=3600)
+            except Exception:
+                pass
         redis_set(_last_pf_key, omega_out, ttl=300)
     except Exception:
         pass
