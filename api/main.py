@@ -9117,23 +9117,24 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _lv = response.get("lyapunov_stability")
     response["stability_gauge"] = _ss["score"] if _ss and isinstance(_ss, dict) and "score" in _ss else (_lv["V"] if _lv and isinstance(_lv, dict) and "V" in _lv else 0.0)
 
-    # Forecast → Decision Hook
+    # Forecast → Decision Hook (never override ASK_USER — only upgrade USE_MEMORY)
     response["forecast_integrated"] = False
-    try:
-        _koop = response.get("koopman", {})
-        _pred5 = _koop.get("prediction_5") if isinstance(_koop, dict) else None
-        if _pred5 is not None and float(_pred5) > 60:
-            _steps_to_block = 5 if float(_pred5) > 80 else 3 if float(_pred5) > 70 else 5
-            response["forecast_warning"] = True
-            response["forecast_horizon"] = _steps_to_block
-            response["forecast_integrated"] = True
-            if _steps_to_block <= 3 and response["recommended_action"] == "USE_MEMORY":
-                response["recommended_action"] = "WARN"
-                response["preventive_action"] = "WARN"
-            elif _steps_to_block <= 5 and response["recommended_action"] == "USE_MEMORY":
-                response["preventive_action"] = "ASK_USER"
-    except Exception:
-        pass
+    if response["recommended_action"] != "ASK_USER":
+        try:
+            _koop = response.get("koopman", {})
+            _pred5 = _koop.get("prediction_5") if isinstance(_koop, dict) else None
+            if _pred5 is not None and float(_pred5) > 60:
+                _steps_to_block = 5 if float(_pred5) > 80 else 3 if float(_pred5) > 70 else 5
+                response["forecast_warning"] = True
+                response["forecast_horizon"] = _steps_to_block
+                response["forecast_integrated"] = True
+                if _steps_to_block <= 3 and response["recommended_action"] == "USE_MEMORY":
+                    response["recommended_action"] = "WARN"
+                    response["preventive_action"] = "WARN"
+                elif _steps_to_block <= 5 and response["recommended_action"] == "USE_MEMORY":
+                    response["preventive_action"] = "ASK_USER"
+        except Exception:
+            pass
 
     # Hysteresis: suppress small stochastic-only omega jitter
     _prev_omega = _te_history_cache[-1] if _te_history_cache else None
@@ -9161,7 +9162,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["stability_window"] = "narrow" if 35 <= _omega_now <= 55 else "wide" if (20 <= _omega_now < 35 or 55 < _omega_now <= 70) else "clear"
 
     # Enhanced hysteresis: keep previous decision in boundary zone
-    if _prev_decision and response["hysteresis_band"]:
+    # Skip for demo/stateless calls — only apply when real API key has persistent Redis history
+    _is_stateful = not key_record.get("demo", False) and _prev_decision is not None
+    if _is_stateful and _prev_decision and response["hysteresis_band"]:
         if _prev_decision == "BLOCK" and _omega_now < 55:
             response["recommended_action"] = "BLOCK"
             response["hysteresis_applied"] = True
