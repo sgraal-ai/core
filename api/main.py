@@ -9125,7 +9125,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Step 1 — Base decision from scoring engine (already computed, includes domain/action multipliers)
     _base = response["recommended_action"]
 
-    # Step 2 — Forecast escalation (ONLY upward, never down)
+    # Step 1b — Confidence interval (metadata only, does NOT change decision)
+    _uncertainty = 5
+    _omega_high = min(_omega_now + _uncertainty, 100)
+    _ci_decision = "BLOCK" if _omega_high >= 55 else "ASK_USER" if _omega_high >= 45 else "WARN" if _omega_high >= 30 else "USE_MEMORY"
+    response["ci_decision"] = _ci_decision
+    response["ci_would_escalate"] = _SEVERITY[_ci_decision] > _SEVERITY[_base]
+
+    # Step 2 — Forecast escalation (ONLY for WARN and above, never USE_MEMORY → WARN)
     _forecast = _base
     response["forecast_integrated"] = False
     try:
@@ -9136,9 +9143,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["forecast_warning"] = True
             response["forecast_horizon"] = _steps_to_block
             response["forecast_integrated"] = True
-            # Only escalate if omega >= 20 (too-clean memory should not be warned)
-            if _steps_to_block <= 3 and _omega_now >= 20:
-                # Escalate one level, but ASK_USER is the ceiling from forecast alone
+            # Only escalate WARN or above — never touch USE_MEMORY
+            if _steps_to_block <= 3 and _SEVERITY[_base] >= 1:
                 _fc_sev = min(_SEVERITY[_base] + 1, 2)  # cap at ASK_USER
                 _forecast = _SEV_TO_ACTION[max(_SEVERITY[_base], _fc_sev)]
                 response["preventive_action"] = _forecast
