@@ -9117,68 +9117,60 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _lv = response.get("lyapunov_stability")
     response["stability_gauge"] = _ss["score"] if _ss and isinstance(_ss, dict) and "score" in _ss else (_lv["V"] if _lv and isinstance(_lv, dict) and "V" in _lv else 0.0)
 
-    # Forecast → Decision Hook (never override ASK_USER — only upgrade USE_MEMORY)
+    # ── Security-Monotone Decision Pipeline ──
+    _SEVERITY = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
+    _SEV_TO_ACTION = {0: "USE_MEMORY", 1: "WARN", 2: "ASK_USER", 3: "BLOCK"}
+    _omega_now = response["omega_mem_final"]
+
+    # Step 1 — Base decision from scoring engine (already computed, includes domain/action multipliers)
+    _base = response["recommended_action"]
+
+    # Step 2 — Forecast escalation (ONLY upward, never down)
+    _forecast = _base
     response["forecast_integrated"] = False
-    if response["recommended_action"] != "ASK_USER":
+    try:
+        _koop = response.get("koopman", {})
+        _pred5 = _koop.get("prediction_5") if isinstance(_koop, dict) else None
+        if _pred5 is not None and float(_pred5) > 60:
+            _steps_to_block = 5 if float(_pred5) > 80 else 3 if float(_pred5) > 70 else 5
+            response["forecast_warning"] = True
+            response["forecast_horizon"] = _steps_to_block
+            response["forecast_integrated"] = True
+            if _steps_to_block <= 3:
+                # Escalate one level, but ASK_USER is the ceiling from forecast alone
+                _fc_sev = min(_SEVERITY[_base] + 1, 2)  # cap at ASK_USER
+                _forecast = _SEV_TO_ACTION[max(_SEVERITY[_base], _fc_sev)]
+                response["preventive_action"] = _forecast
+    except Exception:
+        pass
+
+    # Step 3 — Sticky floor (ONLY ASK_USER and BLOCK are sticky, stateful calls only)
+    _sticky = _base  # default: no sticky effect
+    _is_stateful = not key_record.get("demo", False)
+    _prev_decision = None
+    if _is_stateful:
         try:
-            _koop = response.get("koopman", {})
-            _pred5 = _koop.get("prediction_5") if isinstance(_koop, dict) else None
-            if _pred5 is not None and float(_pred5) > 60:
-                _steps_to_block = 5 if float(_pred5) > 80 else 3 if float(_pred5) > 70 else 5
-                response["forecast_warning"] = True
-                response["forecast_horizon"] = _steps_to_block
-                response["forecast_integrated"] = True
-                if _steps_to_block <= 3 and response["recommended_action"] == "USE_MEMORY":
-                    response["recommended_action"] = "WARN"
-                    response["preventive_action"] = "WARN"
-                elif _steps_to_block <= 5 and response["recommended_action"] == "USE_MEMORY":
-                    response["preventive_action"] = "ASK_USER"
+            _diff_key_hyst = f"last_preflight_summary:{key_record.get('key_hash','default')}:{req.agent_id or 'anonymous'}"
+            _prev_sum = redis_get(_diff_key_hyst)
+            if _prev_sum and isinstance(_prev_sum, dict):
+                _prev_decision = _prev_sum.get("action")
         except Exception:
             pass
+    if _prev_decision is not None:
+        # Only ASK_USER and BLOCK are sticky, and only if omega >= 30
+        if _prev_decision in ("ASK_USER", "BLOCK") and _omega_now >= 30:
+            _sticky = _prev_decision
+        # WARN and USE_MEMORY are NEVER sticky
 
-    # Hysteresis: suppress small stochastic-only omega jitter
-    # Skip for demo keys — shared Redis state causes race conditions in concurrent calls
-    _prev_omega = _te_history_cache[-1] if _te_history_cache and not key_record.get("demo", False) else None
-    if _prev_omega is not None:
-        _omega_delta = abs(response["omega_mem_final"] - _prev_omega)
-        # Check if delta comes only from stochastic modules (particle_filter, pctl)
-        _stochastic_only = (
-            response.get("particle_filter") is not None or response.get("pctl_verification") is not None
-        ) and _omega_delta < 3.0
-        if _stochastic_only and response["recommended_action"] == (
-            "USE_MEMORY" if _prev_omega <= 30 else "WARN" if _prev_omega <= 60 else "ASK_USER" if _prev_omega <= 80 else "BLOCK"
-        ):
-            response["omega_mem_final"] = round(_prev_omega, 2)
-            response["hysteresis_applied"] = True
-    if "hysteresis_applied" not in response:
-        response["hysteresis_applied"] = False
+    # Step 4 — Final decision: max(base, forecast, sticky)
+    _final_sev = max(_SEVERITY[_base], _SEVERITY[_forecast], _SEVERITY[_sticky])
+    response["recommended_action"] = _SEV_TO_ACTION[_final_sev]
 
-    # Decision Stability Layer
-    _omega_now = response["omega_mem_final"]
-    _prev_decision = None
-    if _prev_omega is not None:
-        _prev_decision = "USE_MEMORY" if _prev_omega <= 30 else "WARN" if _prev_omega <= 60 else "ASK_USER" if _prev_omega <= 80 else "BLOCK"
+    # Hysteresis metadata
+    response["hysteresis_applied"] = _SEVERITY[_sticky] > _SEVERITY[_base] and _is_stateful
     response["decision_stable"] = (_prev_decision == response["recommended_action"]) if _prev_decision else True
     response["hysteresis_band"] = 35 <= _omega_now <= 55
     response["stability_window"] = "narrow" if 35 <= _omega_now <= 55 else "wide" if (20 <= _omega_now < 35 or 55 < _omega_now <= 70) else "clear"
-
-    # Enhanced hysteresis: keep previous decision in boundary zone
-    # Skip for demo/stateless calls — only apply when real API key has persistent Redis history
-    _is_stateful = not key_record.get("demo", False) and _prev_decision is not None
-    if _is_stateful and _prev_decision and response["hysteresis_band"]:
-        if _prev_decision == "BLOCK" and _omega_now < 55:
-            response["recommended_action"] = "BLOCK"
-            response["hysteresis_applied"] = True
-        elif _prev_decision == "USE_MEMORY" and _omega_now > 35:
-            response["recommended_action"] = "USE_MEMORY"
-            response["hysteresis_applied"] = True
-        # Override only if clearly crosses threshold
-        if _omega_now > 70:
-            response["recommended_action"] = "BLOCK" if _omega_now > 80 else "ASK_USER"
-            response["hysteresis_applied"] = False
-        elif _omega_now < 20:
-            response["recommended_action"] = "USE_MEMORY"
-            response["hysteresis_applied"] = False
 
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
