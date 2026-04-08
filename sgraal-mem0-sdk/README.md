@@ -1,0 +1,83 @@
+# mem0-sgraal
+
+Sgraal memory governance integration for [mem0](https://mem0.ai). Validates memory entries with the Sgraal preflight protocol before your agent acts on them.
+
+## Install
+
+```bash
+pip install mem0-sgraal
+```
+
+## Quick Start — Preflight Hook
+
+The simplest way to add Sgraal validation to mem0 memories:
+
+```python
+from mem0_sgraal import preflight_hook
+
+memories = [
+    {"id": "m1", "memory": "User prefers fintech", "score": 0.9},
+    {"id": "m2", "memory": "Account balance $50K", "score": 0.85},
+]
+
+safe = preflight_hook(
+    memories,
+    domain="fintech",
+    api_key="sg_demo_playground"  # or set SGRAAL_API_KEY env var
+)
+
+# safe = only memories that passed preflight (USE_MEMORY)
+for m in safe:
+    print(f"{m['id']}: {m['sgraal_decision']} (omega={m['sgraal_omega']})")
+```
+
+## Full Client — mem0 + Sgraal
+
+```python
+import os
+from mem0_sgraal import Mem0SgraalClient
+
+client = Mem0SgraalClient(
+    sgraal_api_key=os.environ["SGRAAL_API_KEY"],
+    mem0_api_key=os.environ["MEM0_API_KEY"]
+)
+
+# Search with safety validation
+result = client.safe_search(
+    query="user preferences",
+    user_id="alice",
+    domain="fintech",
+    action_type="irreversible"
+)
+
+print(f"Safe: {result['preflight_summary']['safe_count']}/{result['preflight_summary']['total']}")
+for m in result["safe_memories"]:
+    print(f"  {m['memory']} (omega={m['sgraal_omega']})")
+
+# Add with validation
+client.safe_add(
+    messages=[{"role": "user", "content": "I prefer email notifications"}],
+    user_id="alice"
+)
+```
+
+## Environment Variables
+
+```bash
+export SGRAAL_API_KEY=sg_live_...   # Required
+export MEM0_API_KEY=m0-...           # Required for Mem0SgraalClient
+```
+
+## Demo Key
+
+Use `sg_demo_playground` for testing Sgraal — no signup needed.
+
+## Links
+
+- [sgraal.com](https://sgraal.com) — Landing page
+- [mem0.ai](https://mem0.ai) — mem0 platform
+- [github.com/sgraal-ai/core](https://github.com/sgraal-ai/core) — Source
+
+## License
+
+Apache 2.0
