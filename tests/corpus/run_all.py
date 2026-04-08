@@ -32,7 +32,7 @@ def call_api(rec, layout):
         expected = rec["expected"]["recommended_action"]
     else:
         payload = {"memory_state": rec["memory_state"], "action_type": rec["action_type"], "domain": rec["domain"]}
-        expected = rec["ground_truth"]["expected_action"]
+        expected = rec["ground_truth"].get("expected_action") or rec["ground_truth"].get("recommended_action", "")
     try:
         resp = http_requests.post(API_URL, json=payload, headers=HEADERS, timeout=15)
         if resp.status_code == 200:

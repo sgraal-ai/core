@@ -6687,18 +6687,47 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _deterministic_seed = int(_input_hash_full[:16], 16)
     _deterministic_seed_str = str(_deterministic_seed)
 
+    # Copy-on-read Redis snapshot — freeze state at request start
+    _kh = key_record.get("key_hash", "default")
+    _agent = req.agent_id or "anonymous"
+    _snapshot_keys = [
+        f"te_history:{_kh}:{req.domain}",
+        f"last_preflight_summary:{_kh}:{_agent}",
+        f"last_preflight:{_kh}:{_agent}",
+        f"fe_max:{_kh}:{req.domain}",
+        f"prov_entropy:{_kh}:{req.domain}",
+        f"frechet_ref:{_kh}:{req.domain}",
+        f"hotelling_ref:{_kh}:{req.domain}",
+        f"mdp_transitions:{_kh}:{req.domain}",
+        f"mttr_history:{_kh}:{req.domain}",
+        f"pg_temperature:{_kh}:{req.domain}",
+        f"lv4_weights:{_kh}:{req.domain}",
+    ]
+    try:
+        from api.redis_snapshot import RedisSnapshot
+        _snapshot = RedisSnapshot(_snapshot_keys)
+        _snapshot_taken = _snapshot.keys_loaded > 0
+    except Exception:
+        _snapshot = None
+        _snapshot_taken = False
+
     _module_times = {}
     _mt_start = _time.monotonic()
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, _effective_weights, req.thresholds, req.use_pagerank)
     _module_times["scoring_engine"] = round((_time.monotonic() - _mt_start) * 1000, 1)
 
     # Fetch te_history ONCE for all time-series modules (eliminates 10 redundant Redis calls)
+    # Use snapshot if available, fall back to live Redis
     _te_history_cache = list(req.score_history) if req.score_history else []
 
-    # Auto-populate from Redis ring buffer
+    # Auto-populate from snapshot or Redis ring buffer
+    if len(_te_history_cache) < 5 and _snapshot:
+        _snap_hist = _snapshot.get(f"te_history:{_kh}:{req.domain}")
+        if _snap_hist and isinstance(_snap_hist, list):
+            _te_history_cache = [float(x) for x in _snap_hist]
     if len(_te_history_cache) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
-            _te_cache_key = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
+            _te_cache_key = f"te_history:{_kh}:{req.domain}"
             _te_cache_r = http_requests.get(
                 f"{UPSTASH_REDIS_URL}/LRANGE/{_te_cache_key}/0/99",
                 headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
@@ -8916,6 +8945,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "omega_source": "weighted_sum_10_components",
         "analytics_affect_score": True if _omega_delta != 0 else False,
     }
+    response["snapshot_taken"] = _snapshot_taken
     # Tag each module section with affects_omega
     for _mk in ["hawkes_intensity", "copula_analysis", "mewma", "calibration", "free_energy",
                  "info_thermodynamics", "rmt_analysis", "causal_graph", "spectral_analysis",
