@@ -9,6 +9,10 @@
 [![Tests](https://img.shields.io/badge/tests-1876%20passing-brightgreen)](#)
 [![Benchmark](https://img.shields.io/badge/F1-1.000-gold)](https://sgraal.com/blog/grok-benchmark)
 [![Corpus](https://img.shields.io/badge/corpus-239%2F239-brightgreen)](https://github.com/sgraal-ai/core/tree/main/tests)
+[![PyPI openai-sgraal](https://img.shields.io/pypi/v/openai-sgraal?label=openai-sgraal)](https://pypi.org/project/openai-sgraal/)
+[![PyPI crewai-sgraal](https://img.shields.io/pypi/v/crewai-sgraal?label=crewai-sgraal)](https://pypi.org/project/crewai-sgraal/)
+[![PyPI autogen-sgraal](https://img.shields.io/pypi/v/autogen-sgraal?label=autogen-sgraal)](https://pypi.org/project/autogen-sgraal/)
+[![PyPI sgraal-rag](https://img.shields.io/pypi/v/sgraal-rag?label=sgraal-rag)](https://pypi.org/project/sgraal-rag/)
 
 ---
 
@@ -212,17 +216,21 @@ const result = await guard({
 # Core Python SDK
 pip install sgraal
 
-# mem0 integration
-pip install mem0-sgraal
+# Framework integrations
+pip install langchain-sgraal   # LangChain
+pip install mem0-sgraal        # mem0
+pip install openai-sgraal      # OpenAI Agents SDK
+pip install crewai-sgraal      # CrewAI
+pip install autogen-sgraal     # AutoGen
 
-# LangChain integration
-pip install langchain-sgraal
+# RAG pipeline filter
+pip install sgraal-rag
 
 # MCP server (Claude Desktop, Cursor, Windsurf)
 npm install @sgraal/mcp
 ```
 
-**Framework integrations:** LangChain · LangGraph · AutoGen · CrewAI · LlamaIndex · mem0
+**Framework integrations:** LangChain · LangGraph · AutoGen · CrewAI · LlamaIndex · mem0 · OpenAI Agents SDK
 
 ---
 
