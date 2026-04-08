@@ -6,7 +6,9 @@
 [![PyPI](https://img.shields.io/pypi/v/sgraal)](https://pypi.org/project/sgraal/)
 [![npm](https://img.shields.io/npm/v/@sgraal/mcp)](https://www.npmjs.com/package/@sgraal/mcp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1834%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-1876%20passing-brightgreen)](#)
+[![Benchmark](https://img.shields.io/badge/F1-1.000-gold)](https://sgraal.com/blog/grok-benchmark)
+[![Corpus](https://img.shields.io/badge/corpus-239%2F239-brightgreen)](https://github.com/sgraal-ai/core/tree/main/tests)
 
 ---
 
@@ -69,6 +71,36 @@ curl -X POST https://api.sgraal.com/v1/preflight \
 | `WARN` | Proceed with logging — monitor closely |
 | `ASK_USER` | Pause — human confirmation required |
 | `BLOCK` | Stop — memory is unsafe to act on |
+
+---
+
+## Benchmark Results
+
+Joint benchmark with Grok across 3 adversarial corpora. Independent builds, side-by-side results.
+
+| Corpus | Cases | Sgraal F1 | False Negatives |
+|---|---|---|---|
+| Sponsored drift | 60 | **1.000** | 0 |
+| Subtle drift (0.30–0.55) | 59 | **1.000** | 0 |
+| Hallucination | 60 | **1.000** | 0 |
+| **Total** | **239** | **1.000** | **0** |
+
+Full breakdown → [sgraal.com/blog/grok-benchmark](https://sgraal.com/blog/grok-benchmark)
+Corpus → [tests/](tests/)
+
+---
+
+## Open Standards
+
+Sgraal publishes two open standards:
+
+**MemCube v2** — standardized memory entry schema
+`GET https://api.sgraal.com/v1/standard/memcube-spec`
+
+**SMRS v1.0** — formal memory risk score definition (0–100, 10 components)
+`GET https://api.sgraal.com/v1/standard/score-definition`
+
+→ [sgraal.com/standard](https://sgraal.com/standard)
 
 ---
 
@@ -174,16 +206,23 @@ const result = await guard({
 }
 ```
 
-### Other SDKs
+### Installation
 
-| Language | Install |
-|----------|---------|
-| Go | `go get github.com/sgraal-ai/sgraal-go` |
-| Java | `maven: com.sgraal:sgraal-java` |
-| Rust | `cargo add sgraal` |
-| C# | `dotnet add package Sgraal` |
+```bash
+# Core Python SDK
+pip install sgraal
 
-**Framework integrations:** LangChain · LangGraph · AutoGen · CrewAI · LlamaIndex · Semantic Kernel · Haystack · Flowise · n8n · Zapier · Cursor · Replit
+# mem0 integration
+pip install mem0-sgraal
+
+# LangChain integration
+pip install langchain-sgraal
+
+# MCP server (Claude Desktop, Cursor, Windsurf)
+npm install @sgraal/mcp
+```
+
+**Framework integrations:** LangChain · LangGraph · AutoGen · CrewAI · LlamaIndex · mem0
 
 ---
 
@@ -218,6 +257,18 @@ Full docs: [api.sgraal.com/docs](https://api.sgraal.com/docs)
 
 *Sgraal* comes from *Saint Graal* — the Holy Grail.
 Because truly reliable AI memory is the holy grail of agent systems.
+
+---
+
+## Links
+
+- [sgraal.com](https://sgraal.com) — main site
+- [sgraal.com/standard](https://sgraal.com/standard) — open standards
+- [sgraal.com/docs](https://sgraal.com/docs) — documentation
+- [sgraal.com/blog/grok-benchmark](https://sgraal.com/blog/grok-benchmark) — benchmark blog post
+- [api.sgraal.com/docs](https://api.sgraal.com/docs) — API reference
+- [pypi.org/project/sgraal](https://pypi.org/project/sgraal) — PyPI
+- [npmjs.com/package/@sgraal/mcp](https://npmjs.com/package/@sgraal/mcp) — npm
 
 ---
 
