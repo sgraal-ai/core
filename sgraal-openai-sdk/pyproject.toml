@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openai-sgraal"
+version = "0.1.0"
+description = "Sgraal memory governance for OpenAI Agents SDK"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [{name = "Sgraal AI", email = "hello@sgraal.com"}]
+requires-python = ">=3.8"
+dependencies = ["requests>=2.28.0", "sgraal>=0.2.0", "openai>=1.0.0"]
+
+[project.urls]
+Homepage = "https://sgraal.com"
+Repository = "https://github.com/sgraal-ai/core"
