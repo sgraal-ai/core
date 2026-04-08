@@ -213,6 +213,7 @@ class PreflightRequest(BaseModel):
     auto_route: bool = False  # #126 Memory Routing Layer
     policy_id: Optional[str] = None  # #125 Agent Policy Compiler
     dry_run: bool = False  # FIX 9: no webhooks, no audit, no quota
+    grok_context: Optional[dict] = None  # Grok compatibility mode: {grok_confidence, grok_decision, consensus_agents}
     action_context: Optional[dict] = None  # FIX 3: Agent Action Checkpoint
     outcome_context: Optional[str] = None  # FIX 8: "refresh"|"natural" — suppresses auto-outcome on refresh
 
@@ -9413,5 +9414,62 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # #137 Shadow preflight (async — never blocks)
     if req.profile:
         response["shadow_queued"] = True
+
+    # ── Email notification for ASK_USER decisions ──
+    response["notification_sent"] = False
+    if response.get("recommended_action") == "ASK_USER" and not _is_dry_run:
+        _notif_email = key_record.get("email", "")
+        _notif_agent = req.agent_id or "anonymous"
+        _notif_key = f"email_notif:{key_record.get('key_hash', 'default')}:{_notif_agent}"
+        if _notif_email and resend.api_key:
+            # Rate limit: 1 email per agent per hour
+            _already_sent = redis_get(_notif_key)
+            if not _already_sent:
+                try:
+                    def _send_notif():
+                        try:
+                            resend.Emails.send({
+                                "from": "Sgraal <hello@sgraal.com>",
+                                "to": [_notif_email],
+                                "subject": "Sgraal: Human approval required for agent action",
+                                "text": f"Your AI agent needs human approval before proceeding.\n\nAgent: {_notif_agent}\nDomain: {req.domain}\nAction type: {req.action_type}\nOmega score: {omega_out}\n\nReason: {response.get('explainability_note', '')}\n\nReview in dashboard: app.sgraal.com\n\nThis is an automated notification from Sgraal.",
+                            })
+                        except Exception:
+                            pass
+                    threading.Thread(target=_send_notif, daemon=True).start()
+                    redis_set(_notif_key, True, ttl=3600)
+                    response["notification_sent"] = True
+                except Exception:
+                    pass
+
+    # ── Grok Compatibility Mode ──
+    if req.grok_context and isinstance(req.grok_context, dict):
+        _gc = req.grok_context
+        _grok_decision = _gc.get("grok_decision", "")
+        _grok_confidence = float(_gc.get("grok_confidence", 0))
+        _consensus_agents = int(_gc.get("consensus_agents", 0))
+        _sgraal_decision = response.get("recommended_action", "USE_MEMORY")
+        _SEVERITY_GC = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
+        if _grok_decision and _grok_decision != _sgraal_decision:
+            response["sgraal_override"] = True
+            response["override_reason"] = "formal contradiction detected"
+            response["grok_decision"] = _grok_decision
+            response["delta_risk"] = _SEVERITY_GC.get(_sgraal_decision, 0) - _SEVERITY_GC.get(_grok_decision, 0)
+        else:
+            response["sgraal_override"] = False
+            if _grok_decision:
+                response["grok_decision"] = _grok_decision
+        # Deference check: high confidence + multi-agent consensus + no Z3 contradiction
+        _z3_contradiction = response.get("zk_sheaf_proof", {}).get("proof_valid") is False if isinstance(response.get("zk_sheaf_proof"), dict) else False
+        if _grok_confidence > 0.95 and _consensus_agents >= 3 and not _z3_contradiction:
+            response["grok_deference"] = True
+        else:
+            response["grok_deference"] = False
+        # Z3 formal override always wins
+        if _z3_contradiction:
+            response["formal_override"] = True
+            response["override_authority"] = "z3_formal_verification"
+        else:
+            response["formal_override"] = False
 
     return response
