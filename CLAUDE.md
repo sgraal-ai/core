@@ -52,11 +52,30 @@ cd dashboard && vercel --prod
 cd web-static && vercel --prod
 ```
 
-## Tests
+## Testing
 
-12 test files, 1859 tests total:
+### Run all unit tests:
+```bash
+python3 -m pytest tests/ --tb=short -q
+```
+
+### Run all corpus tests (against live API):
+```bash
+python3 tests/corpus/run_all.py
+```
+
+### Baseline — do not drop below:
+- pytest: 1,876 passing
+- Corpus total: 239/239 (Joint: 60, Sponsored: 60, Subtle: 59, Hallucination: 60)
+
+### When to run tests:
+- **pytest**: only when `api/` or `tests/` files change
+- **corpus**: only when scoring logic changes
+- **NEVER run for**: frontend, docs, SDK, README changes
+
+### Test files (15 files, 1876 tests):
 - `test_scoring.py` — Core scoring engine (1840+ tests)
-- `test_api_key_cache.py` — Redis-cached API key validation (6 tests)
+- `test_api_key_cache.py` — Redis-cached API key validation
 - `test_alias_fields.py` — heal_decision and stability_gauge alias fields
 - `test_audit_log.py` — Audit log write correctness
 - `test_audit_log_fields.py` — Audit log GET response timestamp/omega mapping
@@ -64,11 +83,14 @@ cd web-static && vercel --prod
 - `test_team_and_executive.py` — Key generation and executive summary fields
 - `test_approvals_agent_id.py` — Approvals response includes agent_id
 - `test_comply_fixes.py` — SIEM omega field and EU AI Act block counts
+- `test_proof_and_protocol.py` — Proof-of-decision, court authority, passport TTL, anti-consensus
+- `test_stability_and_endpoints.py` — Decision stability, grok comparison, propagation trace
 
-3 benchmark corpora (179 cases):
+### Benchmark corpora (4 files, 239 cases):
 - `sgraal_grok_joint_corpus.jsonl` — 60 cases: freshness, drift, criticality, compliance, healing, security
 - `sgraal_grok_sponsored_drift_corpus.jsonl` — 60 cases: sponsored drift, cross-agent propagation, clean baseline, mixed drift
 - `sgraal_grok_subtle_drift_corpus.jsonl` — 59 cases: subtle sponsored, buried propagation, adversarial clean, boundary edge
+- `sgraal_grok_hallucination_corpus.jsonl` — 60 cases: confident fabrication, multi-hop echo, cross-agent amplification
 
 ## Deployment
 
