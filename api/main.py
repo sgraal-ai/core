@@ -6665,7 +6665,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _mt_dist_key = f"mem_type_dist:{key_record.get('key_hash', 'default')}"
         for _entry in entries:
             _type_k = f"{_mt_dist_key}:{_entry.type}"
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
                 http_requests.post(f"{UPSTASH_REDIS_URL}/INCR/{_type_k}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
                 http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_type_k}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
     except Exception:
@@ -7258,7 +7258,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             fe_surprise = fe.surprise
 
             # Update max_observed_F in Redis if current F is larger
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
                 try:
                     new_max = max(fe.F, fe_max or 1.0)
                     if fe_max is None or fe.F > fe_max:
@@ -7438,8 +7438,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     pass
 
             if _fd_ref is None:
-                # First call or reset: store current as reference
-                if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                # First call or reset: store current as reference (skip for demo)
+                if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
                     try:
                         _fd_store = _json.dumps({"vectors": _fd_vectors, "age": 0})
                         http_requests.post(
@@ -7464,8 +7464,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         old_enc = response["component_breakdown"].get("r_encode", 0)
                         response["component_breakdown"]["r_encode"] = round(min(100, old_enc + 15), 2)
 
-                    # Update age in Redis
-                    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                    # Update age in Redis (skip for demo)
+                    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
                         try:
                             _fd_store = _json.dumps({"vectors": _fd_ref, "age": _fd_age})
                             http_requests.post(
@@ -8816,7 +8816,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _src_key = f"source_errors:{key_record.get('key_hash','default')}:{e.id}"
             _src_data = redis_get(_src_key, {"errors": 0, "total": 0})
             _src_data["total"] = _src_data.get("total", 0) + 1
-            redis_set(_src_key, _src_data, ttl=30*86400)
+            if not _is_dry_run:
+                redis_set(_src_key, _src_data, ttl=30*86400)
             if _src_data["total"] >= 5:
                 error_rate = _src_data.get("errors", 0) / max(_src_data["total"], 1)
                 adjusted = round(e.source_trust * math.exp(-error_rate * 0.1), 4)
@@ -8838,7 +8839,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _goal_key = f"agent_goal:{key_record.get('key_hash','default')}:{_agent_id}"
         _comp_vec = list(result.component_breakdown.values())
         _baseline = redis_get(_goal_key)
-        if _baseline is None:
+        if _baseline is None and not _is_dry_run:
             redis_set(_goal_key, _comp_vec, ttl=7*86400)
         else:
             # Cosine similarity
@@ -8871,7 +8872,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             eta = max(0.001, eta * 0.9); eta_adjusted = True
             ewc = min(1.0, ewc * 1.1)
             if ewc >= 1.0: ewc_at_max = True
-        redis_set(_ml_key, {"eta": round(eta, 6), "ewc_strength": round(ewc, 4)}, ttl=86400)
+        if not _is_dry_run:
+            redis_set(_ml_key, {"eta": round(eta, 6), "ewc_strength": round(ewc, 4)}, ttl=86400)
         response["meta_learning"] = {"current_eta": round(eta, 6), "consistency_score": round(_cons_score, 4),
             "eta_adjusted": eta_adjusted, "ewc_strength": round(ewc, 4), "ewc_at_maximum": ewc_at_max}
     except Exception:
