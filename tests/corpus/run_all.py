@@ -20,6 +20,7 @@ CORPORA = [
     ("tests/sgraal_grok_sponsored_drift_corpus.jsonl", "Round 2 — Sponsored Drift", "top"),
     ("tests/sgraal_grok_subtle_drift_corpus.jsonl", "Round 2b — Subtle Drift", "top"),
     ("tests/sgraal_grok_hallucination_corpus.jsonl", "Round 3 — Hallucination", "top"),
+    ("tests/sgraal_grok_propagation_corpus.jsonl", "Round 4 — Propagation", "top"),
 ]
 
 
