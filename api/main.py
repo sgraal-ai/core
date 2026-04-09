@@ -6613,9 +6613,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Track first preflight timestamp for activation funnel
     _is_dry_run = req.dry_run or key_record.get("demo", False)
+    # For demo/dry-run keys: skip ALL Redis I/O (reads + writes) → fully stateless & deterministic
+    _redis_enabled = bool(UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN) and not _is_dry_run
+    _rget = (lambda key, default=None: default) if _is_dry_run else redis_get
     try:
         _first_pf_key = f"first_preflight:{key_record.get('key_hash', 'default')}"
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
+        if _redis_enabled:
             http_requests.post(f"{UPSTASH_REDIS_URL}/SETNX/{_first_pf_key}/{datetime.now(timezone.utc).isoformat()}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
     except Exception:
         pass
@@ -6665,7 +6668,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _mt_dist_key = f"mem_type_dist:{key_record.get('key_hash', 'default')}"
         for _entry in entries:
             _type_k = f"{_mt_dist_key}:{_entry.type}"
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
+            if _redis_enabled:
                 http_requests.post(f"{UPSTASH_REDIS_URL}/INCR/{_type_k}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
                 http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_type_k}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
     except Exception:
@@ -6735,7 +6738,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     ]
     try:
         from api.redis_snapshot import RedisSnapshot
-        _snapshot = RedisSnapshot(_snapshot_keys)
+        _snapshot = RedisSnapshot([] if _is_dry_run else _snapshot_keys)
         _snapshot_taken = _snapshot.keys_loaded > 0
     except Exception:
         _snapshot = None
@@ -6755,7 +6758,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _snap_hist = _snapshot.get(f"te_history:{_kh}:{req.domain}")
         if _snap_hist and isinstance(_snap_hist, list):
             _te_history_cache = [float(x) for x in _snap_hist]
-    if len(_te_history_cache) < 5 and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+    if len(_te_history_cache) < 5 and _redis_enabled:
         try:
             _te_cache_key = f"te_history:{_kh}:{req.domain}"
             _te_cache_r = http_requests.get(
@@ -7234,7 +7237,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         # Fetch max_observed_F from Redis
         fe_max_key = f"fe_max:{key_record.get('key_hash', 'default')}:{req.domain}"
         fe_max = None
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _r = http_requests.get(
                     f"{UPSTASH_REDIS_URL}/GET/{fe_max_key}",
@@ -7258,7 +7261,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             fe_surprise = fe.surprise
 
             # Update max_observed_F in Redis if current F is larger
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
+            if _redis_enabled:
                 try:
                     new_max = max(fe.F, fe_max or 1.0)
                     if fe_max is None or fe.F > fe_max:
@@ -7335,7 +7338,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         # Fetch entropy history from Redis for trend
         _pe_history = None
         _pe_key = f"prov_entropy:{key_record.get('key_hash', 'default')}:{req.domain}"
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _per = http_requests.get(
                     f"{UPSTASH_REDIS_URL}/LRANGE/{_pe_key}/0/9",
@@ -7366,7 +7369,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 response["component_breakdown"]["s_provenance"] = round(min(100, old_prov + boost), 2)
 
             # Push to Redis for trend (skip for demo/dry_run — read-only)
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
+            if _redis_enabled:
                 try:
                     http_requests.post(
                         f"{UPSTASH_REDIS_URL}/RPUSH/{_pe_key}/{pe.mean_entropy}",
@@ -7423,7 +7426,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _fd_ref = None
             _fd_age = 0
 
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not req.reset_frechet_reference:
+            if _redis_enabled and not req.reset_frechet_reference:
                 try:
                     _fdr = http_requests.get(
                         f"{UPSTASH_REDIS_URL}/GET/{_fd_key}",
@@ -7439,7 +7442,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
             if _fd_ref is None:
                 # First call or reset: store current as reference (skip for demo)
-                if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
+                if _redis_enabled:
                     try:
                         _fd_store = _json.dumps({"vectors": _fd_vectors, "age": 0})
                         http_requests.post(
@@ -7465,7 +7468,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         response["component_breakdown"]["r_encode"] = round(min(100, old_enc + 15), 2)
 
                     # Update age in Redis (skip for demo)
-                    if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
+                    if _redis_enabled:
                         try:
                             _fd_store = _json.dumps({"vectors": _fd_ref, "age": _fd_age})
                             http_requests.post(
@@ -7504,7 +7507,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         # Fetch learned transitions from Redis
         _mdp_key = f"mdp_transitions:{key_record.get('key_hash', 'default')}:{req.domain}"
         _mdp_data = None
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _mdpr = http_requests.get(
                     f"{UPSTASH_REDIS_URL}/GET/{_mdp_key}",
@@ -7541,7 +7544,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     try:
         _mttr_key = f"mttr_history:{key_record.get('key_hash', 'default')}:{req.domain}"
         _mttr_durations = None
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _mttrr = http_requests.get(
                     f"{UPSTASH_REDIS_URL}/LRANGE/{_mttr_key}/0/49",
@@ -7663,7 +7666,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     try:
         _hot_key = f"hotelling_ref:{key_record.get('key_hash', 'default')}:{req.domain}"
         _hot_ref = None
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _hr = http_requests.get(
                     f"{UPSTASH_REDIS_URL}/GET/{_hot_key}",
@@ -7850,7 +7853,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _cl_iter = 0
         _cl_min = None
         _cl_max = None
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _clr = http_requests.get(
                     f"{UPSTASH_REDIS_URL}/GET/{_cl_key}",
@@ -7881,7 +7884,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _colimit_state = cl.global_state
 
             # Store in Redis
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            if _redis_enabled:
                 try:
                     _raw = sum(_omega_scores) / max(len(_omega_scores), 1) * cl.h1_factor
                     _new_min = min(_cl_min or _raw, _raw)
@@ -7957,7 +7960,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     try:
         _pr_key = f"poisson_lambda:{key_record.get('key_hash', 'default')}:{req.domain}"
         _pr_lam = 0.1
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _prr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_pr_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -7977,7 +7980,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # ROC AUC Monitoring (R-04)
     try:
         _roc_key = f"roc_history:{key_record.get('key_hash', 'default')}:{req.domain}"
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _rocr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_roc_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -7997,7 +8000,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     try:
         _fd_key = f"frontdoor_probs:{key_record.get('key_hash', 'default')}:{req.domain}"
         _fd_data = None
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _fdr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_fd_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -8074,7 +8077,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _sa_loss = _ul_data.get("L_v4", 0.0)
         _sa_key = f"sa_state:{key_record.get('key_hash', 'default')}:{req.domain}"
         _sa_prev = None
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _sar = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_sa_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -8085,7 +8088,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         sa = compute_simulated_annealing(_sa_loss, _sa_gc, _sa_prev)
         if sa:
             response["simulated_annealing"] = {"current_temperature": sa.current_temperature, "accepted_moves": sa.accepted_moves, "best_loss": sa.best_loss, "sa_active": sa.sa_active}
-            if sa.sa_active and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
+            if sa.sa_active and _redis_enabled:
                 try:
                     _sa_store = _json.dumps({"temperature": sa.current_temperature, "accepted": sa.accepted_moves, "best_loss": sa.best_loss, "iteration": _sa_prev.get("iteration", 0) + 1 if _sa_prev else 1})
                     http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_sa_key}/{_sa_store}/EX/86400",
@@ -8153,7 +8156,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     try:
         _pf_key = f"pf_particles:{key_record.get('key_hash', 'default')}:{req.domain}"
         _pf_parts, _pf_weights = None, None
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _pfr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_pf_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -8209,7 +8212,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     try:
         _mk_key = f"merkle_root:{key_record.get('key_hash', 'default')}:{req.domain}"
         _mk_stored = None
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _mkr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_mk_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -8222,7 +8225,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                                          "integrity_verified": mk.integrity_verified, "tamper_detected": mk.tamper_detected}
             if mk.integrity_verified and "compliance_result" in response:
                 response["compliance_result"]["merkle_integrity_proof"] = True
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
+            if _redis_enabled:
                 try:
                     http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_mk_key}/{mk.root_hash}/EX/86400",
                         headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -8455,7 +8458,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 }
 
         # Push current score to Redis ring buffer (keep last 100, skip for demo)
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
+        if _redis_enabled:
             try:
                 _rk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
                 http_requests.post(
@@ -8543,7 +8546,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         # Fetch temperature from Redis
         _pg_temp_key = f"pg_temperature:{key_record.get('key_hash', 'default')}:{req.domain}"
         _pg_temp = 1.0
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _ptr = http_requests.get(
                     f"{UPSTASH_REDIS_URL}/GET/{_pg_temp_key}",
@@ -8669,7 +8672,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _lv4_key = f"lv4_weights:{key_record.get('key_hash', 'default')}:{req.domain}"
         _lv4_weights = None
         _lv4_update_count = 0
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if _redis_enabled:
             try:
                 _lv4r = http_requests.get(
                     f"{UPSTASH_REDIS_URL}/GET/{_lv4_key}",
@@ -8814,7 +8817,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _trust_adjustments = {}
         for e in entries:
             _src_key = f"source_errors:{key_record.get('key_hash','default')}:{e.id}"
-            _src_data = redis_get(_src_key, {"errors": 0, "total": 0})
+            _src_data = _rget(_src_key, {"errors": 0, "total": 0})
             _src_data["total"] = _src_data.get("total", 0) + 1
             if not _is_dry_run:
                 redis_set(_src_key, _src_data, ttl=30*86400)
@@ -8838,7 +8841,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _agent_id = getattr(req, 'agent_id', None) or "anonymous"
         _goal_key = f"agent_goal:{key_record.get('key_hash','default')}:{_agent_id}"
         _comp_vec = list(result.component_breakdown.values())
-        _baseline = redis_get(_goal_key)
+        _baseline = _rget(_goal_key)
         if _baseline is None and not _is_dry_run:
             redis_set(_goal_key, _comp_vec, ttl=7*86400)
         else:
@@ -8858,9 +8861,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # #141 Meta-Learning Rate
     try:
         _ml_key = f"learning_rate:{key_record.get('key_hash','default')}:{req.domain}"
-        _ml_data = redis_get(_ml_key, {"eta": 0.01, "ewc_strength": 0.1})
+        _ml_data = _rget(_ml_key, {"eta": 0.01, "ewc_strength": 0.1})
         _cons_key = f"outcome_consistency:{key_record.get('key_hash','default')}:{req.domain}"
-        _cons = redis_get(_cons_key, {"consistent": 0, "total": 0})
+        _cons = _rget(_cons_key, {"consistent": 0, "total": 0})
         _cons_score = _cons["consistent"] / max(_cons["total"], 1) if _cons["total"] > 0 else 0.5
         eta = _ml_data.get("eta", 0.01)
         ewc = _ml_data.get("ewc_strength", 0.1)
@@ -8885,7 +8888,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     try:
         _agent_id = req.agent_id or "anonymous"
         _last_pf_key = f"last_preflight:{key_record.get('key_hash', 'default')}:{_agent_id}"
-        _prev_omega = redis_get(_last_pf_key)
+        _prev_omega = _rget(_last_pf_key)
         auto_inferred = None
         if _suppress_auto_inference:
             response["auto_inference_suppressed"] = True
@@ -9103,7 +9106,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # FIX 10: "Why did this change?" auto diff
     try:
         _diff_key = f"last_preflight_summary:{key_record.get('key_hash','default')}:{req.agent_id or 'anonymous'}"
-        _prev_summary = redis_get(_diff_key)
+        _prev_summary = _rget(_diff_key)
         if _prev_summary and isinstance(_prev_summary, dict):
             _prev_omega = _prev_summary.get("omega", 0)
             _prev_action = _prev_summary.get("action", "USE_MEMORY")
@@ -9235,7 +9238,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if _is_stateful:
         try:
             _diff_key_hyst = f"last_preflight_summary:{key_record.get('key_hash','default')}:{req.agent_id or 'anonymous'}"
-            _prev_sum = redis_get(_diff_key_hyst)
+            _prev_sum = _rget(_diff_key_hyst)
             if _prev_sum and isinstance(_prev_sum, dict):
                 _prev_decision = _prev_sum.get("action")
         except Exception:
@@ -9344,7 +9347,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # #138 Circuit Breaker check
     try:
         _cb_key = f"circuit_breaker:{key_record.get('key_hash','default')}:{req.domain}"
-        _cb_state = redis_get(_cb_key, {"state": "CLOSED", "omega_history": []})
+        _cb_state = _rget(_cb_key, {"state": "CLOSED", "omega_history": []})
         _cb_hist = _cb_state.get("omega_history", [])
         _cb_hist.append(omega_out)
         _cb_hist = _cb_hist[-5:]
@@ -9489,7 +9492,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _notif_key = f"email_notif:{key_record.get('key_hash', 'default')}:{_notif_agent}"
         if _notif_email and resend.api_key:
             # Rate limit: 1 email per agent per hour
-            _already_sent = redis_get(_notif_key)
+            _already_sent = _rget(_notif_key)
             if not _already_sent:
                 try:
                     def _send_notif():
