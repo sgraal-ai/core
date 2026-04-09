@@ -9293,6 +9293,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         pass
 
     response["per_module_latency"] = _module_times
+    response["pipeline_ms"] = round((_time.monotonic() - _t_start) * 1000, 1)
 
     response["_trace"] = {
         "span": "preflight",
