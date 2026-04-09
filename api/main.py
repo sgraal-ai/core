@@ -1581,6 +1581,8 @@ def revoke_dev_key(key_id: str, key_record: dict = Depends(verify_api_key)):
         redis_delete(f"api_key_valid:{key_id}")
     except Exception:
         pass
+    # Audit log the revocation
+    _audit_log("key_revoked", str(uuid.uuid4()), key_record, "REVOKED", 0, {"key_id": key_id})
     return {"revoked": key_id}
 
 @app.post("/v1/api-keys/{key_id}/rotate")
@@ -5925,6 +5927,7 @@ def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str
     """Log audit event to Supabase (requires service role for RLS)."""
     _sb = supabase_service_client or supabase_client
     if not _sb:
+        logger.debug("AUDIT_LOG_DISABLED: no Supabase client configured")
         return
     try:
         record = {
@@ -5938,11 +5941,37 @@ def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str
             record.update(extra)
         _sb.table("audit_log").insert(record).execute()
     except Exception as e:
-        logger.warning("AUDIT_LOG_ERROR: %s", e)
+        # Retry up to 2 more times
+        for _retry in range(2):
+            try:
+                _sb.table("audit_log").insert(record).execute()
+                break
+            except Exception:
+                pass
+        else:
+            logger.error("AUDIT_LOG_FAILED after 3 attempts: %s", e)
 
 
 # In-memory healing counter store (per entry_id)
 _healing_counters: dict[str, int] = {}
+
+def _get_healing_counter(entry_id: str) -> int:
+    """Get healing counter from memory, falling back to Redis."""
+    if entry_id in _healing_counters:
+        return _healing_counters[entry_id]
+    val = redis_get(f"healing_counter:{entry_id}")
+    if val is not None and isinstance(val, (int, float)):
+        _healing_counters[entry_id] = int(val)
+        return int(val)
+    return 0
+
+def _set_healing_counter(entry_id: str, count: int):
+    """Set healing counter in memory and Redis."""
+    _healing_counters[entry_id] = count
+    try:
+        redis_set(f"healing_counter:{entry_id}", count, ttl=86400)
+    except Exception:
+        pass
 
 # Thread manager for adaptive sampling
 _thread_manager = ThreadManager()
@@ -5972,8 +6001,8 @@ def _check_rate_limit(key_record: dict, allow_demo: bool = False):
 def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     # Increment healing counter for this entry
-    prev = _healing_counters.get(req.entry_id, 0)
-    _healing_counters[req.entry_id] = prev + 1
+    prev = _get_healing_counter(req.entry_id)
+    _set_healing_counter(req.entry_id, prev + 1)
 
     now = datetime.now(timezone.utc)
     projected = _HEAL_IMPROVEMENTS.get(req.action, 0.0)
@@ -6571,11 +6600,11 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
-    # Rate limit check
+    # Rate limit check (skip for dry_run — encourage testing)
     tier = key_record.get("tier", "free")
     calls = key_record.get("calls_this_month", 0)
     limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
-    if calls >= limit:
+    if calls >= limit and not req.dry_run:
         raise HTTPException(
             status_code=429,
             detail=f"Monthly limit of {limit:,} calls exceeded for {tier} tier. "

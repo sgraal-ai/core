@@ -29,7 +29,7 @@ pip install -r requirements.txt
 # Run API server locally
 uvicorn api.main:app --reload
 
-# Run tests (1859 tests across 12 test files)
+# Run tests (1876 tests across 15 test files)
 pip install pytest httpx
 python3 -m pytest tests/ -v
 
@@ -66,7 +66,11 @@ python3 tests/corpus/run_all.py
 
 ### Baseline — do not drop below:
 - pytest: 1,876 passing
-- Corpus total: 239/239 (Joint: 60, Sponsored: 60, Subtle: 59, Hallucination: 60)
+- Corpus total: 329/329 (Joint: 60, Sponsored: 60, Subtle: 59, Hallucination: 60, Propagation: 90)
+
+### Scoring weight note:
+- `s_recovery` has **negative weight** (-0.10) — recovery capability *reduces* risk. This is intentional.
+- Component weights sum to 0.99 (not 1.0) due to the negative recovery weight.
 
 ### When to run tests:
 - **pytest**: only when `api/` or `tests/` files change
