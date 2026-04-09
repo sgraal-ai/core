@@ -6612,9 +6612,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         )
 
     # Track first preflight timestamp for activation funnel
+    _is_dry_run = req.dry_run or key_record.get("demo", False)
     try:
         _first_pf_key = f"first_preflight:{key_record.get('key_hash', 'default')}"
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
             http_requests.post(f"{UPSTASH_REDIS_URL}/SETNX/{_first_pf_key}/{datetime.now(timezone.utc).isoformat()}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
     except Exception:
         pass
@@ -7364,8 +7365,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 old_prov = response["component_breakdown"].get("s_provenance", 0)
                 response["component_breakdown"]["s_provenance"] = round(min(100, old_prov + boost), 2)
 
-            # Push to Redis for trend
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            # Push to Redis for trend (skip for demo/dry_run — read-only)
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
                 try:
                     http_requests.post(
                         f"{UPSTASH_REDIS_URL}/RPUSH/{_pe_key}/{pe.mean_entropy}",
@@ -8084,7 +8085,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         sa = compute_simulated_annealing(_sa_loss, _sa_gc, _sa_prev)
         if sa:
             response["simulated_annealing"] = {"current_temperature": sa.current_temperature, "accepted_moves": sa.accepted_moves, "best_loss": sa.best_loss, "sa_active": sa.sa_active}
-            if sa.sa_active and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            if sa.sa_active and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
                 try:
                     _sa_store = _json.dumps({"temperature": sa.current_temperature, "accepted": sa.accepted_moves, "best_loss": sa.best_loss, "iteration": _sa_prev.get("iteration", 0) + 1 if _sa_prev else 1})
                     http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_sa_key}/{_sa_store}/EX/86400",
@@ -8221,7 +8222,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                                          "integrity_verified": mk.integrity_verified, "tamper_detected": mk.tamper_detected}
             if mk.integrity_verified and "compliance_result" in response:
                 response["compliance_result"]["merkle_integrity_proof"] = True
-            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+            if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
                 try:
                     http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_mk_key}/{mk.root_hash}/EX/86400",
                         headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -8453,8 +8454,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "current_deviation": ou_result.current_deviation,
                 }
 
-        # Push current score to Redis ring buffer (keep last 100)
-        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+        # Push current score to Redis ring buffer (keep last 100, skip for demo)
+        if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN and not _is_dry_run:
             try:
                 _rk = f"te_history:{key_record.get('key_hash', 'default')}:{req.domain}"
                 http_requests.post(
@@ -8906,7 +8907,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 }, ttl=3600)
             except Exception:
                 pass
-        redis_set(_last_pf_key, omega_out, ttl=300)
+        if not _is_dry_run:
+            redis_set(_last_pf_key, omega_out, ttl=300)
     except Exception:
         pass
 
@@ -9117,12 +9119,13 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "entries_changed": len(req.memory_state) != _prev_summary.get("n_entries", 0),
                 "time_since_last": round(_time.time() - _prev_summary.get("ts", _time.time()), 1),
             }
-        # Store current summary
-        redis_set(_diff_key, {
-            "omega": omega_out, "action": response.get("recommended_action", "USE_MEMORY"),
-            "components": {k: round(v, 1) for k, v in response.get("component_breakdown", {}).items()},
-            "n_entries": len(req.memory_state), "ts": _time.time()
-        }, ttl=3600)
+        # Store current summary (skip for demo — read-only)
+        if not _is_dry_run:
+            redis_set(_diff_key, {
+                "omega": omega_out, "action": response.get("recommended_action", "USE_MEMORY"),
+                "components": {k: round(v, 1) for k, v in response.get("component_breakdown", {}).items()},
+                "n_entries": len(req.memory_state), "ts": _time.time()
+            }, ttl=3600)
     except Exception:
         pass
 
@@ -9356,7 +9359,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         else:
             _cb_state = {"state": _cb_state.get("state", "CLOSED"), "omega_history": _cb_hist}
 
-        redis_set(_cb_key, _cb_state, ttl=300)
+        if not _is_dry_run:
+            redis_set(_cb_key, _cb_state, ttl=300)
         response["circuit_breaker_state"] = _cb_state["state"]
         # #136 Push circuit_open event
         if _cb_state["state"] == "OPEN":
