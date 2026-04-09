@@ -780,7 +780,7 @@ _STREAM_MODULES = [
 @app.post("/v1/preflight/stream")
 def preflight_stream(req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
     """Real SSE streaming — emits one event per module in deterministic order."""
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     import time as _st
 
     if not req.memory_state:
@@ -833,7 +833,7 @@ class MemoryDiffRequest(BaseModel):
 
 @app.post("/v1/memory/diff")
 def memory_diff(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     before_ids = {e["id"]: e for e in req.memory_state_before}
     after_ids = {e["id"]: e for e in req.memory_state_after}
     added = [e for eid, e in after_ids.items() if eid not in before_ids]
@@ -1225,7 +1225,7 @@ REQUIRED_FIELDS = {"id", "content", "type", "timestamp_age_days", "source_trust"
 V2_OPTIONAL = {"embedding", "memory_type_v2", "ttl_seconds", "verified_at", "tags", "importance"}
 @app.post("/v1/validate")
 def validate_schema(req: ValidateRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     errors, warns = [], []
     for i, e in enumerate(req.entries):
         missing = REQUIRED_FIELDS - set(e.keys())
@@ -1267,7 +1267,7 @@ def delete_template(name: str, key_record: dict = Depends(verify_api_key)):
     return {"deleted": name}
 @app.post("/v1/preflight/from-template/{name}")
 def preflight_from_template(name: str, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     kh = key_record.get("key_hash", "default")
     tpl = _templates.get(f"{kh}:{name}")
     if not tpl: raise HTTPException(status_code=404, detail=f"Template '{name}' not found")
@@ -1408,7 +1408,7 @@ class SimilarRequest(BaseModel):
 
 @app.post("/v1/memory/similar")
 def find_similar(req: SimilarRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     return {"similar": [], "query": req.content, "threshold": req.threshold}
 
 # ---- #44 Batch Heal ----
@@ -2121,7 +2121,7 @@ def export_traces_jaeger(key_record: dict = Depends(verify_api_key)):
 # ---- #116b RAG Guard filter endpoint ----
 @app.post("/v1/rag/filter")
 def rag_filter(req: dict, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     chunks = req.get("chunks", [])
     max_omega = req.get("max_omega", 60)
     filtered = []
@@ -2339,7 +2339,7 @@ def generate_synthetic(req: SyntheticRequest, key_record: dict = Depends(verify_
 # ---- #145 Playground Shareable Links ----
 @app.post("/v1/playground/save")
 def playground_save(data: dict, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     share_id = secrets.token_urlsafe(12)
     redis_set(f"playground_share:{share_id}", data, ttl=7*86400)
     return {"share_id": share_id, "share_url": f"https://sgraal.com/playground?share={share_id}"}
@@ -2404,7 +2404,7 @@ class SimDecisionRequest(BaseModel):
 
 @app.post("/v1/simulate/decision")
 def simulate_decision(req: SimDecisionRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     if len(req.variants) > 10:
         raise HTTPException(status_code=400, detail="Maximum 10 variants")
     results = []
@@ -2538,7 +2538,7 @@ class CounterfactualRequest(BaseModel):
 
 @app.post("/v1/simulate/counterfactual")
 def simulate_counterfactual(req: CounterfactualRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     if len(req.scenarios) > 5:
         raise HTTPException(status_code=400, detail="Maximum 5 scenarios")
     if not req.memory_state:
@@ -2749,7 +2749,7 @@ class TranslateRequest(BaseModel):
 
 @app.post("/v1/memory/translate")
 def translate_memory(req: TranslateRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     src_fmt = req.source_format
     if src_fmt == "auto":
         src_fmt = _detect_format(req.memory_state)
@@ -2927,7 +2927,7 @@ def create_firewall_rule(req: FirewallRuleRequest, key_record: dict = Depends(ve
             "require_preflight_score": req.require_preflight_score,
             "created_at": datetime.now(timezone.utc).isoformat()}
     _firewall_rules[rule_key] = rule
-    redis_set(f"firewall_rules:{rule_key}", rule)
+    redis_set(f"firewall_rules:{rule_key}", rule, ttl=86400)
     return {"created": True, "namespace": req.namespace, "rule": rule}
 
 @app.get("/v1/firewall/rules")
@@ -3111,13 +3111,13 @@ def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api
     if not losers: losers = scored[1:]
     losers = [s["entry"] if isinstance(s, dict) and "entry" in s else s for s in losers]
     # Z3 consistency check (logical, since Z3 may not be available)
-    _z3_proof = "logical_consistency_verified"
+    _z3_proof = "logical_fallback"
     try:
         from scoring_engine.formal_verification import verify_healing_policies
         _z3_result = verify_healing_policies()
         _z3_proof = "z3_verified" if _z3_result.get("z3_available") else "logical_fallback"
     except Exception:
-        pass
+        _z3_proof = "logical_fallback"
     confidence = round(1 - (scored[0]["omega"] / 100), 2) if scored else 0
     vid = str(uuid.uuid4())
     verdict = {"verdict_id": vid, "winner_entries": winners, "loser_entries": losers,
@@ -3224,7 +3224,7 @@ class ForecastRequest(BaseModel):
 
 @app.post("/v1/memory/forecast")
 def memory_forecast(req: ForecastRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     if req.horizon_days < 1: req.horizon_days = 1
     if req.horizon_days > 30: req.horizon_days = 30
     if not req.memory_state:
@@ -3761,7 +3761,7 @@ class RegulatoryCheckRequest(BaseModel):
 
 @app.post("/v1/regulatory/check")
 def regulatory_check(req: RegulatoryCheckRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     _reg_key = req.regulation.upper().replace("-", "").replace(" ", "")
     reg = _REGULATION_PROFILES.get(_reg_key, {})
     if not reg:
@@ -3847,7 +3847,7 @@ def verify_fidelity(req: dict):
 @app.post("/v1/preflight/zk")
 def preflight_zk(req: dict, key_record: dict = Depends(verify_api_key)):
     """Zero-knowledge preflight — scores on metadata + hashes, never sees content."""
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     zk_entries = req.get("memory_state", [])
     if not zk_entries:
         raise HTTPException(status_code=400, detail="memory_state required")
@@ -3885,7 +3885,7 @@ def set_persona(agent_id: str, req: PersonaRequest, key_record: dict = Depends(v
     kh = key_record.get("key_hash", "default")
     persona = req.model_dump()
     _personas[f"{kh}:{agent_id}"] = persona
-    redis_set(f"agent_persona:{kh}:{agent_id}", persona)
+    redis_set(f"agent_persona:{kh}:{agent_id}", persona, ttl=86400)
     return {"stored": True, "agent_id": agent_id, "persona": persona}
 
 @app.get("/v1/agents/{agent_id}/persona")
@@ -3926,7 +3926,7 @@ class DivergenceRequest(BaseModel):
 
 @app.post("/v1/divergence/check")
 def check_divergence(req: DivergenceRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     ref = req.reference_memory_state
     if not ref and req.reference_agent_id:
         ref = []  # Would load from store in production
@@ -4160,7 +4160,7 @@ class LabRunRequest(BaseModel):
 
 @app.post("/v1/lab/run")
 def lab_run(req: LabRunRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     job_id = str(uuid.uuid4())
     scenario_results = []
     from scoring_engine.omega_mem import _weibull_decay
@@ -4227,7 +4227,7 @@ class ResolveRequest(BaseModel):
 
 @app.post("/v1/memory/resolve")
 def resolve_conflicts(req: ResolveRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     entries = req.entries
     notes = []
     if req.strategy == "merge":
@@ -4290,7 +4290,7 @@ class RAGFilterRequest(BaseModel):
 
 @app.post("/v1/rag/filter")
 def rag_filter(req: RAGFilterRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     if len(req.chunks) > 500:
         raise HTTPException(status_code=400, detail="Maximum 500 chunks per request.")
     passed, blocked = [], []
@@ -4357,7 +4357,7 @@ class CompressRequest(BaseModel):
 
 @app.post("/v1/memory/compress")
 def compress_memory(req: CompressRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     entries = req.memory_state
     if not entries: return {"compressed": [], "original_count": 0, "compressed_count": 0, "ratio": 1.0}
     target = req.target_count or max(1, len(entries) // 2)
@@ -4448,7 +4448,7 @@ class SimulateRequest(BaseModel):
 
 @app.post("/v1/simulate")
 def simulate_rollout(req: SimulateRequest, key_record: dict = Depends(verify_api_key)):
-    _check_rate_limit(key_record, allow_demo=True)
+    _check_rate_limit(key_record)
     steps = min(req.steps, 20)
     from scoring_engine import compute as _sim_compute, MemoryEntry as _sim_ME
     entries = [_sim_ME(id=e.get("id",f"s{i}"), content=e.get("content",""), type=e.get("type","semantic"),
@@ -8918,9 +8918,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _skip_adjusted = omega_out < 20 and req.action_type in ("reversible", "informational")
         if abs(_omega_delta) > 5.0 and not _skip_adjusted:
             response["decision_based_on"] = "omega_adjusted"
-            _t_warn = req.thresholds.get("warn", 25) if req.thresholds else 25
-            _t_ask = req.thresholds.get("ask_user", 45) if req.thresholds else 45
-            _t_block = req.thresholds.get("block", 70) if req.thresholds else 70
+            _t_warn = max(0, min(100, req.thresholds.get("warn", 25))) if req.thresholds else 25
+            _t_ask = max(0, min(100, req.thresholds.get("ask_user", 45))) if req.thresholds else 45
+            _t_block = max(0, min(100, req.thresholds.get("block", 70))) if req.thresholds else 70
+            # Enforce ordering: warn <= ask_user <= block
+            _t_ask = max(_t_ask, _t_warn)
+            _t_block = max(_t_block, _t_ask)
             if _omega_adjusted < _t_warn: _adj_action = "USE_MEMORY"
             elif _omega_adjusted < _t_ask: _adj_action = "WARN"
             elif _omega_adjusted < _t_block: _adj_action = "ASK_USER"
@@ -9452,10 +9455,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _notif_email = key_record.get("email", "")
         _notif_agent = req.agent_id or "anonymous"
         _notif_key = f"email_notif:{key_record.get('key_hash', 'default')}:{_notif_agent}"
+        _global_notif_key = f"email_notif_global:{key_record.get('key_hash', 'default')}"
         if _notif_email and resend.api_key:
-            # Rate limit: 1 email per agent per hour
+            # Rate limit: 1 email per agent per hour + max 10 per key per hour
             _already_sent = redis_get(_notif_key)
-            if not _already_sent:
+            _global_count = redis_get(_global_notif_key) or 0
+            if not _already_sent and int(_global_count) < 10:
                 try:
                     def _send_notif():
                         try:
@@ -9469,6 +9474,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                             pass
                     threading.Thread(target=_send_notif, daemon=True).start()
                     redis_set(_notif_key, True, ttl=3600)
+                    redis_set(_global_notif_key, int(_global_count) + 1, ttl=3600)
                     response["notification_sent"] = True
                 except Exception:
                     pass
@@ -9476,9 +9482,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # ── Grok Compatibility Mode ──
     if req.grok_context and isinstance(req.grok_context, dict):
         _gc = req.grok_context
+        _valid_decisions = {"USE_MEMORY", "WARN", "ASK_USER", "BLOCK"}
         _grok_decision = _gc.get("grok_decision", "")
-        _grok_confidence = float(_gc.get("grok_confidence", 0))
-        _consensus_agents = int(_gc.get("consensus_agents", 0))
+        if _grok_decision and _grok_decision not in _valid_decisions:
+            _grok_decision = ""  # ignore invalid decision
+        _grok_confidence = max(0.0, min(1.0, float(_gc.get("grok_confidence", 0))))
+        _consensus_agents = max(0, min(100, int(_gc.get("consensus_agents", 0))))
         _sgraal_decision = response.get("recommended_action", "USE_MEMORY")
         _SEVERITY_GC = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
         if _grok_decision and _grok_decision != _sgraal_decision:

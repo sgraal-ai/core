@@ -8659,10 +8659,10 @@ class TestSimilaritySearch:
     def test_query_echo(self):
         r = client.post("/v1/memory/similar", json={"content": "hello"}, headers=AUTH)
         assert r.json()["query"] == "hello"
-    def test_demo_allowed(self):
+    def test_demo_blocked(self):
         r = client.post("/v1/memory/similar", json={"content": "test"},
             headers={"Authorization": "Bearer sg_demo_playground"})
-        assert r.status_code == 200
+        assert r.status_code == 403
 
 class TestBatchHeal:
     def test_single(self):
@@ -9194,9 +9194,9 @@ class TestMemoryCompression:
     def test_empty(self):
         r = client.post("/v1/memory/compress", json={"memory_state": []}, headers=AUTH)
         assert r.json()["original_count"] == 0
-    def test_demo_allowed(self):
+    def test_demo_blocked(self):
         r = client.post("/v1/memory/compress", json={"memory_state": [{"id":"e1"}]}, headers={"Authorization": "Bearer sg_demo_playground"})
-        assert r.status_code == 200
+        assert r.status_code == 403
 
 class TestCostAttribution:
     def test_cost_team(self):
@@ -9579,10 +9579,10 @@ class TestRAGFilter:
     def test_short_chunk_passthrough(self):
         r = client.post("/v1/rag/filter", json={"chunks": [{"content": "hi"}]}, headers=AUTH)
         assert r.json()["passed"] == 1 and r.json()["filtered_chunks"][0]["sgraal_omega"] == 0
-    def test_demo_allowed(self):
+    def test_demo_blocked(self):
         r = client.post("/v1/rag/filter", json={"chunks": [{"content": "test chunk"}]},
             headers={"Authorization": "Bearer sg_demo_playground"})
-        assert r.status_code == 200
+        assert r.status_code == 403
     def test_sdk_importable(self):
         from sdk.python.sgraal.rag_filter import SgraalRAGFilter
         f = SgraalRAGFilter("key")
@@ -9849,9 +9849,9 @@ class TestPlaygroundShare:
     def test_share_url_format(self):
         r = client.post("/v1/playground/save", json={"test": True}, headers=AUTH)
         assert "sgraal.com/playground?share=" in r.json()["share_url"]
-    def test_demo_allowed(self):
+    def test_demo_blocked(self):
         r = client.post("/v1/playground/save", json={"x": 1}, headers={"Authorization": "Bearer sg_demo_playground"})
-        assert r.status_code == 200
+        assert r.status_code == 403
 
 class TestDashboardFeedback:
     def test_thumbs_up(self):

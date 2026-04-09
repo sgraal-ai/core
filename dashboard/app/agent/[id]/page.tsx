@@ -217,7 +217,8 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         const borderColor = isBlock ? "#dc2626" : isWarn ? "#c9a962" : "#16a34a";
         const statusLabel = isBlock ? "BLOCKED" : isWarn ? "WARNING" : "HEALTHY";
         const cb = agent.component_breakdown ?? {};
-        const worstKey = Object.entries(cb).sort(([,a],[,b]) => (b as number) - (a as number))[0];
+        const _cbEntries = Object.entries(cb).sort(([,a],[,b]) => (b as number) - (a as number));
+        const worstKey = _cbEntries.length > 0 ? _cbEntries[0] : null;
         const worstReason = worstKey ? worstKey[0].replace(/_/g, " ").replace(/^[sr] /, "") : "unknown factors";
         const rp = agent.repair_plan ?? [];
         const firstAction = rp.length > 0 ? (typeof rp[0] === "object" ? (rp[0] as unknown as Record<string,unknown>).action ?? rp[0] : rp[0]) : null;
