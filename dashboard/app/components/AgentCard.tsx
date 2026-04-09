@@ -48,8 +48,7 @@ export function AgentCard({ agent }: { agent: Agent }) {
         <p className="text-xs text-muted font-mono mb-2">{agent.id}</p>
         {agent.recommended_action === "BLOCK" && (() => {
           const cb = agent.component_breakdown ?? {};
-          const _entries = Object.entries(cb).sort(([,a],[,b]) => b - a);
-          const top = _entries.length > 0 ? _entries[0] : null;
+          const top = Object.entries(cb).sort(([,a],[,b]) => b - a)[0];
           const reason = top ? (COMPONENT_LABELS[top[0]] ?? top[0].replace(/_/g, " ")) : "high risk";
           const rp = agent.repair_plan ?? [];
           const fix = rp.length > 0 ? (REPAIR_LABELS[rp[0].action] ?? rp[0].action) : "Review manually";

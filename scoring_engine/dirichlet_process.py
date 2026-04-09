@@ -26,21 +26,17 @@ def compute_dirichlet_process(entries: list[dict], alpha: float = 1.0, sim_thres
         vecs = [_entry_vec(e) for e in entries]
         clusters, centroids = [], []
         new_detected = False
-        cluster_counts = [1] * len(centroids)
         for i,v in enumerate(vecs):
             assigned = False
             for ci,cent in enumerate(centroids):
                 if _cosine(v, cent) > sim_threshold:
                     clusters.append(ci)
-                    n = cluster_counts[ci]
-                    centroids[ci] = [(cent[d]*n+v[d])/(n+1) for d in range(len(v))]
-                    cluster_counts[ci] += 1
+                    centroids[ci] = [(cent[d]*i+v[d])/(i+1) for d in range(len(v))]
                     assigned = True; break
             if not assigned:
                 p_new = alpha / (i + alpha)
                 clusters.append(len(centroids))
                 centroids.append(v[:])
-                cluster_counts.append(1)
                 if i > 0: new_detected = True
         return DirichletProcessResult(n_clusters=len(centroids), cluster_assignments=clusters, new_cluster_detected=new_detected, concentration=alpha)
     except Exception: return None
