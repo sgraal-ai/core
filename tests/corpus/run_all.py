@@ -51,13 +51,10 @@ def run_corpus(path, name, layout):
         return name, 0, 0, [f"File not found: {path}"]
 
     results = []
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        futures = {pool.submit(call_api, r, layout): r for r in records}
-        for fut in as_completed(futures):
-            rec = futures[fut]
-            expected, actual, omega = fut.result()
-            tid = rec.get("test_id", "?")
-            results.append((tid, expected, actual, omega))
+    for rec in records:
+        expected, actual, omega = call_api(rec, layout)
+        tid = rec.get("test_id", "?")
+        results.append((tid, expected, actual, omega))
 
     passed = sum(1 for _, e, a, _ in results if e == a)
     total = len(results)
