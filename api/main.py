@@ -6213,6 +6213,128 @@ def _check_identity_drift(memory_state: list) -> dict:
     }
 
 
+def _check_consensus_collapse(memory_state: list) -> dict:
+    """Detect silent consensus collapse — amplification mistaken for corroboration."""
+    import re as _re
+    _flags = []
+    _risk = 0.0
+
+    _entries = []
+    for e in memory_state:
+        if isinstance(e, dict):
+            _entries.append(e)
+        else:
+            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
+                "type": getattr(e, "type", "semantic"), "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
+                "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
+                "downstream_count": getattr(e, "downstream_count", 0)})
+
+    n = len(_entries)
+    if n < 3:
+        return {"consensus_collapse": "CLEAN", "consensus_collapse_flags": [],
+                "collapse_ratio": 0.0, "independent_root_estimate": n}
+
+    # Extract key tokens for similarity (simple: 3+ char words, lowered)
+    def _key_tokens(text):
+        return set(w for w in text.lower().split() if len(w) >= 4)
+
+    all_tokens = [_key_tokens(e.get("content", "")) for e in _entries]
+
+    # PATTERN 1 — Collapse Ratio
+    # Group similar entries (Jaccard > 0.2 with any other entry)
+    _similar_groups = set()
+    for i in range(n):
+        for j in range(i + 1, n):
+            if not all_tokens[i] or not all_tokens[j]:
+                continue
+            intersection = len(all_tokens[i] & all_tokens[j])
+            union = len(all_tokens[i] | all_tokens[j])
+            if union > 0 and intersection / union > 0.2:
+                _similar_groups.add(i)
+                _similar_groups.add(j)
+
+    n_similar = max(len(_similar_groups), 1)
+
+    # Count independent roots: entries with unique (source_trust, downstream_count) pairs
+    _signatures = set()
+    for e in _entries:
+        _signatures.add((round(e.get("source_trust", 0), 2), e.get("downstream_count", 0)))
+    independent_roots = max(len(_signatures), 1)
+
+    collapse_ratio = round(n_similar / independent_roots, 2) if independent_roots > 0 else 0.0
+
+    if collapse_ratio >= 5.0:
+        _flags.append("collapse_ratio:manipulated")
+        _risk = max(_risk, 1.0)
+    elif collapse_ratio >= 3.0:
+        _flags.append("collapse_ratio:suspicious")
+        _risk = max(_risk, 0.6)
+
+    # PATTERN 2 — Uncertainty hardening (hedge marker decay)
+    _hedge_words = {"likely", "appears", "possibly", "probably", "may", "might",
+                    "seems", "approximately", "estimated", "reportedly", "allegedly", "assumed"}
+
+    sorted_entries = sorted(_entries, key=lambda e: e.get("downstream_count", 0))
+    hedge_present = []
+    for e in sorted_entries:
+        words = set(e.get("content", "").lower().split())
+        hedge_present.append(bool(words & _hedge_words))
+
+    if n >= 3 and any(hedge_present[:n//2 + 1]) and not any(hedge_present[n//2 + 1:]):
+        # Early entries have hedges, later entries don't
+        _flags.append("uncertainty_hardening:suspicious")
+        _risk = max(_risk, 0.5)
+
+    # Also: no hedges anywhere + strong claims + high downstream
+    if not any(hedge_present):
+        max_ds = max(e.get("downstream_count", 0) for e in _entries)
+        if max_ds > 8 and n_similar >= 3:
+            _flags.append("hedge_absent_high_propagation:suspicious")
+            _risk = max(_risk, 0.4)
+
+    # PATTERN 3 — Self-reinforcing consensus ("too clean")
+    _all_low_conflict = all(e.get("source_conflict", 0) < 0.05 for e in _entries)
+    _all_high_trust = all(e.get("source_trust", 0) > 0.85 for e in _entries)
+    _all_propagated = all(e.get("downstream_count", 0) > 5 for e in _entries)
+    _max_ds_all = max(e.get("downstream_count", 0) for e in _entries)
+
+    if _all_low_conflict and _all_high_trust and _all_propagated and n_similar >= 3:
+        if _max_ds_all > 15:
+            _flags.append("self_reinforcing:manipulated")
+            _risk = max(_risk, 1.0)
+        else:
+            _flags.append("self_reinforcing:suspicious")
+            _risk = max(_risk, 0.5)
+
+    # PATTERN 4 — Confidence recycling loop
+    _recycling_pats = _re.compile(
+        r'\b(confirmed|validated|verified|approved|already reviewed|previously confirmed|on file|prior review|consensus reached)\b',
+        _re.IGNORECASE)
+    for entry in _entries:
+        content = entry.get("content", "")
+        conflict = entry.get("source_conflict", 0)
+        ds = entry.get("downstream_count", 0)
+        if _recycling_pats.search(content) and conflict < 0.03 and ds > 6:
+            _flags.append("confidence_recycling:suspicious")
+            _risk = max(_risk, 0.5)
+            break  # One detection suffices
+
+    # Determine collapse level
+    if any("manipulated" in f for f in _flags):
+        _collapse = "MANIPULATED"
+    elif _flags:
+        _collapse = "SUSPICIOUS"
+    else:
+        _collapse = "CLEAN"
+
+    return {
+        "consensus_collapse": _collapse,
+        "consensus_collapse_flags": _flags,
+        "collapse_ratio": collapse_ratio,
+        "independent_root_estimate": independent_roots,
+    }
+
+
 def _check_rate_limit(key_record: dict, allow_demo: bool = False):
     """Shared rate limit check for all mutating endpoints."""
     if key_record.get("demo") and not allow_demo:
@@ -7356,6 +7478,25 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         response["identity_drift"] = "CLEAN"
         response["identity_drift_flags"] = []
+
+    # Consensus collapse check (fields only — override applied post-reconciliation)
+    try:
+        _cc_check = _check_consensus_collapse(req.memory_state)
+        response["consensus_collapse"] = _cc_check["consensus_collapse"]
+        response["consensus_collapse_flags"] = _cc_check["consensus_collapse_flags"]
+        response["collapse_ratio"] = _cc_check["collapse_ratio"]
+        if _cc_check["consensus_collapse"] in ("MANIPULATED", "SUSPICIOUS"):
+            repair_plan_out.append({
+                "action": "VERIFY_CONSENSUS", "entry_id": "*",
+                "reason": "Verify that supporting memories have independent source origins before treating consensus as corroboration.",
+                "priority": "critical" if _cc_check["consensus_collapse"] == "MANIPULATED" else "high",
+                "projected_improvement": 0,
+                "success_probability": 1.0 if _cc_check["consensus_collapse"] == "MANIPULATED" else 0.8,
+            })
+    except Exception:
+        response["consensus_collapse"] = "CLEAN"
+        response["consensus_collapse_flags"] = []
+        response["collapse_ratio"] = 0.0
 
     # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
     if outcome_id in _outcomes:
@@ -9539,6 +9680,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _id_cur in _id_sev_map:
             response["recommended_action"] = _id_sev_map[_id_cur]
 
+    # Consensus collapse override — AFTER all reconciliation, cannot be overridden
+    _cc_collapse = response.get("consensus_collapse", "CLEAN")
+    if _cc_collapse == "MANIPULATED":
+        response["recommended_action"] = "BLOCK"
+    elif _cc_collapse == "SUSPICIOUS":
+        _cc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
+        _cc_cur = response["recommended_action"]
+        if _cc_cur in _cc_sev_map:
+            response["recommended_action"] = _cc_sev_map[_cc_cur]
+
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
         response["boundary_decision"] = True
@@ -9580,7 +9731,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "decision_stable", "hysteresis_band", "stability_window",
                          "boundary_decision", "forecast_integrated", "forecast_warning",
                          "timestamp_integrity", "timestamp_flags",
-                         "identity_drift", "identity_drift_flags"}
+                         "identity_drift", "identity_drift_flags",
+                         "consensus_collapse", "consensus_collapse_flags", "collapse_ratio"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
