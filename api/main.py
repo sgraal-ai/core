@@ -6107,6 +6107,112 @@ def _check_timestamp_integrity(memory_state: list) -> dict:
     }
 
 
+def _check_identity_drift(memory_state: list) -> dict:
+    """Detect identity drift attacks — gradual authority expansion across hops."""
+    import re as _re
+    _flags = []
+    _risk = 0.0
+
+    _entries = []
+    for e in memory_state:
+        if isinstance(e, dict):
+            _entries.append(e)
+        else:
+            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
+                "type": getattr(e, "type", "semantic"), "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
+                "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
+                "downstream_count": getattr(e, "downstream_count", 0)})
+
+    _identity_types = {"identity", "role", "semantic"}
+
+    # PATTERN 1 — Authority expansion keywords
+    _escalation_markers = [
+        r'\b(expanded authority|also authorized|now permitted|elevated to)\b',
+        r'\b(acting as|promoted|override available|standing authority)\b',
+        r'\b(previously confirmed|already approved|trusted execution)\b',
+        r'\b(authorized to execute|full access|unrestricted)\b',
+    ]
+    _escalation_pats = [_re.compile(p, _re.IGNORECASE) for p in _escalation_markers]
+
+    _subject_rebind_pats = [
+        _re.compile(r'\b(workspace owner|organization|cross-tenant|all users|the account|the platform)\b', _re.IGNORECASE),
+    ]
+    _confirmation_erosion_pats = [
+        _re.compile(r'\b(usually confirmed|previously confirmed|workflow approved|assumed confirmed|auto-approved)\b', _re.IGNORECASE),
+    ]
+
+    for entry in _entries:
+        if entry.get("type", "semantic") not in _identity_types:
+            continue
+        content = entry.get("content", "")
+        esc_count = sum(1 for pat in _escalation_pats if pat.search(content))
+        if esc_count >= 2:
+            _flags.append("authority_expansion:manipulated")
+            _risk = max(_risk, 1.0)
+        elif esc_count == 1:
+            _flags.append("authority_expansion:suspicious")
+            _risk = max(_risk, 0.5)
+
+        if any(pat.search(content) for pat in _subject_rebind_pats):
+            _flags.append("subject_rebinding:manipulated")
+            _risk = max(_risk, 1.0)
+
+        if any(pat.search(content) for pat in _confirmation_erosion_pats):
+            _flags.append("confirmation_erosion:suspicious")
+            _risk = max(_risk, 0.5)
+
+    # PATTERN 2 — Permission lattice violation
+    _perm_levels = {"read_only": 0, "read-only": 0, "annotate": 1, "recommend": 2,
+                    "modify": 3, "approve": 4, "execute": 5, "admin": 6}
+    _action_severity = {"informational": 0, "reversible": 3, "irreversible": 5, "destructive": 6}
+    for entry in _entries:
+        content = entry.get("content", "").lower()
+        for perm, level in _perm_levels.items():
+            if perm in content and level <= 1:  # Claims low permission
+                # Check if any entry has high-severity action signals
+                if any(kw in content for kw in ("execute", "approve", "delete", "transfer", "admin")):
+                    _flags.append("permission_lattice_violation:suspicious")
+                    _risk = max(_risk, 0.6)
+                    break
+
+    # PATTERN 3 — Path drift accumulation
+    _id_entries = [e for e in _entries if e.get("type", "semantic") in _identity_types]
+    if len(_id_entries) >= 3:
+        ds_vals = [e.get("downstream_count", 0) for e in _id_entries]
+        _increasing = all(ds_vals[i] < ds_vals[i+1] for i in range(len(ds_vals)-1))
+        _has_escalation = any("authority_expansion" in f for f in _flags)
+        if _increasing and _has_escalation:
+            _flags.append("path_drift_accumulation:manipulated")
+            _risk = max(_risk, 1.0)
+
+    # PATTERN 4 — Time-bounded authority replay
+    _time_bound_pats = [
+        _re.compile(r'\b(temporary|emergency|30 minutes|this session|incident|override|valid until|expires)\b', _re.IGNORECASE),
+    ]
+    for entry in _entries:
+        if entry.get("type", "semantic") not in _identity_types:
+            continue
+        content = entry.get("content", "")
+        age = entry.get("timestamp_age_days", 0)
+        if age > 0.5 and any(pat.search(content) for pat in _time_bound_pats):
+            _flags.append("time_bounded_replay:suspicious")
+            _risk = max(_risk, 0.5)
+
+    # Determine drift level
+    if any("manipulated" in f for f in _flags):
+        _drift = "MANIPULATED"
+    elif _flags:
+        _drift = "SUSPICIOUS"
+    else:
+        _drift = "CLEAN"
+
+    return {
+        "identity_drift": _drift,
+        "identity_drift_flags": _flags,
+        "authority_expansion_score": round(_risk, 2),
+    }
+
+
 def _check_rate_limit(key_record: dict, allow_demo: bool = False):
     """Shared rate limit check for all mutating endpoints."""
     if key_record.get("demo") and not allow_demo:
@@ -7233,6 +7339,23 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         response["timestamp_integrity"] = "VALID"
         response["timestamp_flags"] = []
+
+    # Identity drift check (fields only — override applied post-reconciliation)
+    try:
+        _id_check = _check_identity_drift(req.memory_state)
+        response["identity_drift"] = _id_check["identity_drift"]
+        response["identity_drift_flags"] = _id_check["identity_drift_flags"]
+        if _id_check["identity_drift"] in ("MANIPULATED", "SUSPICIOUS"):
+            repair_plan_out.append({
+                "action": "VERIFY_IDENTITY", "entry_id": "*",
+                "reason": "Verify agent identity against original signed grant before permitting this action.",
+                "priority": "critical" if _id_check["identity_drift"] == "MANIPULATED" else "high",
+                "projected_improvement": 0,
+                "success_probability": 1.0 if _id_check["identity_drift"] == "MANIPULATED" else 0.8,
+            })
+    except Exception:
+        response["identity_drift"] = "CLEAN"
+        response["identity_drift_flags"] = []
 
     # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
     if outcome_id in _outcomes:
@@ -9406,6 +9529,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _ts_cur in _ts_sev_map:
             response["recommended_action"] = _ts_sev_map[_ts_cur]
 
+    # Identity drift override — AFTER all reconciliation, cannot be overridden
+    _id_drift = response.get("identity_drift", "CLEAN")
+    if _id_drift == "MANIPULATED":
+        response["recommended_action"] = "BLOCK"
+    elif _id_drift == "SUSPICIOUS":
+        _id_sev_map = {"USE_MEMORY": "WARN", "WARN": "BLOCK", "ASK_USER": "BLOCK"}
+        _id_cur = response["recommended_action"]
+        if _id_cur in _id_sev_map:
+            response["recommended_action"] = _id_sev_map[_id_cur]
+
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
         response["boundary_decision"] = True
@@ -9446,7 +9579,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "hysteresis_applied", "input_hash", "deterministic", "reproducible", "proof_version",
                          "decision_stable", "hysteresis_band", "stability_window",
                          "boundary_decision", "forecast_integrated", "forecast_warning",
-                         "timestamp_integrity", "timestamp_flags"}
+                         "timestamp_integrity", "timestamp_flags",
+                         "identity_drift", "identity_drift_flags"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
