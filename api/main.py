@@ -1555,19 +1555,25 @@ def generate_api_key(req: GenerateKeyRequest, key_record: dict = Depends(verify_
     now = datetime.now(timezone.utc).isoformat()
     _dev_keys[key_hash] = {"name": req.name, "hash": key_hash, "active": True, "created_at": now}
     # Store in Supabase if available
+    _gen_tier = key_record.get("tier", "free")
+    _gen_customer_id = key_record.get("customer_id", f"gen_{key_hash[:12]}")
     if supabase_service_client:
         try:
             email = key_record.get("email", "")
-            customer_id = key_record.get("customer_id", f"gen_{key_hash[:12]}")
             supabase_service_client.table("api_keys").insert({
                 "key_hash": key_hash,
-                "customer_id": customer_id,
+                "customer_id": _gen_customer_id,
                 "email": email,
-                "tier": key_record.get("tier", "free"),
+                "tier": _gen_tier,
                 "calls_this_month": 0,
             }).execute()
         except Exception:
             pass
+    # Prime Redis cache so the key is immediately usable without Supabase round-trip
+    try:
+        redis_set(f"api_key_valid:{key_hash[:16]}", {"valid": True, "user_id": _gen_customer_id, "plan": _gen_tier}, ttl=300)
+    except Exception:
+        pass
     trunc = new_key[:12] + "..." + new_key[-4:]
     return {"api_key": new_key, "key_truncated": trunc, "name": req.name, "id": key_hash[:16], "created": now}
 
@@ -5566,6 +5572,12 @@ def signup(req: SignupRequest):
         "tier": "free",
     }).execute()
 
+    # 4b. Prime Redis cache for immediate usability
+    try:
+        redis_set(f"api_key_valid:{key_hash[:16]}", {"valid": True, "user_id": customer.id, "plan": "free"}, ttl=300)
+    except Exception:
+        pass
+
     # 5. Return plaintext key (only time it's shown)
     return {
         "api_key": api_key,
@@ -5634,30 +5646,38 @@ def _add_resend_contact(email: str) -> None:
 
 
 def _send_api_key_email(email: str, api_key: str) -> None:
-    """Send API key via Resend. Fails silently if Resend not configured or errors."""
+    """Send API key via Resend HTTP API. Logs errors instead of silently swallowing."""
     if not resend.api_key:
+        logger.warning("[RESEND] Cannot send API key email — RESEND_API_KEY not set")
         return
     token = _generate_unsubscribe_token(email)
     unsub_url = f"https://api.sgraal.com/unsubscribe?email={email}&token={token}"
     try:
-        resend.Emails.send({
-            "from": "Sgraal <hello@sgraal.com>",
-            "to": [email],
-            "subject": "Your Sgraal API key",
-            "text": (
-                f"Your Sgraal API key: {api_key}\n\n"
-                "Keep this safe — it won't be shown again.\n\n"
-                "Get started: https://sgraal.com/docs\n"
-                "Dashboard: https://app.sgraal.com\n\n"
-                "Free tier: 10,000 decisions/month.\n"
-                "Upgrade: https://sgraal.com/pricing\n\n"
-                "---\n"
-                "You can unsubscribe from product updates at any time:\n"
-                f"{unsub_url}"
-            ),
-        })
-    except Exception:
-        pass
+        r = http_requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {resend.api_key}", "Content-Type": "application/json"},
+            json={
+                "from": "Sgraal <hello@sgraal.com>",
+                "to": [email],
+                "subject": "Your Sgraal API key",
+                "text": (
+                    f"Your Sgraal API key: {api_key}\n\n"
+                    "Keep this safe — it won't be shown again.\n\n"
+                    "Get started: https://sgraal.com/docs\n"
+                    "Dashboard: https://app.sgraal.com\n\n"
+                    "Free tier: 10,000 decisions/month.\n"
+                    "Upgrade: https://sgraal.com/pricing\n\n"
+                    "---\n"
+                    "You can unsubscribe from product updates at any time:\n"
+                    f"{unsub_url}"
+                ),
+            },
+            timeout=10,
+        )
+        if not r.ok:
+            logger.error("[RESEND] Email send failed: %s %s", r.status_code, r.text)
+    except Exception as e:
+        logger.error("[RESEND] Email send error: %s", e)
 
 
 @app.post("/v1/auth/register")
@@ -5682,19 +5702,33 @@ def auth_register(req: RegisterRequest, request: Request):
         supabase_service_client.table("api_keys").update({
             "key_hash": new_hash,
         }).eq("email", req.email).execute()
+        # Invalidate old Redis cache + prime new key
+        old_hash = existing.data[0].get("key_hash", "")
+        if old_hash:
+            try: redis_delete(f"api_key_valid:{old_hash[:16]}")
+            except Exception: pass
+        try: redis_set(f"api_key_valid:{new_hash[:16]}", {"valid": True, "user_id": existing.data[0].get("customer_id", ""), "plan": "free"}, ttl=300)
+        except Exception: pass
         _send_api_key_email(req.email, new_key)
         return {"success": True, "message": "API key sent to your email"}
 
     # 4. Generate new key and store
     api_key = _generate_api_key()
     key_hash = _hash_key(api_key)
+    _reg_customer_id = f"email_reg_{hashlib.sha256(req.email.encode()).hexdigest()[:12]}"
     supabase_service_client.table("api_keys").insert({
         "key_hash": key_hash,
-        "customer_id": f"email_reg_{hashlib.sha256(req.email.encode()).hexdigest()[:12]}",
+        "customer_id": _reg_customer_id,
         "email": req.email,
         "tier": "free",
         "calls_this_month": 0,
     }).execute()
+
+    # 4b. Prime Redis cache for immediate usability
+    try:
+        redis_set(f"api_key_valid:{key_hash[:16]}", {"valid": True, "user_id": _reg_customer_id, "plan": "free"}, ttl=300)
+    except Exception:
+        pass
 
     # 5. Add to Resend audience + send email
     _add_resend_contact(req.email)
