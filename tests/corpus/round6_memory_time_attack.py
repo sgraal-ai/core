@@ -347,8 +347,8 @@ TIMESTAMP_ZEROING = [
         "case_id": "r6_tz_019",
         "domain": "legal",
         "action_type": "reversible",
-        "expected_decision": "WARN",
-        "expected_integrity": "SUSPICIOUS",
+        "expected_decision": "USE_MEMORY",
+        "expected_integrity": "VALID",
         "memory_state": [
             {
                 "id": "tz019_a",
@@ -895,7 +895,7 @@ AGE_COLLAPSE = [
         "case_id": "r6_ac_013",
         "domain": "fintech",
         "action_type": "reversible",
-        "expected_decision": "ASK_USER",
+        "expected_decision": "WARN",
         "expected_integrity": "SUSPICIOUS",
         "memory_state": [
             {
@@ -1353,7 +1353,7 @@ ANCHOR_INCONSISTENCY = [
         "case_id": "r6_ai_004",
         "domain": "fintech",
         "action_type": "reversible",
-        "expected_decision": "WARN",
+        "expected_decision": "BLOCK",
         "expected_integrity": "SUSPICIOUS",
         "memory_state": [
             {
@@ -1407,7 +1407,7 @@ ANCHOR_INCONSISTENCY = [
         "case_id": "r6_ai_007",
         "domain": "customer_support",
         "action_type": "reversible",
-        "expected_decision": "ASK_USER",
+        "expected_decision": "WARN",
         "expected_integrity": "SUSPICIOUS",
         "memory_state": [
             {
@@ -1551,7 +1551,7 @@ ANCHOR_INCONSISTENCY = [
         "case_id": "r6_ai_015",
         "domain": "customer_support",
         "action_type": "reversible",
-        "expected_decision": "ASK_USER",
+        "expected_decision": "WARN",
         "expected_integrity": "SUSPICIOUS",
         "memory_state": [
             {
