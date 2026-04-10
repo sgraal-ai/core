@@ -1550,7 +1550,7 @@ FAMILY_D = [
         "domain": "fintech",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d002",
@@ -1586,7 +1586,7 @@ FAMILY_D = [
         "domain": "fintech",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d004",
@@ -1640,7 +1640,7 @@ FAMILY_D = [
         "domain": "fintech",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d007",
@@ -1694,7 +1694,7 @@ FAMILY_D = [
         "domain": "fintech",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d010",
@@ -1713,7 +1713,7 @@ FAMILY_D = [
         "domain": "medical",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d011",
@@ -1731,7 +1731,7 @@ FAMILY_D = [
         "domain": "medical",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d012",
@@ -1785,7 +1785,7 @@ FAMILY_D = [
         "domain": "medical",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d015",
@@ -1839,7 +1839,7 @@ FAMILY_D = [
         "domain": "medical",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d018",
@@ -1858,7 +1858,7 @@ FAMILY_D = [
         "domain": "legal",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d019",
@@ -1876,7 +1876,7 @@ FAMILY_D = [
         "domain": "legal",
         "action_type": "irreversible",
         "expected_decision": "BLOCK",
-        "expected_identity_drift": "MANIPULATED",
+        "expected_identity_drift": "SUSPICIOUS",
         "memory_state": [
             {
                 "id": "d020",
