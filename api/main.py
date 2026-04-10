@@ -178,6 +178,8 @@ class MemoryEntryRequest(BaseModel):
     verified_at: Optional[str] = None     # ISO timestamp of last human verification
     tags: Optional[list[str]] = None
     importance: Optional[float] = None    # 0-1
+    # MemCube v3 optional fields
+    provenance_chain: Optional[list[str]] = None  # ordered list of agent_ids that touched this entry
 
 class StepRequest(BaseModel):
     step_id: str
@@ -430,6 +432,25 @@ def delete_vaccine(signature_id: str, key_record: dict = Depends(verify_api_key)
     """Remove a vaccine signature."""
     redis_delete(f"vaccine:{signature_id}")
     return {"deleted": signature_id}
+
+
+@app.get("/v1/compromised-agents")
+def list_compromised_agents(key_record: dict = Depends(verify_api_key)):
+    """List currently flagged compromised agent_ids."""
+    agents = redis_get("compromised_agents", [])
+    if not isinstance(agents, list):
+        agents = []
+    return {"count": len(agents), "agents": agents}
+
+
+@app.delete("/v1/compromised-agents/{agent_id}")
+def remove_compromised_agent(agent_id: str, key_record: dict = Depends(verify_api_key)):
+    """Remove an agent from the compromised set."""
+    agents = redis_get("compromised_agents", [])
+    if isinstance(agents, list) and agent_id in agents:
+        agents.remove(agent_id)
+        redis_set("compromised_agents", agents, ttl=604800)
+    return {"removed": agent_id}
 
 
 @app.get("/docs/postman")
@@ -6359,6 +6380,63 @@ def _check_consensus_collapse(memory_state: list) -> dict:
     }
 
 
+def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rget=None) -> dict:
+    """Detect provenance chain attacks — circular refs, length mismatches, compromised agents."""
+    _entries = []
+    for e in memory_state:
+        if isinstance(e, dict):
+            _entries.append(e)
+        else:
+            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
+                "downstream_count": getattr(e, "downstream_count", 0),
+                "provenance_chain": getattr(e, "provenance_chain", None) or []})
+
+    _flags = []
+    _chains = [e.get("provenance_chain") or [] for e in _entries]
+    _has_chains = any(len(c) > 0 for c in _chains)
+    _max_depth = max((len(c) for c in _chains), default=0)
+
+    if not _has_chains:
+        return {"provenance_chain_integrity": "CLEAN", "provenance_chain_flags": [], "chain_depth": 0}
+
+    # PATTERN 1 — Chain length vs downstream mismatch
+    for i, e in enumerate(_entries):
+        chain = _chains[i]
+        if len(chain) > 0 and len(chain) < 2 and e.get("downstream_count", 0) > 8:
+            _flags.append("chain_length_mismatch:suspicious")
+            break
+
+    # PATTERN 2 — Circular reference
+    for chain in _chains:
+        if len(chain) != len(set(chain)):
+            _flags.append("circular_reference:manipulated")
+            break
+
+    # PATTERN 3 — Known compromised agents
+    if redis_enabled and rget:
+        _compromised = rget("compromised_agents", [])
+        if isinstance(_compromised, list) and _compromised:
+            _compromised_set = set(_compromised)
+            for chain in _chains:
+                if _compromised_set & set(chain):
+                    _flags.append("compromised_agent:manipulated")
+                    break
+
+    # PATTERN 4 — Chain growth anomaly (identical chains)
+    _nonempty = [tuple(c) for c in _chains if len(c) > 0]
+    if len(_nonempty) >= 3 and len(set(_nonempty)) == 1:
+        _flags.append("identical_chains:suspicious")
+
+    if any("manipulated" in f for f in _flags):
+        _integrity = "MANIPULATED"
+    elif _flags:
+        _integrity = "SUSPICIOUS"
+    else:
+        _integrity = "CLEAN"
+
+    return {"provenance_chain_integrity": _integrity, "provenance_chain_flags": _flags, "chain_depth": _max_depth}
+
+
 def _check_naturalness(memory_state: list) -> dict:
     """Detect synthetic/fabricated memory states via statistical naturalness signals."""
     _entries = []
@@ -6458,16 +6536,18 @@ def _extract_attack_signature(memory_state: list, detection_results: dict, domai
     }
 
 
-def _compute_attack_surface_score(ts_result: dict, id_result: dict, cc_result: dict) -> dict:
-    """Compute compound attack surface score from three detection layers."""
+def _compute_attack_surface_score(ts_result: dict, id_result: dict, cc_result: dict, pc_result: dict = None) -> dict:
+    """Compute compound attack surface score from detection layers."""
     _RISK = {"CLEAN": 0.0, "VALID": 0.0, "SUSPICIOUS": 0.5, "MANIPULATED": 1.0}
+    _pc_risk = _RISK.get((pc_result or {}).get("provenance_chain_integrity", "CLEAN"), 0.0)
     risks = sorted([
         _RISK.get(ts_result.get("timestamp_integrity", "VALID"), 0.0),
         _RISK.get(id_result.get("identity_drift", "CLEAN"), 0.0),
         _RISK.get(cc_result.get("consensus_collapse", "CLEAN"), 0.0),
+        _pc_risk,
     ], reverse=True)
 
-    score = round(risks[0] + 0.3 * risks[1] + 0.1 * risks[2], 2)
+    score = round(risks[0] + 0.3 * risks[1] + 0.1 * risks[2] + 0.05 * risks[3], 2)
 
     if score == 0.0:
         level = "NONE"
@@ -6487,6 +6567,8 @@ def _compute_attack_surface_score(ts_result: dict, id_result: dict, cc_result: d
         active.append("identity_drift")
     if _RISK.get(cc_result.get("consensus_collapse", "CLEAN"), 0.0) > 0:
         active.append("consensus_collapse")
+    if _pc_risk > 0:
+        active.append("provenance_chain")
 
     return {"attack_surface_score": score, "attack_surface_level": level, "active_detection_layers": active}
 
@@ -7654,12 +7736,32 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["consensus_collapse_flags"] = []
         response["collapse_ratio"] = 0.0
 
+    # Provenance chain check
+    try:
+        _pc_check = _check_provenance_chain(req.memory_state, _redis_enabled, _rget)
+        response["provenance_chain_integrity"] = _pc_check["provenance_chain_integrity"]
+        response["provenance_chain_flags"] = _pc_check["provenance_chain_flags"]
+        response["chain_depth"] = _pc_check["chain_depth"]
+        if _pc_check["provenance_chain_integrity"] in ("MANIPULATED", "SUSPICIOUS"):
+            repair_plan_out.append({
+                "action": "VERIFY_PROVENANCE", "entry_id": "*",
+                "reason": "Verify provenance chain integrity — memory may have been tampered with in transit.",
+                "priority": "critical" if _pc_check["provenance_chain_integrity"] == "MANIPULATED" else "high",
+                "projected_improvement": 0,
+                "success_probability": 1.0 if _pc_check["provenance_chain_integrity"] == "MANIPULATED" else 0.8,
+            })
+    except Exception:
+        response["provenance_chain_integrity"] = "CLEAN"
+        response["provenance_chain_flags"] = []
+        response["chain_depth"] = 0
+
     # Compound attack surface score
     try:
         _as_ts = {"timestamp_integrity": response.get("timestamp_integrity", "VALID")}
         _as_id = {"identity_drift": response.get("identity_drift", "CLEAN")}
         _as_cc = {"consensus_collapse": response.get("consensus_collapse", "CLEAN")}
-        _as_result = _compute_attack_surface_score(_as_ts, _as_id, _as_cc)
+        _as_pc = {"provenance_chain_integrity": response.get("provenance_chain_integrity", "CLEAN")}
+        _as_result = _compute_attack_surface_score(_as_ts, _as_id, _as_cc, _as_pc)
         response["attack_surface_score"] = _as_result["attack_surface_score"]
         response["attack_surface_level"] = _as_result["attack_surface_level"]
         response["active_detection_layers"] = _as_result["active_detection_layers"]
@@ -7735,6 +7837,31 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     http_requests.post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key}/{_urlp.quote(_sig['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                     http_requests.post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                     http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key}/2592000", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+        except Exception:
+            pass
+
+    # Compromised agent registry — add agents from provenance chains on MANIPULATED BLOCK
+    if _redis_enabled and response.get("recommended_action") == "BLOCK":
+        try:
+            _any_manip = (
+                response.get("timestamp_integrity") == "MANIPULATED" or
+                response.get("identity_drift") == "MANIPULATED" or
+                response.get("consensus_collapse") == "MANIPULATED" or
+                response.get("provenance_chain_integrity") == "MANIPULATED"
+            )
+            if _any_manip:
+                _comp_agents = _rget("compromised_agents", [])
+                if not isinstance(_comp_agents, list):
+                    _comp_agents = []
+                _added = False
+                for e in entries:
+                    chain = getattr(e, "provenance_chain", None) or []
+                    for aid in chain:
+                        if aid and aid not in _comp_agents:
+                            _comp_agents.append(aid)
+                            _added = True
+                if _added:
+                    redis_set("compromised_agents", _comp_agents[:500], ttl=604800)
         except Exception:
             pass
 
@@ -9930,6 +10057,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _cc_cur in _cc_sev_map:
             response["recommended_action"] = _cc_sev_map[_cc_cur]
 
+    # Provenance chain override — AFTER all reconciliation, cannot be overridden
+    _pc_integrity = response.get("provenance_chain_integrity", "CLEAN")
+    if _pc_integrity == "MANIPULATED":
+        response["recommended_action"] = "BLOCK"
+    elif _pc_integrity == "SUSPICIOUS":
+        _pc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
+        _pc_cur = response["recommended_action"]
+        if _pc_cur in _pc_sev_map:
+            response["recommended_action"] = _pc_sev_map[_pc_cur]
+
     # Naturalness override — FABRICATED escalates one tier
     _nat_level = response.get("naturalness_level", "ORGANIC")
     if _nat_level == "FABRICATED":
@@ -10008,7 +10145,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "attack_surface_score", "attack_surface_level", "active_detection_layers",
                          "detection_feedback_applied",
                          "naturalness_score", "naturalness_level", "naturalness_flags",
-                         "vaccination_match", "matched_signature_id"}
+                         "vaccination_match", "matched_signature_id",
+                         "provenance_chain_integrity", "provenance_chain_flags", "chain_depth"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
