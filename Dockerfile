@@ -5,8 +5,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY scoring_engine/ scoring_engine/
-COPY api/ api/
 COPY tests/ tests/
+COPY api/ api/
 
 ENV PYTHONPATH=/app
 EXPOSE 8000

@@ -227,9 +227,24 @@ def load_corpus_cases(corpus_name: str) -> list:
     """Load corpus cases by name."""
     import sys as _sys
     import importlib as _il
+    import logging
+    _log = logging.getLogger(__name__)
+
+    # Resolve paths — works both locally and in Docker (/app)
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     corpus_dir = os.path.join(repo_root, "tests", "corpus")
     tests_dir = os.path.join(repo_root, "tests")
+
+    # Fallback: if running from /app with PYTHONPATH=/app
+    if not os.path.isdir(tests_dir):
+        for candidate in ["/app/tests", os.path.join(os.getcwd(), "tests")]:
+            if os.path.isdir(candidate):
+                tests_dir = candidate
+                corpus_dir = os.path.join(candidate, "corpus")
+                break
+
+    _log.info("calibration: repo_root=%s tests_dir=%s corpus_dir=%s exists=%s",
+              repo_root, tests_dir, corpus_dir, os.path.isdir(corpus_dir))
     if corpus_dir not in _sys.path:
         _sys.path.insert(0, corpus_dir)
     cases = []
@@ -244,7 +259,10 @@ def load_corpus_cases(corpus_name: str) -> list:
     ]
     for round_name, filename, layout in _JSONL_CORPORA:
         if corpus_name in (round_name, "all"):
-            cases.extend(_load_jsonl_corpus(os.path.join(tests_dir, filename), layout))
+            fpath = os.path.join(tests_dir, filename)
+            loaded = _load_jsonl_corpus(fpath, layout)
+            _log.info("calibration: %s → %s (found=%s, cases=%d)", round_name, fpath, os.path.isfile(fpath), len(loaded))
+            cases.extend(loaded)
 
     # Rounds 6-8: Python modules in tests/corpus/
     if corpus_name in ("round6", "all"):
