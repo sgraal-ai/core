@@ -6126,13 +6126,12 @@ def _check_identity_drift(memory_state: list) -> dict:
     _identity_types = {"identity", "role", "semantic"}
 
     # PATTERN 1 — Authority expansion keywords
-    _escalation_markers = [
-        r'\b(expanded authority|also authorized|now permitted|elevated to)\b',
-        r'\b(acting as|promoted|override available|standing authority)\b',
-        r'\b(previously confirmed|already approved|trusted execution)\b',
-        r'\b(authorized to execute|full access|unrestricted)\b',
+    _escalation_keywords = [
+        "expanded authority", "also authorized", "now permitted", "elevated to",
+        "acting as", "promoted", "override available", "standing authority",
+        "previously confirmed", "already approved", "trusted execution",
+        "authorized to execute", "full access", "unrestricted",
     ]
-    _escalation_pats = [_re.compile(p, _re.IGNORECASE) for p in _escalation_markers]
 
     _subject_rebind_pats = [
         _re.compile(r'\b(workspace owner|organization|cross-tenant|all users|the account|the platform)\b', _re.IGNORECASE),
@@ -6145,7 +6144,8 @@ def _check_identity_drift(memory_state: list) -> dict:
         if entry.get("type", "semantic") not in _identity_types:
             continue
         content = entry.get("content", "")
-        esc_count = sum(1 for pat in _escalation_pats if pat.search(content))
+        _content_lower = content.lower()
+        esc_count = sum(1 for kw in _escalation_keywords if kw in _content_lower)
         if esc_count >= 2:
             _flags.append("authority_expansion:manipulated")
             _risk = max(_risk, 1.0)
