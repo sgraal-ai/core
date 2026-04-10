@@ -6335,6 +6335,39 @@ def _check_consensus_collapse(memory_state: list) -> dict:
     }
 
 
+def _compute_attack_surface_score(ts_result: dict, id_result: dict, cc_result: dict) -> dict:
+    """Compute compound attack surface score from three detection layers."""
+    _RISK = {"CLEAN": 0.0, "VALID": 0.0, "SUSPICIOUS": 0.5, "MANIPULATED": 1.0}
+    risks = sorted([
+        _RISK.get(ts_result.get("timestamp_integrity", "VALID"), 0.0),
+        _RISK.get(id_result.get("identity_drift", "CLEAN"), 0.0),
+        _RISK.get(cc_result.get("consensus_collapse", "CLEAN"), 0.0),
+    ], reverse=True)
+
+    score = round(risks[0] + 0.3 * risks[1] + 0.1 * risks[2], 2)
+
+    if score == 0.0:
+        level = "NONE"
+    elif score < 0.50:
+        level = "LOW"
+    elif score < 0.70:
+        level = "MODERATE"
+    elif score < 1.00:
+        level = "HIGH"
+    else:
+        level = "CRITICAL"
+
+    active = []
+    if _RISK.get(ts_result.get("timestamp_integrity", "VALID"), 0.0) > 0:
+        active.append("timestamp_integrity")
+    if _RISK.get(id_result.get("identity_drift", "CLEAN"), 0.0) > 0:
+        active.append("identity_drift")
+    if _RISK.get(cc_result.get("consensus_collapse", "CLEAN"), 0.0) > 0:
+        active.append("consensus_collapse")
+
+    return {"attack_surface_score": score, "attack_surface_level": level, "active_detection_layers": active}
+
+
 def _check_rate_limit(key_record: dict, allow_demo: bool = False):
     """Shared rate limit check for all mutating endpoints."""
     if key_record.get("demo") and not allow_demo:
@@ -7497,6 +7530,26 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["consensus_collapse"] = "CLEAN"
         response["consensus_collapse_flags"] = []
         response["collapse_ratio"] = 0.0
+
+    # Compound attack surface score
+    try:
+        _as_ts = {"timestamp_integrity": response.get("timestamp_integrity", "VALID")}
+        _as_id = {"identity_drift": response.get("identity_drift", "CLEAN")}
+        _as_cc = {"consensus_collapse": response.get("consensus_collapse", "CLEAN")}
+        _as_result = _compute_attack_surface_score(_as_ts, _as_id, _as_cc)
+        response["attack_surface_score"] = _as_result["attack_surface_score"]
+        response["attack_surface_level"] = _as_result["attack_surface_level"]
+        response["active_detection_layers"] = _as_result["active_detection_layers"]
+        if _as_result["attack_surface_level"] in ("HIGH", "CRITICAL"):
+            repair_plan_out.append({
+                "action": "COMPOUND_ATTACK", "entry_id": "*",
+                "reason": "Multiple attack vectors detected simultaneously. Treat as coordinated attack.",
+                "priority": "critical", "projected_improvement": 0, "success_probability": 1.0,
+            })
+    except Exception:
+        response["attack_surface_score"] = 0.0
+        response["attack_surface_level"] = "NONE"
+        response["active_detection_layers"] = []
 
     # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
     if outcome_id in _outcomes:
@@ -9732,7 +9785,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "boundary_decision", "forecast_integrated", "forecast_warning",
                          "timestamp_integrity", "timestamp_flags",
                          "identity_drift", "identity_drift_flags",
-                         "consensus_collapse", "consensus_collapse_flags", "collapse_ratio"}
+                         "consensus_collapse", "consensus_collapse_flags", "collapse_ratio",
+                         "attack_surface_score", "attack_surface_level", "active_detection_layers"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
