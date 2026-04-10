@@ -408,6 +408,30 @@ def health():
             redis_health = {"status": "down", "latency_ms": None, "keys_count": 0}
     return {"status": "ok", "port": os.environ.get("PORT", "not set"), "redis": redis_health}
 
+
+# ---- Memory Vaccination endpoints ----
+
+@app.get("/v1/vaccines")
+def list_vaccines(domain: str = Query("general"), key_record: dict = Depends(verify_api_key)):
+    """List stored vaccine signatures for a domain."""
+    _vax_idx_key = f"vaccine_index:{domain}"
+    _vax_ids = redis_get(_vax_idx_key, [])
+    vaccines = []
+    if isinstance(_vax_ids, list):
+        for _vid in _vax_ids[:50]:
+            _vax = redis_get(f"vaccine:{_vid}")
+            if _vax and isinstance(_vax, dict):
+                vaccines.append(_vax)
+    return {"domain": domain, "count": len(vaccines), "vaccines": vaccines}
+
+
+@app.delete("/v1/vaccines/{signature_id}")
+def delete_vaccine(signature_id: str, key_record: dict = Depends(verify_api_key)):
+    """Remove a vaccine signature."""
+    redis_delete(f"vaccine:{signature_id}")
+    return {"deleted": signature_id}
+
+
 @app.get("/docs/postman")
 def postman_collection():
     """Download Postman collection for Sgraal API."""
@@ -6335,6 +6359,105 @@ def _check_consensus_collapse(memory_state: list) -> dict:
     }
 
 
+def _check_naturalness(memory_state: list) -> dict:
+    """Detect synthetic/fabricated memory states via statistical naturalness signals."""
+    _entries = []
+    for e in memory_state:
+        if isinstance(e, dict):
+            _entries.append(e)
+        else:
+            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
+                "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
+                "source_trust": getattr(e, "source_trust", 0.5),
+                "source_conflict": getattr(e, "source_conflict", 0),
+                "downstream_count": getattr(e, "downstream_count", 0)})
+
+    _flags = []
+    _score = 1.0
+    n = len(_entries)
+
+    # SIGNAL 1 — Trust variance
+    if n >= 3:
+        trusts = [e.get("source_trust", 0.5) for e in _entries]
+        mean_t = sum(trusts) / n
+        var_t = sum((t - mean_t) ** 2 for t in trusts) / n
+        if var_t < 0.001:
+            _flags.append("uniform_trust")
+            _score -= 0.2
+
+    # SIGNAL 2 — Conflict uniformity
+    if n >= 3:
+        if all(e.get("source_conflict", 0) < 0.02 for e in _entries):
+            _flags.append("zero_conflict")
+            _score -= 0.2
+
+    # SIGNAL 3 — Downstream implausibility
+    for e in _entries:
+        if e.get("downstream_count", 0) > 10 and e.get("timestamp_age_days", 0) < 0.1:
+            _flags.append("downstream_implausible")
+            _score -= 0.2
+            break
+
+    # SIGNAL 4 — Age distribution
+    if n >= 3 and all(e.get("timestamp_age_days", 0) == 0 for e in _entries):
+        _flags.append("all_zero_age")
+        _score -= 0.2
+
+    # SIGNAL 5 — Perfect trust scores
+    if any(e.get("source_trust", 0) == 1.0 for e in _entries):
+        _flags.append("perfect_trust")
+        _score -= 0.2
+
+    _score = round(max(0.0, _score), 2)
+
+    if _score >= 0.8:
+        _level = "ORGANIC"
+    elif _score >= 0.6:
+        _level = "PLAUSIBLE"
+    elif _score >= 0.4:
+        _level = "SYNTHETIC"
+    else:
+        _level = "FABRICATED"
+
+    return {"naturalness_score": _score, "naturalness_level": _level, "naturalness_flags": _flags}
+
+
+def _extract_attack_signature(memory_state: list, detection_results: dict, domain: str) -> dict:
+    """Extract vaccine signature from a blocked attack for fleet-wide immunity."""
+    _entries = []
+    for e in memory_state:
+        if isinstance(e, dict):
+            _entries.append(e)
+        else:
+            _entries.append({"content": getattr(e, "content", ""), "downstream_count": getattr(e, "downstream_count", 0),
+                "source_trust": getattr(e, "source_trust", 0.5)})
+
+    content_hash = hashlib.sha256(_entries[0].get("content", "").encode()).hexdigest()[:16] if _entries else ""
+    max_ds = max((e.get("downstream_count", 0) for e in _entries), default=0)
+    trusts = [e.get("source_trust", 0.5) for e in _entries]
+    mean_t = sum(trusts) / max(len(trusts), 1)
+    var_t = sum((t - mean_t) ** 2 for t in trusts) / max(len(trusts), 1)
+
+    attack_type = "unknown"
+    if detection_results.get("timestamp_integrity") == "MANIPULATED":
+        attack_type = "timestamp_manipulation"
+    elif detection_results.get("identity_drift") == "MANIPULATED":
+        attack_type = "identity_drift"
+    elif detection_results.get("consensus_collapse") == "MANIPULATED":
+        attack_type = "consensus_collapse"
+
+    return {
+        "signature_id": str(uuid.uuid4()),
+        "created_at": _time.time(),
+        "attack_type": attack_type,
+        "content_hash_prefix": content_hash,
+        "downstream_pattern": "high" if max_ds > 10 else "low",
+        "trust_range": "uniform" if var_t < 0.001 else "varied",
+        "domain": domain,
+        "ttl_days": 30,
+    }
+
+
 def _compute_attack_surface_score(ts_result: dict, id_result: dict, cc_result: dict) -> dict:
     """Compute compound attack surface score from three detection layers."""
     _RISK = {"CLEAN": 0.0, "VALID": 0.0, "SUSPICIOUS": 0.5, "MANIPULATED": 1.0}
@@ -7551,7 +7674,69 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["attack_surface_level"] = "NONE"
         response["active_detection_layers"] = []
 
-    # (Detection feedback loop moved to post-module position, before compact profile)
+    # Naturalness score
+    try:
+        _nat_check = _check_naturalness(req.memory_state)
+        response["naturalness_score"] = _nat_check["naturalness_score"]
+        response["naturalness_level"] = _nat_check["naturalness_level"]
+        response["naturalness_flags"] = _nat_check["naturalness_flags"]
+        if _nat_check["naturalness_level"] == "SYNTHETIC":
+            repair_plan_out.append({
+                "action": "VERIFY_NATURALNESS", "entry_id": "*",
+                "reason": "Memory state shows synthetic patterns. Verify entries originate from independent real sources.",
+                "priority": "high", "projected_improvement": 0, "success_probability": 0.8,
+            })
+    except Exception:
+        response["naturalness_score"] = 1.0
+        response["naturalness_level"] = "ORGANIC"
+        response["naturalness_flags"] = []
+
+    # Memory vaccination — check for known attack signatures
+    response["vaccination_match"] = False
+    response["matched_signature_id"] = None
+    if _redis_enabled and len(_entries) > 0:
+        try:
+            _vax_hash = hashlib.sha256(_entries[0].content.encode()).hexdigest()[:16]
+            _vax_idx_key = f"vaccine_index:{req.domain}"
+            _vax_ids = _rget(_vax_idx_key, [])
+            if isinstance(_vax_ids, list):
+                for _vid in _vax_ids[:20]:
+                    _vax = _rget(f"vaccine:{_vid}")
+                    if _vax and isinstance(_vax, dict) and _vax.get("content_hash_prefix") == _vax_hash:
+                        _max_ds = max((e.downstream_count for e in entries), default=0)
+                        _ds_pat = "high" if _max_ds > 10 else "low"
+                        if _vax.get("downstream_pattern") == _ds_pat:
+                            response["vaccination_match"] = True
+                            response["matched_signature_id"] = _vid
+                            break
+        except Exception:
+            pass
+
+    # Memory vaccination — store signature on MANIPULATED BLOCK
+    if _redis_enabled and response.get("recommended_action") == "BLOCK":
+        try:
+            _any_manipulated = (
+                response.get("timestamp_integrity") == "MANIPULATED" or
+                response.get("identity_drift") == "MANIPULATED" or
+                response.get("consensus_collapse") == "MANIPULATED"
+            )
+            if _any_manipulated:
+                _det_results = {
+                    "timestamp_integrity": response.get("timestamp_integrity", "VALID"),
+                    "identity_drift": response.get("identity_drift", "CLEAN"),
+                    "consensus_collapse": response.get("consensus_collapse", "CLEAN"),
+                }
+                _sig = _extract_attack_signature(req.memory_state, _det_results, req.domain)
+                redis_set(f"vaccine:{_sig['signature_id']}", _sig, ttl=2592000)
+                # Update index
+                _vax_idx_key = f"vaccine_index:{req.domain}"
+                if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                    import urllib.parse as _urlp
+                    http_requests.post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key}/{_urlp.quote(_sig['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                    http_requests.post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                    http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key}/2592000", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+        except Exception:
+            pass
 
     # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
     if outcome_id in _outcomes:
@@ -9745,6 +9930,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _cc_cur in _cc_sev_map:
             response["recommended_action"] = _cc_sev_map[_cc_cur]
 
+    # Naturalness override — FABRICATED escalates one tier
+    _nat_level = response.get("naturalness_level", "ORGANIC")
+    if _nat_level == "FABRICATED":
+        _nat_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER", "ASK_USER": "BLOCK"}
+        _nat_cur = response["recommended_action"]
+        if _nat_cur in _nat_sev_map:
+            response["recommended_action"] = _nat_sev_map[_nat_cur]
+
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
         response["boundary_decision"] = True
@@ -9813,7 +10006,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "identity_drift", "identity_drift_flags",
                          "consensus_collapse", "consensus_collapse_flags", "collapse_ratio",
                          "attack_surface_score", "attack_surface_level", "active_detection_layers",
-                         "detection_feedback_applied"}
+                         "detection_feedback_applied",
+                         "naturalness_score", "naturalness_level", "naturalness_flags",
+                         "vaccination_match", "matched_signature_id"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
