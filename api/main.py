@@ -7551,6 +7551,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["attack_surface_level"] = "NONE"
         response["active_detection_layers"] = []
 
+    # (Detection feedback loop moved to post-module position, before compact profile)
+
     # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
     if outcome_id in _outcomes:
         _outcomes[outcome_id]["compliance_result"] = response.get("compliance_result", {})
@@ -9764,6 +9766,30 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     else:
         response["boundary_decision"] = False
 
+    # Detection-to-scoring feedback loop — boost components AFTER all module-level modifications
+    try:
+        _dfb_applied = False
+        _cb = response.get("component_breakdown", {})
+        _ts_level = response.get("timestamp_integrity", "VALID")
+        _id_level = response.get("identity_drift", "CLEAN")
+        _cc_level = response.get("consensus_collapse", "CLEAN")
+        if _ts_level == "SUSPICIOUS":
+            _cb["s_freshness"] = min(100.0, round(_cb.get("s_freshness", 0) + 15, 2)); _dfb_applied = True
+        elif _ts_level == "MANIPULATED":
+            _cb["s_freshness"] = min(100.0, round(_cb.get("s_freshness", 0) + 30, 2)); _dfb_applied = True
+        if _id_level == "SUSPICIOUS":
+            _cb["s_provenance"] = min(100.0, round(_cb.get("s_provenance", 0) + 15, 2)); _dfb_applied = True
+        elif _id_level == "MANIPULATED":
+            _cb["s_provenance"] = min(100.0, round(_cb.get("s_provenance", 0) + 30, 2)); _dfb_applied = True
+        if _cc_level == "SUSPICIOUS":
+            _cb["s_interference"] = min(100.0, round(_cb.get("s_interference", 0) + 20, 2)); _dfb_applied = True
+        elif _cc_level == "MANIPULATED":
+            _cb["s_interference"] = min(100.0, round(_cb.get("s_interference", 0) + 40, 2)); _dfb_applied = True
+        response["component_breakdown"] = _cb
+        response["detection_feedback_applied"] = _dfb_applied
+    except Exception:
+        response["detection_feedback_applied"] = False
+
     response["response_profile_used"] = _profile
     if _profile == "compact":
         _compact_keys = {"omega_mem_final", "omega_adjusted", "recommended_action", "assurance_score",
@@ -9786,7 +9812,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "timestamp_integrity", "timestamp_flags",
                          "identity_drift", "identity_drift_flags",
                          "consensus_collapse", "consensus_collapse_flags", "collapse_ratio",
-                         "attack_surface_score", "attack_surface_level", "active_detection_layers"}
+                         "attack_surface_score", "attack_surface_level", "active_detection_layers",
+                         "detection_feedback_applied"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
