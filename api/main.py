@@ -7183,27 +7183,18 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         ),
     }
 
-    # Timestamp integrity check
+    # Timestamp integrity check (fields only — override applied post-reconciliation)
     try:
         _ts_check = _check_timestamp_integrity(req.memory_state)
         response["timestamp_integrity"] = _ts_check["timestamp_integrity"]
         response["timestamp_flags"] = _ts_check["timestamp_flags"]
-        if _ts_check["timestamp_integrity"] == "MANIPULATED":
-            response["recommended_action"] = "BLOCK"
+        if _ts_check["timestamp_integrity"] in ("MANIPULATED", "SUSPICIOUS"):
             repair_plan_out.append({
                 "action": "VERIFY_TIMESTAMP", "entry_id": "*",
                 "reason": "Verify actual memory age against external audit log before trusting this entry.",
-                "priority": "critical", "projected_improvement": 0, "success_probability": 1.0,
-            })
-        elif _ts_check["timestamp_integrity"] == "SUSPICIOUS":
-            _severity_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
-            _cur = response["recommended_action"]
-            if _cur in _severity_map:
-                response["recommended_action"] = _severity_map[_cur]
-            repair_plan_out.append({
-                "action": "VERIFY_TIMESTAMP", "entry_id": "*",
-                "reason": "Verify actual memory age against external audit log before trusting this entry.",
-                "priority": "high", "projected_improvement": 0, "success_probability": 0.8,
+                "priority": "critical" if _ts_check["timestamp_integrity"] == "MANIPULATED" else "high",
+                "projected_improvement": 0,
+                "success_probability": 1.0 if _ts_check["timestamp_integrity"] == "MANIPULATED" else 0.8,
             })
     except Exception:
         response["timestamp_integrity"] = "VALID"
@@ -9370,6 +9361,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["decision_stable"] = (_prev_decision == response["recommended_action"]) if _prev_decision else True
     response["hysteresis_band"] = 35 <= _omega_now <= 55
     response["stability_window"] = "narrow" if 35 <= _omega_now <= 55 else "wide" if (20 <= _omega_now < 35 or 55 < _omega_now <= 70) else "clear"
+
+    # Timestamp integrity override — AFTER all reconciliation, cannot be overridden
+    _ts_integrity = response.get("timestamp_integrity", "VALID")
+    if _ts_integrity == "MANIPULATED":
+        response["recommended_action"] = "BLOCK"
+    elif _ts_integrity == "SUSPICIOUS":
+        _ts_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
+        _ts_cur = response["recommended_action"]
+        if _ts_cur in _ts_sev_map:
+            response["recommended_action"] = _ts_sev_map[_ts_cur]
 
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
