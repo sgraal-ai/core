@@ -453,6 +453,79 @@ def remove_compromised_agent(agent_id: str, key_record: dict = Depends(verify_ap
     return {"removed": agent_id}
 
 
+# ---- Calibration endpoints ----
+
+_last_calibration_report: dict = {}
+_human_review_cases: dict = {}  # case_id → detail
+
+
+class CalibrationRunRequest(BaseModel):
+    corpus: str = "all"
+    dry_run: bool = True
+
+
+@app.post("/v1/calibration/run")
+def run_calibration(req: CalibrationRunRequest, key_record: dict = Depends(verify_api_key)):
+    """Trigger a calibration run against built-in corpus."""
+    global _last_calibration_report, _human_review_cases
+    from api.calibration_engine import CalibrationEngine, load_corpus_cases
+    cases = load_corpus_cases(req.corpus)
+    if not cases:
+        raise HTTPException(status_code=400, detail=f"No cases found for corpus '{req.corpus}'")
+    engine = CalibrationEngine(api_url="https://api.sgraal.com", api_key="sg_demo_playground")
+    report = engine.run_corpus_cases(cases)
+    report.corpus_name = req.corpus
+    report_dict = report.to_dict()
+    _last_calibration_report = report_dict
+    # Flag ambiguous cases for human review
+    if not req.dry_run:
+        for detail in report.details:
+            if detail["classification"] == "ambiguous":
+                _human_review_cases[detail["case_id"]] = detail
+        # Store in Redis if available
+        try:
+            redis_set("calibration_report", report_dict, ttl=86400)
+            if report.human_review_required:
+                redis_set("calibration_human_review", {c: _human_review_cases.get(c, {}) for c in report.human_review_required}, ttl=86400)
+        except Exception:
+            pass
+    return report_dict
+
+
+@app.get("/v1/calibration/report")
+def get_calibration_report(key_record: dict = Depends(verify_api_key)):
+    """Returns the last calibration report."""
+    if _last_calibration_report:
+        return _last_calibration_report
+    cached = redis_get("calibration_report")
+    if cached and isinstance(cached, dict):
+        return cached
+    return {"total_cases": 0, "passed": 0, "mismatched": 0, "pass_rate": 0, "calibration_health": "UNKNOWN", "message": "No calibration run yet"}
+
+
+@app.get("/v1/calibration/human-review")
+def get_human_review(key_record: dict = Depends(verify_api_key)):
+    """Returns corpus cases flagged for human review."""
+    items = list(_human_review_cases.values())
+    if not items:
+        cached = redis_get("calibration_human_review")
+        if cached and isinstance(cached, dict):
+            items = list(cached.values())
+    return {"count": len(items), "cases": items}
+
+
+class ResolveRequest(BaseModel):
+    resolution: Literal["corpus_fixed", "threshold_adjusted", "accepted"]
+
+
+@app.post("/v1/calibration/resolve/{case_id}")
+def resolve_human_review(case_id: str, req: ResolveRequest, key_record: dict = Depends(verify_api_key)):
+    """Mark a human-review case as resolved."""
+    if case_id in _human_review_cases:
+        _human_review_cases.pop(case_id)
+    return {"resolved": case_id, "resolution": req.resolution}
+
+
 @app.get("/docs/postman")
 def postman_collection():
     """Download Postman collection for Sgraal API."""
