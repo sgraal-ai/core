@@ -197,29 +197,31 @@ class CalibrationEngine:
 
 def load_corpus_cases(corpus_name: str) -> list:
     """Load corpus cases by name."""
+    import sys as _sys
+    import importlib as _il
     base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tests", "corpus")
+    if base not in _sys.path:
+        _sys.path.insert(0, base)
     cases = []
 
     if corpus_name in ("round6", "all"):
         try:
-            import sys
-            sys.path.insert(0, base)
-            from round6_memory_time_attack import CASES as r6
-            cases.extend(r6)
+            m = _il.import_module("round6_memory_time_attack")
+            cases.extend(m.CASES)
         except Exception:
             pass
 
     if corpus_name in ("round7", "all"):
         try:
-            from round7_identity_drift import CASES as r7
-            cases.extend(r7)
+            m = _il.import_module("round7_identity_drift")
+            cases.extend(m.CASES)
         except Exception:
             pass
 
     if corpus_name in ("round8", "all"):
         try:
-            from round8_consensus_collapse import CASES as r8
-            cases.extend(r8)
+            m = _il.import_module("round8_consensus_collapse")
+            cases.extend(m.CASES)
         except Exception:
             pass
 
