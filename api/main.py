@@ -7694,9 +7694,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Memory vaccination — check for known attack signatures
     response["vaccination_match"] = False
     response["matched_signature_id"] = None
-    if _redis_enabled and len(_entries) > 0:
+    if _redis_enabled and len(entries) > 0:
         try:
-            _vax_hash = hashlib.sha256(_entries[0].content.encode()).hexdigest()[:16]
+            _vax_hash = hashlib.sha256(entries[0].content.encode()).hexdigest()[:16]
             _vax_idx_key = f"vaccine_index:{req.domain}"
             _vax_ids = _rget(_vax_idx_key, [])
             if isinstance(_vax_ids, list):
