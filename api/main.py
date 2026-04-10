@@ -5987,6 +5987,92 @@ _HEAL_IMPROVEMENTS = {
 }
 
 
+def _check_timestamp_integrity(memory_state: list) -> dict:
+    """Detect timestamp manipulation attacks in memory entries."""
+    import re as _re
+    _current_year = datetime.now().year
+    _flags = []
+    _risk = 0.0
+
+    _entries = []
+    for e in memory_state:
+        if isinstance(e, dict):
+            _entries.append(e)
+        else:
+            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
+                "type": getattr(e, "type", "semantic"), "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
+                "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
+                "downstream_count": getattr(e, "downstream_count", 0)})
+
+    # PATTERN 1 — Content-age mismatch
+    _past_year_pat = _re.compile(r'\b(20[0-2][0-9])\b')
+    _temporal_markers = [
+        r'\b(last year|previous year|earlier this year)\b',
+        r'\bQ[1-4]\s*20[0-2][0-9]\b',
+        r'\b(deprecated|legacy|obsolete|end-of-life|sunset)\b',
+        r'\b(v[0-9]+\.[0-9]+|version\s+[0-9]+)\b',
+        r'\b(was|were|had been|used to)\b.{0,30}\b(required|mandatory|recommended)\b',
+    ]
+    _temporal_pats = [_re.compile(p, _re.IGNORECASE) for p in _temporal_markers]
+
+    for entry in _entries:
+        content = entry.get("content", "")
+        age = entry.get("timestamp_age_days", 0)
+        if age >= 2:
+            continue
+        marker_count = 0
+        # Check for past years
+        for m in _past_year_pat.finditer(content):
+            yr = int(m.group(1))
+            if yr < _current_year:
+                marker_count += 1
+        # Check temporal patterns
+        for pat in _temporal_pats:
+            if pat.search(content):
+                marker_count += 1
+        if age == 0 and marker_count >= 3:
+            _flags.append("content_age_mismatch:manipulated")
+            _risk = max(_risk, 1.0)
+        elif age < 2 and marker_count >= 2:
+            _flags.append("content_age_mismatch:suspicious")
+            _risk = max(_risk, 0.6)
+
+    # PATTERN 2 — Fleet-wide age collapse
+    _near_zero = [e for e in _entries if e.get("timestamp_age_days", 0) < 0.5]
+    if len(_near_zero) >= 3:
+        _has_conflict = any(e.get("source_conflict", 0) > 0.3 for e in _near_zero)
+        _all_exact_zero = all(e.get("timestamp_age_days", 0) == 0 for e in _near_zero)
+        if _all_exact_zero and _has_conflict:
+            _flags.append("fleet_age_collapse:manipulated")
+            _risk = max(_risk, 1.0)
+        else:
+            _flags.append("fleet_age_collapse:suspicious")
+            _risk = max(_risk, 0.4)
+
+    # PATTERN 4 — Anchor inconsistency
+    for entry in _entries:
+        ds = entry.get("downstream_count", 0)
+        age = entry.get("timestamp_age_days", 0)
+        if ds > 5 and age < 1:
+            _flags.append("anchor_inconsistency:suspicious")
+            _risk = max(_risk, 0.5)
+            break
+
+    # Determine integrity level
+    if any("manipulated" in f for f in _flags):
+        _integrity = "MANIPULATED"
+    elif _flags:
+        _integrity = "SUSPICIOUS"
+    else:
+        _integrity = "VALID"
+
+    return {
+        "timestamp_integrity": _integrity,
+        "timestamp_flags": _flags,
+        "timestamp_risk_score": round(_risk, 2),
+    }
+
+
 def _check_rate_limit(key_record: dict, allow_demo: bool = False):
     """Shared rate limit check for all mutating endpoints."""
     if key_record.get("demo") and not allow_demo:
@@ -7096,6 +7182,32 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
     }
+
+    # Timestamp integrity check
+    try:
+        _ts_check = _check_timestamp_integrity(req.memory_state)
+        response["timestamp_integrity"] = _ts_check["timestamp_integrity"]
+        response["timestamp_flags"] = _ts_check["timestamp_flags"]
+        if _ts_check["timestamp_integrity"] == "MANIPULATED":
+            response["recommended_action"] = "BLOCK"
+            repair_plan_out.append({
+                "action": "VERIFY_TIMESTAMP", "entry_id": "*",
+                "reason": "Verify actual memory age against external audit log before trusting this entry.",
+                "priority": "critical", "projected_improvement": 0, "success_probability": 1.0,
+            })
+        elif _ts_check["timestamp_integrity"] == "SUSPICIOUS":
+            _severity_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
+            _cur = response["recommended_action"]
+            if _cur in _severity_map:
+                response["recommended_action"] = _severity_map[_cur]
+            repair_plan_out.append({
+                "action": "VERIFY_TIMESTAMP", "entry_id": "*",
+                "reason": "Verify actual memory age against external audit log before trusting this entry.",
+                "priority": "high", "projected_improvement": 0, "success_probability": 0.8,
+            })
+    except Exception:
+        response["timestamp_integrity"] = "VALID"
+        response["timestamp_flags"] = []
 
     # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
     if outcome_id in _outcomes:
@@ -9298,7 +9410,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "auto_inference_suppressed", "heal_decision", "stability_gauge",
                          "hysteresis_applied", "input_hash", "deterministic", "reproducible", "proof_version",
                          "decision_stable", "hysteresis_band", "stability_window",
-                         "boundary_decision", "forecast_integrated", "forecast_warning"}
+                         "boundary_decision", "forecast_integrated", "forecast_warning",
+                         "timestamp_integrity", "timestamp_flags"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
