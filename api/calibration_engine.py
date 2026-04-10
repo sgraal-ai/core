@@ -195,15 +195,58 @@ class CalibrationEngine:
         return report
 
 
+def _load_jsonl_corpus(path: str, layout: str) -> list:
+    """Load a JSONL corpus file and normalize to calibration format."""
+    cases = []
+    try:
+        for line in open(path):
+            rec = json.loads(line)
+            if layout == "input":
+                cases.append({
+                    "case_id": rec.get("test_id", "?"),
+                    "memory_state": rec["input"]["memory_state"],
+                    "action_type": rec["input"].get("action_type", "reversible"),
+                    "domain": rec["input"].get("domain", "general"),
+                    "expected_decision": rec["expected"]["recommended_action"],
+                })
+            else:
+                cases.append({
+                    "case_id": rec.get("test_id", "?"),
+                    "memory_state": rec["memory_state"],
+                    "action_type": rec.get("action_type", "reversible"),
+                    "domain": rec.get("domain", "general"),
+                    "expected_decision": (rec.get("ground_truth", {}).get("expected_action")
+                                          or rec.get("ground_truth", {}).get("recommended_action", "")),
+                })
+    except Exception:
+        pass
+    return cases
+
+
 def load_corpus_cases(corpus_name: str) -> list:
     """Load corpus cases by name."""
     import sys as _sys
     import importlib as _il
-    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tests", "corpus")
-    if base not in _sys.path:
-        _sys.path.insert(0, base)
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    corpus_dir = os.path.join(repo_root, "tests", "corpus")
+    tests_dir = os.path.join(repo_root, "tests")
+    if corpus_dir not in _sys.path:
+        _sys.path.insert(0, corpus_dir)
     cases = []
 
+    # Rounds 1-4: JSONL files in tests/
+    _JSONL_CORPORA = [
+        ("round1", "sgraal_grok_joint_corpus.jsonl", "input"),
+        ("round2", "sgraal_grok_sponsored_drift_corpus.jsonl", "top"),
+        ("round2b", "sgraal_grok_subtle_drift_corpus.jsonl", "top"),
+        ("round3", "sgraal_grok_hallucination_corpus.jsonl", "top"),
+        ("round4", "sgraal_grok_propagation_corpus.jsonl", "top"),
+    ]
+    for round_name, filename, layout in _JSONL_CORPORA:
+        if corpus_name in (round_name, "all"):
+            cases.extend(_load_jsonl_corpus(os.path.join(tests_dir, filename), layout))
+
+    # Rounds 6-8: Python modules in tests/corpus/
     if corpus_name in ("round6", "all"):
         try:
             m = _il.import_module("round6_memory_time_attack")
