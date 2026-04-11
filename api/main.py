@@ -101,6 +101,31 @@ app = FastAPI(
 _ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://sgraal.com,https://www.sgraal.com,https://app.sgraal.com,https://api.sgraal.com,http://localhost:3000").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
+
+@app.middleware("http")
+async def sgraal_headers_middleware(request, call_next):
+    """Copy _headers from JSON response body into actual HTTP response headers."""
+    response = await call_next(request)
+    # Only process JSON responses from preflight-like endpoints
+    if response.status_code == 200 and "application/json" in response.headers.get("content-type", ""):
+        body_parts = []
+        async for chunk in response.body_iterator:
+            body_parts.append(chunk if isinstance(chunk, bytes) else chunk.encode())
+        body = b"".join(body_parts)
+        try:
+            import json as _mj
+            data = _mj.loads(body)
+            if isinstance(data, dict) and "_headers" in data:
+                for k, v in data["_headers"].items():
+                    response.headers[k] = str(v)
+        except Exception:
+            pass
+        from starlette.responses import Response as StarletteResponse
+        return StarletteResponse(content=body, status_code=response.status_code,
+                                 headers=dict(response.headers), media_type=response.media_type)
+    return response
+
+
 # In-memory API key store: api_key -> stripe_customer_id
 API_KEYS: dict[str, str] = {
     "sg_test_key_001": "cus_test_001",
