@@ -10516,22 +10516,24 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # #138 Circuit Breaker check
     try:
         _cb_key = f"circuit_breaker:{key_record.get('key_hash','default')}:{req.domain}"
-        _cb_state = _rget(_cb_key, {"state": "CLOSED", "omega_history": []})
+        _cb_state = _rget(_cb_key, {"state": "CLOSED", "omega_history": [], "last_opened": 0})
         _cb_hist = _cb_state.get("omega_history", [])
         _cb_hist.append(omega_out)
         _cb_hist = _cb_hist[-5:]
 
         _ldt_prob = response.get("levy_flight", {}).get("extreme_event_probability", 0)
         if _cb_state["state"] == "OPEN":
-            # HALF_OPEN: allow 1 probe
-            if omega_out < 60:
-                _cb_state = {"state": "CLOSED", "omega_history": _cb_hist}
+            _last_opened = _cb_state.get("last_opened", 0)
+            _recovery_elapsed = _time.time() - _last_opened if _last_opened else 999
+            # Auto-reset after 30-second recovery window OR if current omega is healthy
+            if _recovery_elapsed >= 30 or omega_out < 60:
+                _cb_state = {"state": "CLOSED", "omega_history": _cb_hist, "last_opened": 0}
             else:
-                _cb_state = {"state": "OPEN", "omega_history": _cb_hist}
+                _cb_state = {"state": "OPEN", "omega_history": _cb_hist, "last_opened": _last_opened}
         elif _ldt_prob > 0.1 or (len(_cb_hist) >= 5 and all(o > 80 for o in _cb_hist)):
-            _cb_state = {"state": "OPEN", "omega_history": _cb_hist}
+            _cb_state = {"state": "OPEN", "omega_history": _cb_hist, "last_opened": _time.time()}
         else:
-            _cb_state = {"state": _cb_state.get("state", "CLOSED"), "omega_history": _cb_hist}
+            _cb_state = {"state": "CLOSED", "omega_history": _cb_hist, "last_opened": 0}
 
         if not _is_dry_run:
             redis_set(_cb_key, _cb_state, ttl=300)
