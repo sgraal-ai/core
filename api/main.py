@@ -618,10 +618,19 @@ def validate_policy(req: PolicyValidateRequest, key_record: dict = Depends(verif
 
     thresholds = cfg.get("thresholds", {})
     if thresholds:
-        for k in ("block_omega", "warn_omega", "ask_user_omega"):
+        _bounds = {"block_omega": (50, 95), "warn_omega": (20, 60), "ask_user_omega": (30, 70)}
+        for k, (lo, hi) in _bounds.items():
             v = thresholds.get(k)
-            if v is not None and (not isinstance(v, (int, float)) or v < 0 or v > 100):
-                errors.append(f"Invalid threshold {k}: must be 0-100")
+            if v is not None:
+                if not isinstance(v, (int, float)) or v < lo or v > hi:
+                    errors.append(f"{k} must be between {lo} and {hi}")
+        _w = thresholds.get("warn_omega")
+        _a = thresholds.get("ask_user_omega")
+        _b = thresholds.get("block_omega")
+        if _w is not None and _a is not None and _w >= _a:
+            errors.append("thresholds must be ascending: warn_omega < ask_user_omega")
+        if _a is not None and _b is not None and _a >= _b:
+            errors.append("thresholds must be ascending: ask_user_omega < block_omega")
 
     return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
@@ -835,6 +844,65 @@ def compare_policies(req: PolicyCompareRequest, key_record: dict = Depends(verif
             conflicts.append({"field": key, "inline": req.inline[key], "registry": reg_cfg[key]})
     return {"conflicts": conflicts, "conflict_count": len(conflicts),
             "recommendation": "Inline policy takes precedence when both are applied to the same request."}
+
+
+# ---- Memory Governance Certificate ----
+
+_certificates: dict = {}
+
+
+class CertificateRequest(BaseModel):
+    request_id: str
+
+
+@app.post("/v1/certificate")
+def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify_api_key)):
+    """Issue a governance certificate for a BLOCK event."""
+    # Look up in _outcomes or Redis
+    _outcome = _outcomes.get(req.request_id) or redis_get(f"outcome:{req.request_id}")
+    if not _outcome:
+        # Check if it's an outcome_id instead of request_id
+        for _oid, _od in _outcomes.items():
+            if _od.get("request_id") == req.request_id:
+                _outcome = _od
+                break
+    cert_id = str(uuid.uuid4())
+    cert = {
+        "certificate_id": cert_id,
+        "issued_at": _time.time(),
+        "request_id": req.request_id,
+        "agent_action": "BLOCKED",
+        "decision": "BLOCK",
+        "detection_summary": {
+            "timestamp_integrity": (_outcome or {}).get("timestamp_integrity", "UNKNOWN"),
+            "identity_drift": (_outcome or {}).get("identity_drift", "UNKNOWN"),
+            "consensus_collapse": (_outcome or {}).get("consensus_collapse", "UNKNOWN"),
+            "provenance_chain_integrity": (_outcome or {}).get("provenance_chain_integrity", "UNKNOWN"),
+            "naturalness_level": (_outcome or {}).get("naturalness_level", "UNKNOWN"),
+            "attack_surface_level": (_outcome or {}).get("attack_surface_level", "UNKNOWN"),
+        },
+        "proof": {
+            "input_hash": (_outcome or {}).get("input_hash", ""),
+            "deterministic": True,
+            "reproducible": True,
+            "proof_version": "v1",
+        },
+        "issuer": "Sgraal Protocol",
+        "api_key_id": key_record.get("key_hash", "")[:16],
+        "valid": True,
+    }
+    _certificates[cert_id] = cert
+    redis_set(f"certificate:{cert_id}", cert, ttl=86400 * 90)
+    return cert
+
+
+@app.get("/v1/certificate/{certificate_id}")
+def get_certificate(certificate_id: str, key_record: dict = Depends(verify_api_key)):
+    """Retrieve a previously issued certificate."""
+    cert = _certificates.get(certificate_id) or redis_get(f"certificate:{certificate_id}")
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    return cert
 
 
 # ---- Calibration endpoints ----
@@ -6529,22 +6597,42 @@ _HEAL_IMPROVEMENTS = {
 }
 
 
-def _check_timestamp_integrity(memory_state: list) -> dict:
+def _preprocess_entries(memory_state: list) -> list:
+    """Shared preprocessing for detection layers — avoids redundant conversion/tokenization."""
+    _STOPWORDS = {"this", "that", "with", "have", "from", "they", "them", "then",
+                   "than", "when", "what", "your", "been", "were", "will", "also",
+                   "into", "more", "some", "such", "each", "both", "very", "just"}
+    result = []
+    for e in memory_state:
+        if isinstance(e, dict):
+            d = e
+        else:
+            d = {"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
+                 "type": getattr(e, "type", "semantic"), "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
+                 "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
+                 "downstream_count": getattr(e, "downstream_count", 0),
+                 "provenance_chain": getattr(e, "provenance_chain", None) or []}
+        content = d.get("content", "")
+        content_lower = content.lower()
+        tokens = set(w for w in content_lower.split() if len(w) >= 4 and w not in _STOPWORDS)
+        result.append({
+            "id": d.get("id", "?"), "content": content, "content_lower": content_lower,
+            "tokens": tokens, "type": d.get("type", "semantic"),
+            "timestamp_age_days": d.get("timestamp_age_days", 0),
+            "source_trust": d.get("source_trust", 0.5), "source_conflict": d.get("source_conflict", 0),
+            "downstream_count": d.get("downstream_count", 0),
+            "provenance_chain": d.get("provenance_chain") or [],
+        })
+    return result
+
+
+def _check_timestamp_integrity(memory_state: list, _preprocessed: list = None) -> dict:
     """Detect timestamp manipulation attacks in memory entries."""
     import re as _re
     _current_year = datetime.now().year
     _flags = []
     _risk = 0.0
-
-    _entries = []
-    for e in memory_state:
-        if isinstance(e, dict):
-            _entries.append(e)
-        else:
-            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
-                "type": getattr(e, "type", "semantic"), "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
-                "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
-                "downstream_count": getattr(e, "downstream_count", 0)})
+    _entries = _preprocessed if _preprocessed else _preprocess_entries(memory_state)
 
     # PATTERN 1 — Content-age mismatch
     _past_year_pat = _re.compile(r'\b(20[0-2][0-9])\b')
@@ -6615,21 +6703,12 @@ def _check_timestamp_integrity(memory_state: list) -> dict:
     }
 
 
-def _check_identity_drift(memory_state: list) -> dict:
+def _check_identity_drift(memory_state: list, _preprocessed: list = None) -> dict:
     """Detect identity drift attacks — gradual authority expansion across hops."""
     import re as _re
     _flags = []
     _risk = 0.0
-
-    _entries = []
-    for e in memory_state:
-        if isinstance(e, dict):
-            _entries.append(e)
-        else:
-            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
-                "type": getattr(e, "type", "semantic"), "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
-                "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
-                "downstream_count": getattr(e, "downstream_count", 0)})
+    _entries = _preprocessed if _preprocessed else _preprocess_entries(memory_state)
 
     _identity_types = {"identity", "role", "semantic"}
 
@@ -6652,7 +6731,7 @@ def _check_identity_drift(memory_state: list) -> dict:
         if entry.get("type", "semantic") not in _identity_types:
             continue
         content = entry.get("content", "")
-        _content_lower = content.lower()
+        _content_lower = entry.get("content_lower", content.lower())
         esc_count = sum(1 for kw in _escalation_keywords if _re.search(r'\b' + _re.escape(kw) + r'\b', _content_lower))
         if esc_count >= 2:
             _flags.append("authority_expansion:manipulated")
@@ -6735,35 +6814,20 @@ def _check_identity_drift(memory_state: list) -> dict:
     }
 
 
-def _check_consensus_collapse(memory_state: list) -> dict:
+def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) -> dict:
     """Detect silent consensus collapse — amplification mistaken for corroboration."""
     import re as _re
     _flags = []
     _risk = 0.0
-
-    _entries = []
-    for e in memory_state:
-        if isinstance(e, dict):
-            _entries.append(e)
-        else:
-            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
-                "type": getattr(e, "type", "semantic"), "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
-                "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
-                "downstream_count": getattr(e, "downstream_count", 0)})
+    _entries = _preprocessed if _preprocessed else _preprocess_entries(memory_state)
 
     n = len(_entries)
     if n < 3:
         return {"consensus_collapse": "CLEAN", "consensus_collapse_flags": [],
                 "collapse_ratio": 0.0, "independent_root_estimate": n}
 
-    # Extract key tokens for similarity (simple: 3+ char words, lowered)
-    _STOPWORDS = {"this", "that", "with", "have", "from", "they", "them", "then",
-                   "than", "when", "what", "your", "been", "were", "will", "also",
-                   "into", "more", "some", "such", "each", "both", "very", "just"}
-    def _key_tokens(text):
-        return set(w for w in text.lower().split() if len(w) >= 4 and w not in _STOPWORDS)
-
-    all_tokens = [_key_tokens(e.get("content", "")) for e in _entries]
+    # Use preprocessed tokens if available, otherwise compute
+    all_tokens = [e.get("tokens") or set(w for w in e.get("content", "").lower().split() if len(w) >= 4) for e in _entries]
 
     # PATTERN 1 — Collapse Ratio
     # Group similar entries (Jaccard > 0.2 with any other entry)
@@ -6888,16 +6952,9 @@ def _check_consensus_collapse(memory_state: list) -> dict:
     }
 
 
-def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rget=None) -> dict:
+def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rget=None, _preprocessed: list = None) -> dict:
     """Detect provenance chain attacks — circular refs, length mismatches, compromised agents."""
-    _entries = []
-    for e in memory_state:
-        if isinstance(e, dict):
-            _entries.append(e)
-        else:
-            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
-                "downstream_count": getattr(e, "downstream_count", 0),
-                "provenance_chain": getattr(e, "provenance_chain", None) or []})
+    _entries = _preprocessed if _preprocessed else _preprocess_entries(memory_state)
 
     _flags = []
     _chains = [e.get("provenance_chain") or [] for e in _entries]
@@ -6945,18 +7002,9 @@ def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rge
     return {"provenance_chain_integrity": _integrity, "provenance_chain_flags": _flags, "chain_depth": _max_depth}
 
 
-def _check_naturalness(memory_state: list, action_type: str = "reversible") -> dict:
+def _check_naturalness(memory_state: list, action_type: str = "reversible", _preprocessed: list = None) -> dict:
     """Detect synthetic/fabricated memory states via statistical naturalness signals."""
-    _entries = []
-    for e in memory_state:
-        if isinstance(e, dict):
-            _entries.append(e)
-        else:
-            _entries.append({"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
-                "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
-                "source_trust": getattr(e, "source_trust", 0.5),
-                "source_conflict": getattr(e, "source_conflict", 0),
-                "downstream_count": getattr(e, "downstream_count", 0)})
+    _entries = _preprocessed if _preprocessed else _preprocess_entries(memory_state)
 
     _flags = []
     _score = 1.0
@@ -8194,7 +8242,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Timestamp integrity check (fields only — override applied post-reconciliation)
     try:
-        _ts_check = _check_timestamp_integrity(req.memory_state)
+        _pp_entries = _preprocess_entries(req.memory_state)  # Shared preprocessing for all detection layers
+        _ts_check = _check_timestamp_integrity(req.memory_state, _preprocessed=_pp_entries)
         response["timestamp_integrity"] = _ts_check["timestamp_integrity"]
         response["timestamp_flags"] = _ts_check["timestamp_flags"]
         if _ts_check["timestamp_integrity"] in ("MANIPULATED", "SUSPICIOUS"):
@@ -8211,7 +8260,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Identity drift check (fields only — override applied post-reconciliation)
     try:
-        _id_check = _check_identity_drift(req.memory_state)
+        _id_check = _check_identity_drift(req.memory_state, _preprocessed=_pp_entries)
         response["identity_drift"] = _id_check["identity_drift"]
         response["identity_drift_flags"] = _id_check["identity_drift_flags"]
         if _id_check["identity_drift"] in ("MANIPULATED", "SUSPICIOUS"):
@@ -8228,7 +8277,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Consensus collapse check (fields only — override applied post-reconciliation)
     try:
-        _cc_check = _check_consensus_collapse(req.memory_state)
+        _cc_check = _check_consensus_collapse(req.memory_state, _preprocessed=_pp_entries)
         response["consensus_collapse"] = _cc_check["consensus_collapse"]
         response["consensus_collapse_flags"] = _cc_check["consensus_collapse_flags"]
         response["collapse_ratio"] = _cc_check["collapse_ratio"]
@@ -8247,7 +8296,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Provenance chain check
     try:
-        _pc_check = _check_provenance_chain(req.memory_state, _redis_enabled, _rget)
+        _pc_check = _check_provenance_chain(req.memory_state, _redis_enabled, _rget, _preprocessed=_pp_entries)
         response["provenance_chain_integrity"] = _pc_check["provenance_chain_integrity"]
         response["provenance_chain_flags"] = _pc_check["provenance_chain_flags"]
         response["chain_depth"] = _pc_check["chain_depth"]
@@ -8288,7 +8337,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Naturalness score
     try:
-        _nat_check = _check_naturalness(req.memory_state, req.action_type)
+        _nat_check = _check_naturalness(req.memory_state, req.action_type, _preprocessed=_pp_entries)
         response["naturalness_score"] = _nat_check["naturalness_score"]
         response["naturalness_level"] = _nat_check["naturalness_level"]
         response["naturalness_flags"] = _nat_check["naturalness_flags"]
@@ -10398,6 +10447,19 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _old = _prev_cb.get(_ck2, 0)
                 if abs(_cv2 - _old) > 0.5:
                     _comp_changes[_ck2] = {"before": round(_old, 1), "after": round(_cv2, 1), "delta": round(_cv2 - _old, 1)}
+            # Fix 1: Detection state transitions
+            _detection_layers = ["timestamp_integrity", "identity_drift", "consensus_collapse", "provenance_chain_integrity"]
+            _det_transitions = {}
+            _det_changed = False
+            _prev_det = _prev_summary.get("detection_states", {})
+            for _dl in _detection_layers:
+                _prev_val = _prev_det.get(_dl, "CLEAN")
+                _cur_val = response.get(_dl, "CLEAN")
+                _changed = _prev_val != _cur_val
+                if _changed:
+                    _det_changed = True
+                _det_transitions[_dl] = {"previous": _prev_val, "current": _cur_val, "changed": _changed}
+
             response["preflight_delta"] = {
                 "omega_change": round(omega_out - _prev_omega, 2),
                 "action_changed": response.get("recommended_action") != _prev_action,
@@ -10405,12 +10467,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "components_changed": _comp_changes,
                 "entries_changed": len(req.memory_state) != _prev_summary.get("n_entries", 0),
                 "time_since_last": round(_time.time() - _prev_summary.get("ts", _time.time()), 1),
+                "detection_transitions": _det_transitions,
+                "detection_state_changed": _det_changed,
             }
         # Store current summary (skip for demo — read-only)
         if not _is_dry_run:
             redis_set(_diff_key, {
                 "omega": omega_out, "action": response.get("recommended_action", "USE_MEMORY"),
                 "components": {k: round(v, 1) for k, v in response.get("component_breakdown", {}).items()},
+                "detection_states": {dl: response.get(dl, "CLEAN") for dl in ["timestamp_integrity", "identity_drift", "consensus_collapse", "provenance_chain_integrity"]},
                 "n_entries": len(req.memory_state), "ts": _time.time()
             }, ttl=3600)
     except Exception:
@@ -10674,7 +10739,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "naturalness_score", "naturalness_level", "naturalness_flags",
                          "vaccination_match", "matched_signature_id",
                          "provenance_chain_integrity", "provenance_chain_flags", "chain_depth",
-                         "memory_locations_present", "auto_profile_selected",
+                         "memory_locations_present", "auto_profile_selected", "redis_available",
                          "component_breakdown_raw", "provenance_unverified",
                          "genuine_corroboration"}
         # Truncate repair_plan to top 3 in compact mode
@@ -10772,6 +10837,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "X-Sgraal-Latency-Ms": str(response.get("_trace", {}).get("duration_ms", 0)),
         "X-SMRS": str(omega_out),
     }
+    if response.get("degraded_mode"):
+        response["_headers"]["X-Sgraal-Degraded"] = "true"
     # FIX 9: Add dry_run header after _headers is created
     if response.get("dry_run"):
         response["_headers"]["X-Sgraal-Dry-Run"] = "true"
@@ -10826,9 +10893,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # #13 Counterfactual always available
     response["counterfactual_available"] = True
 
-    # FIX 7: Degraded mode indicator when Redis unavailable
-    if not _redis_is_available():
-        _degraded_features = ["firewall_rules", "atc_holds", "compiled_policies", "goal_drift_baseline",
+    # Fix 3: Redis failure visibility — make degradation explicit
+    _redis_up = _redis_is_available()
+    response["redis_available"] = _redis_up
+    if not _redis_up:
+        _degraded_features = ["vaccination", "circuit_breaker", "sla_monitoring", "compromised_agents",
+                              "firewall_rules", "atc_holds", "compiled_policies", "goal_drift_baseline",
                               "q_table_learning", "truth_subscriptions"]
         response["degraded_mode"] = True
         response["degraded_features"] = _degraded_features
