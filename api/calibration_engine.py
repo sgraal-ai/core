@@ -264,7 +264,14 @@ def load_corpus_cases(corpus_name: str) -> list:
             _log.info("calibration: %s → %s (found=%s, cases=%d)", round_name, fpath, os.path.isfile(fpath), len(loaded))
             cases.extend(loaded)
 
-    # Rounds 6-8: Python modules in tests/corpus/
+    # Rounds 5-8: Python modules in tests/corpus/
+    if corpus_name in ("round5", "all"):
+        try:
+            m = _il.import_module("round5_consensus_poisoning")
+            cases.extend(m.CASES)
+        except Exception:
+            pass
+
     if corpus_name in ("round6", "all"):
         try:
             m = _il.import_module("round6_memory_time_attack")

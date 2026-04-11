@@ -7905,7 +7905,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 redis_set(f"vaccine:{_sig['signature_id']}", _sig, ttl=2592000)
                 # Update index
                 _vax_idx_key = f"vaccine_index:{req.domain}"
-                if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
+                if _redis_enabled:
                     import urllib.parse as _urlp
                     http_requests.post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key}/{_urlp.quote(_sig['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                     http_requests.post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)

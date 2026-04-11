@@ -29,14 +29,14 @@ pip install -r requirements.txt
 # Run API server locally
 uvicorn api.main:app --reload
 
-# Run tests (1,929 tests across 18 test files)
+# Run tests (1,993 tests across 24 test files)
 pip install pytest httpx
 python3 -m pytest tests/ -v
 
 # Run single test file
 python3 -m pytest tests/test_api_key_cache.py -v
 
-# Run benchmark corpora against live API (569 cases total)
+# Run benchmark corpora against live API (614 cases total)
 python3 tests/corpus/run_all.py
 python3 tests/corpus/round6_memory_time_attack.py
 python3 tests/corpus/round7_identity_drift.py
@@ -69,8 +69,9 @@ python3 tests/corpus/run_all.py
 
 ### Baseline — do not drop below:
 - pytest: 1,993 passing
-- Corpus total: 569/569
+- Corpus total: 614/614
   - Rounds 1-4: 329/329 (Joint: 60, Sponsored: 60, Subtle: 59, Hallucination: 60, Propagation: 90)
+  - Round 5 — Consensus Poisoning: 45/45
   - Round 6 — Memory Time Attack: 60/60
   - Round 7 — Identity Drift: 90/90
   - Round 8 — Consensus Collapse: 90/90
