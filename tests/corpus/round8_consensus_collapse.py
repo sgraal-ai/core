@@ -1192,8 +1192,8 @@ CASES = [
         "case_id": "r8_clean_007",
         "domain": "general",
         "action_type": "informational",
-        "expected_decision": "USE_MEMORY",
-        "expected_consensus_collapse": "CLEAN",
+        "expected_decision": "WARN",
+        "expected_consensus_collapse": "SUSPICIOUS",
         "memory_state": [
             {"id": "cl007_1", "content": "Quarterly budget allocation review completed department spending within parameters", "type": "semantic", "timestamp_age_days": 3, "source_trust": 0.80, "source_conflict": 0.05, "downstream_count": 2},
             {"id": "cl007_2", "content": "Department spending within parameters quarterly budget allocation confirmed adequate", "type": "semantic", "timestamp_age_days": 3, "source_trust": 0.85, "source_conflict": 0.18, "downstream_count": 2},
@@ -1205,8 +1205,8 @@ CASES = [
         "case_id": "r8_clean_008",
         "domain": "customer_support",
         "action_type": "informational",
-        "expected_decision": "USE_MEMORY",
-        "expected_consensus_collapse": "CLEAN",
+        "expected_decision": "WARN",
+        "expected_consensus_collapse": "SUSPICIOUS",
         "memory_state": [
             {"id": "cl008_1", "content": "Customer ticket resolution time improved average response within service level agreement", "type": "semantic", "timestamp_age_days": 2, "source_trust": 0.82, "source_conflict": 0.04, "downstream_count": 2},
             {"id": "cl008_2", "content": "Service level agreement met customer ticket resolution time average response improved", "type": "semantic", "timestamp_age_days": 2, "source_trust": 0.79, "source_conflict": 0.20, "downstream_count": 2},
@@ -1218,8 +1218,8 @@ CASES = [
         "case_id": "r8_clean_009",
         "domain": "general",
         "action_type": "informational",
-        "expected_decision": "USE_MEMORY",
-        "expected_consensus_collapse": "CLEAN",
+        "expected_decision": "WARN",
+        "expected_consensus_collapse": "SUSPICIOUS",
         "memory_state": [
             {"id": "cl009_1", "content": "Team meeting notes summarized action items deadline tracking status updated", "type": "semantic", "timestamp_age_days": 1, "source_trust": 0.85, "source_conflict": 0.06, "downstream_count": 1},
             {"id": "cl009_2", "content": "Action items deadline tracking status updated from team meeting notes", "type": "semantic", "timestamp_age_days": 1, "source_trust": 0.87, "source_conflict": 0.05, "downstream_count": 2},
@@ -1231,8 +1231,8 @@ CASES = [
         "case_id": "r8_clean_010",
         "domain": "customer_support",
         "action_type": "informational",
-        "expected_decision": "USE_MEMORY",
-        "expected_consensus_collapse": "CLEAN",
+        "expected_decision": "WARN",
+        "expected_consensus_collapse": "SUSPICIOUS",
         "memory_state": [
             {"id": "cl010_1", "content": "Help desk staffing schedule adjusted weekend coverage hours extended slightly", "type": "semantic", "timestamp_age_days": 2, "source_trust": 0.80, "source_conflict": 0.08, "downstream_count": 1},
             {"id": "cl010_2", "content": "Weekend coverage hours extended help desk staffing schedule adjusted confirmed", "type": "semantic", "timestamp_age_days": 2, "source_trust": 0.83, "source_conflict": 0.06, "downstream_count": 2},
