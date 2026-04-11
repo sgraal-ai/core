@@ -2350,11 +2350,11 @@ def compile_policy(req: CompilePolicyRequest, key_record: dict = Depends(verify_
     redis_set(f"compiled_policy:{req.policy_id}", compiled, ttl=86400)
     return {"policy_id": req.policy_id, "compiled": True, "rule_count": len(req.rules)}
 
-@app.get("/v1/policies/{policy_id}")
-def get_policy(policy_id: str, key_record: dict = Depends(verify_api_key)):
+@app.get("/v1/compiled-policies/{policy_id}")
+def get_compiled_policy(policy_id: str, key_record: dict = Depends(verify_api_key)):
     pol = _compiled_policies.get(policy_id) or redis_get(f"compiled_policy:{policy_id}")
     if not pol:
-        raise HTTPException(status_code=404, detail=f"Policy {policy_id} not found")
+        raise HTTPException(status_code=404, detail=f"Compiled policy {policy_id} not found")
     return pol
 
 def _evaluate_policy(policy_id: str, action_type: str, domain: str, omega: float) -> Optional[dict]:
@@ -6774,7 +6774,7 @@ def _check_consensus_collapse(memory_state: list) -> dict:
                 continue
             intersection = len(all_tokens[i] & all_tokens[j])
             union = len(all_tokens[i] | all_tokens[j])
-            if union > 0 and intersection / union > 0.2:
+            if union > 0 and intersection / union >= 0.3:  # Unified with content cluster threshold
                 _similar_groups.add(i)
                 _similar_groups.add(j)
 
@@ -6863,7 +6863,10 @@ def _check_consensus_collapse(memory_state: list) -> dict:
         _chains = [tuple(e.get("provenance_chain") or []) for e in _entries]
         _nonempty_chains = [c for c in _chains if len(c) > 0]
         _diverse_chains = len(set(_nonempty_chains)) == len(_nonempty_chains) and len(_nonempty_chains) >= 2
-        if _conflict_var > 0.05 or _diverse_chains:
+        # Primary: diverse provenance chains. Supplementary: conflict variance (requires at least 1 chain)
+        # Fix 11: empty chains can't bypass consensus — require non-empty chains for genuine corroboration
+        _has_any_chain = len(_nonempty_chains) >= 1
+        if _diverse_chains or (_conflict_var > 0.0001 and _has_any_chain):
             _genuine = True
             _flags = []
             _risk = 0.0
@@ -8347,7 +8350,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     import urllib.parse as _urlp
                     http_requests.post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key}/{_urlp.quote(_sig['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                     http_requests.post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
-                    http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key}/2592000", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                    http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)  # Match vaccine TTL: 7 days
         except Exception:
             pass
 
@@ -10545,9 +10548,11 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["hysteresis_band"] = 35 <= _omega_now <= 55
     response["stability_window"] = "narrow" if 35 <= _omega_now <= 55 else "wide" if (20 <= _omega_now < 35 or 55 < _omega_now <= 70) else "clear"
 
-    # Fix 9: Naturalness runs FIRST as context-setter (weakest signal)
+    # Naturalness runs FIRST as context-setter (weakest signal)
+    # Fix 12: suppress naturalness override when genuine corroboration detected
     _nat_level = response.get("naturalness_level", "ORGANIC")
-    if _nat_level == "FABRICATED":
+    _genuine_corr = response.get("genuine_corroboration", False)
+    if _nat_level == "FABRICATED" and not _genuine_corr:
         _nat_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER", "ASK_USER": "BLOCK"}
         _nat_cur = response["recommended_action"]
         if _nat_cur in _nat_sev_map:
@@ -10639,10 +10644,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _cb["s_interference"] = min(100.0, round(_cb.get("s_interference", 0) + 40, 2)); _dfb_applied = True
         response["component_breakdown"] = _cb
         response["detection_feedback_applied"] = _dfb_applied
-        response["detection_feedback_display_only"] = True
     except Exception:
         response["detection_feedback_applied"] = False
-        response["detection_feedback_display_only"] = True
 
     response["response_profile_used"] = _profile
     if _profile == "compact":
@@ -10673,7 +10676,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "provenance_chain_integrity", "provenance_chain_flags", "chain_depth",
                          "memory_locations_present", "auto_profile_selected",
                          "component_breakdown_raw", "provenance_unverified",
-                         "genuine_corroboration", "detection_feedback_display_only"}
+                         "genuine_corroboration"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
@@ -10719,13 +10722,23 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if key_record.get("demo"):
         response["demo"] = True
 
-    # #138 Circuit Breaker check (Fix 3: monitor BLOCK decisions, not just omega)
+    # #138 Circuit Breaker check (monitors BLOCK decisions)
     try:
         _cb_key = f"circuit_breaker:{key_record.get('key_hash','default')}:{req.domain}"
         _cb_state = _rget(_cb_key, {"state": "CLOSED", "decision_history": [], "last_opened": 0})
-        _cb_decision_hist = _cb_state.get("decision_history", [])
+        # Fix 1: Migrate old omega_history format to decision_history
+        if "omega_history" in _cb_state and "decision_history" not in _cb_state:
+            _cb_decision_hist = ["BLOCK" if o > 80 else "USE_MEMORY" for o in _cb_state.get("omega_history", [])]
+            logger.info("Migrated circuit breaker from omega_history to decision_history for %s", _cb_key)
+        else:
+            _cb_decision_hist = _cb_state.get("decision_history", [])
         _final_decision = response.get("recommended_action", "USE_MEMORY")
-        _cb_decision_hist.append(_final_decision)
+        # Fix 13: Low-omega detection-override BLOCKs don't count toward circuit breaker
+        _detection_override_block = _final_decision == "BLOCK" and omega_out < 30
+        if not _detection_override_block:
+            _cb_decision_hist.append(_final_decision)
+        else:
+            _cb_decision_hist.append("DETECTION_BLOCK")  # tracked but doesn't trigger trip
         _cb_decision_hist = _cb_decision_hist[-5:]
 
         if _cb_state["state"] == "OPEN":
