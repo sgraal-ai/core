@@ -1,29 +1,29 @@
-# Sgraal Example Projects
+# Sgraal Examples
 
-Production-ready examples of AI agents with Sgraal memory governance.
+Runnable examples demonstrating Sgraal memory governance.
 
-| Example | Stack | Domain | Description |
-|---------|-------|--------|-------------|
-| [fintech-agent](./fintech-agent/) | Python, LangGraph | Fintech | Trading agent with preflight on every decision |
-| [support-agent](./support-agent/) | Node.js | Customer Support | Support agent with memory quality monitoring |
-| [medical-copilot](./medical-copilot/) | Python | Healthcare | HIPAA-compliant medical assistant |
-| [coding-agent](./coding-agent/) | Python | Coding | Coding assistant with @guard decorator |
-| [mem0-migration](./mem0-migration/) | Python | General | Migrate Mem0 → mem0-sgraal in 5 minutes |
-
-## Quick Start
+## Setup
 
 ```bash
-cd fintech-agent
-cp .env.example .env
-# Add your SGRAAL_API_KEY
-pip install -r requirements.txt
-python agent.py
+pip install sgraal
 ```
 
-## Get an API Key
+## Examples
+
+| File | Description |
+|---|---|
+| `01_basic_preflight.py` | Basic preflight validation — single memory entry |
+| `02_rag_guardrail.py` | RAG pipeline guardrail — validate chunks before LLM |
+| `03_multi_agent_chain.py` | Multi-agent provenance chain — detect circular references |
+| `04_compound_attack_detection.py` | Compound attack surface — trigger multiple detection layers |
+
+## Run
 
 ```bash
-curl -X POST https://api.sgraal.com/v1/signup -d '{"email": "you@example.com"}'
+python examples/01_basic_preflight.py
+python examples/02_rag_guardrail.py
+python examples/03_multi_agent_chain.py
+python examples/04_compound_attack_detection.py
 ```
 
-Or sign up at [sgraal.com](https://sgraal.com).
+All examples use the demo key `sg_demo_playground` (rate limited, no signup needed).
