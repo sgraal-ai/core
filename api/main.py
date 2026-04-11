@@ -180,6 +180,7 @@ class MemoryEntryRequest(BaseModel):
     importance: Optional[float] = None    # 0-1
     # MemCube v3 optional fields
     provenance_chain: Optional[list[str]] = None  # ordered list of agent_ids that touched this entry
+    memory_location: Optional[str] = None  # e.g. "redis://agent-001/session-42", "vector_db://collection-fintech"
 
 class StepRequest(BaseModel):
     step_id: str
@@ -451,6 +452,48 @@ def remove_compromised_agent(agent_id: str, key_record: dict = Depends(verify_ap
         agents.remove(agent_id)
         redis_set("compromised_agents", agents, ttl=604800)
     return {"removed": agent_id}
+
+
+# ---- Failure Patterns dataset ----
+
+_FAILURE_PATTERNS = [
+    {"pattern_id": "timestamp_zeroing", "category": "temporal", "round": 6, "case_count": 60, "detection_rate": 1.0,
+     "typical_omega_range": [15, 45], "typical_decision": "BLOCK", "detection_fields": ["timestamp_integrity", "timestamp_flags"]},
+    {"pattern_id": "authority_escalation", "category": "identity", "round": 7, "case_count": 90, "detection_rate": 1.0,
+     "typical_omega_range": [10, 30], "typical_decision": "BLOCK", "detection_fields": ["identity_drift", "identity_drift_flags"]},
+    {"pattern_id": "consensus_fabrication", "category": "consensus", "round": 8, "case_count": 90, "detection_rate": 1.0,
+     "typical_omega_range": [12, 35], "typical_decision": "BLOCK", "detection_fields": ["consensus_collapse", "consensus_collapse_flags"]},
+    {"pattern_id": "circular_provenance", "category": "provenance", "round": 9, "case_count": 13, "detection_rate": 1.0,
+     "typical_omega_range": [5, 25], "typical_decision": "BLOCK", "detection_fields": ["provenance_chain_integrity", "provenance_chain_flags"]},
+    {"pattern_id": "fleet_age_collapse", "category": "temporal", "round": 6, "case_count": 20, "detection_rate": 1.0,
+     "typical_omega_range": [10, 30], "typical_decision": "BLOCK", "detection_fields": ["timestamp_integrity", "naturalness_level"]},
+    {"pattern_id": "modal_uncertainty_strip", "category": "consensus", "round": 8, "case_count": 20, "detection_rate": 1.0,
+     "typical_omega_range": [15, 40], "typical_decision": "WARN", "detection_fields": ["consensus_collapse", "consensus_collapse_flags"]},
+    {"pattern_id": "subject_rebinding", "category": "identity", "round": 7, "case_count": 15, "detection_rate": 1.0,
+     "typical_omega_range": [8, 20], "typical_decision": "BLOCK", "detection_fields": ["identity_drift", "identity_drift_flags"]},
+    {"pattern_id": "confidence_recycling", "category": "consensus", "round": 8, "case_count": 20, "detection_rate": 1.0,
+     "typical_omega_range": [12, 30], "typical_decision": "WARN", "detection_fields": ["consensus_collapse", "consensus_collapse_flags"]},
+]
+
+
+@app.get("/v1/failure-patterns")
+def list_failure_patterns(key_record: dict = Depends(verify_api_key)):
+    """Return top failure patterns from corpus as structured dataset."""
+    return {
+        "patterns": _FAILURE_PATTERNS,
+        "total_corpus_cases": 614,
+        "false_negative_rate": 0.0,
+        "last_updated": "2026-04-11",
+    }
+
+
+@app.get("/v1/failure-patterns/{pattern_id}")
+def get_failure_pattern(pattern_id: str, key_record: dict = Depends(verify_api_key)):
+    """Return a single failure pattern detail."""
+    for p in _FAILURE_PATTERNS:
+        if p["pattern_id"] == pattern_id:
+            return p
+    raise HTTPException(status_code=404, detail=f"Pattern '{pattern_id}' not found")
 
 
 # ---- Calibration endpoints ----
@@ -7866,6 +7909,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["naturalness_level"] = "ORGANIC"
         response["naturalness_flags"] = []
 
+    # Memory location metadata
+    response["memory_locations_present"] = any(getattr(e, "memory_location", None) for e in req.memory_state)
+
     # Memory vaccination — check for known attack signatures
     response["vaccination_match"] = False
     response["matched_signature_id"] = None
@@ -10219,7 +10265,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "detection_feedback_applied",
                          "naturalness_score", "naturalness_level", "naturalness_flags",
                          "vaccination_match", "matched_signature_id",
-                         "provenance_chain_integrity", "provenance_chain_flags", "chain_depth"}
+                         "provenance_chain_integrity", "provenance_chain_flags", "chain_depth",
+                         "memory_locations_present"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
