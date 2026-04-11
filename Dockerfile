@@ -6,6 +6,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY scoring_engine/ scoring_engine/
 COPY tests/ tests/
+COPY docs/ docs/
 COPY api/ api/
 
 ENV PYTHONPATH=/app

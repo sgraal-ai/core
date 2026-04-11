@@ -104,26 +104,28 @@ app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS, allow_methods
 
 @app.middleware("http")
 async def sgraal_headers_middleware(request, call_next):
-    """Copy _headers from JSON response body into actual HTTP response headers."""
+    """Copy _headers from JSON response body into actual HTTP response headers.
+    Skips streaming responses (text/event-stream) to avoid breaking SSE."""
     response = await call_next(request)
-    # Only process JSON responses from preflight-like endpoints
-    if response.status_code == 200 and "application/json" in response.headers.get("content-type", ""):
-        body_parts = []
-        async for chunk in response.body_iterator:
-            body_parts.append(chunk if isinstance(chunk, bytes) else chunk.encode())
-        body = b"".join(body_parts)
-        try:
-            import json as _mj
-            data = _mj.loads(body)
-            if isinstance(data, dict) and "_headers" in data:
-                for k, v in data["_headers"].items():
-                    response.headers[k] = str(v)
-        except Exception:
-            pass
-        from starlette.responses import Response as StarletteResponse
-        return StarletteResponse(content=body, status_code=response.status_code,
-                                 headers=dict(response.headers), media_type=response.media_type)
-    return response
+    content_type = response.headers.get("content-type", "")
+    # Skip non-JSON and streaming responses
+    if response.status_code != 200 or "application/json" not in content_type or "text/event-stream" in content_type:
+        return response
+    body_parts = []
+    async for chunk in response.body_iterator:
+        body_parts.append(chunk if isinstance(chunk, bytes) else chunk.encode())
+    body = b"".join(body_parts)
+    try:
+        import json as _mj
+        data = _mj.loads(body)
+        if isinstance(data, dict) and "_headers" in data:
+            for k, v in data["_headers"].items():
+                response.headers[k] = str(v)
+    except Exception:
+        pass
+    from starlette.responses import Response as StarletteResponse
+    return StarletteResponse(content=body, status_code=response.status_code,
+                             headers=dict(response.headers), media_type=response.media_type)
 
 
 # In-memory API key store: api_key -> stripe_customer_id
@@ -6617,7 +6619,7 @@ def _check_identity_drift(memory_state: list) -> dict:
             continue
         content = entry.get("content", "")
         _content_lower = content.lower()
-        esc_count = sum(1 for kw in _escalation_keywords if kw in _content_lower)
+        esc_count = sum(1 for kw in _escalation_keywords if _re.search(r'\b' + _re.escape(kw) + r'\b', _content_lower))
         if esc_count >= 2:
             _flags.append("authority_expansion:manipulated")
             _risk = max(_risk, 1.0)
@@ -6707,8 +6709,11 @@ def _check_consensus_collapse(memory_state: list) -> dict:
                 "collapse_ratio": 0.0, "independent_root_estimate": n}
 
     # Extract key tokens for similarity (simple: 3+ char words, lowered)
+    _STOPWORDS = {"this", "that", "with", "have", "from", "they", "them", "then",
+                   "than", "when", "what", "your", "been", "were", "will", "also",
+                   "into", "more", "some", "such", "each", "both", "very", "just"}
     def _key_tokens(text):
-        return set(w for w in text.lower().split() if len(w) >= 4)
+        return set(w for w in text.lower().split() if len(w) >= 4 and w not in _STOPWORDS)
 
     all_tokens = [_key_tokens(e.get("content", "")) for e in _entries]
 
@@ -6886,7 +6891,7 @@ def _check_naturalness(memory_state: list) -> dict:
         trusts = [e.get("source_trust", 0.5) for e in _entries]
         mean_t = sum(trusts) / n
         var_t = sum((t - mean_t) ** 2 for t in trusts) / n
-        if var_t < 0.001:
+        if var_t < 0.005:
             _flags.append("uniform_trust")
             _score -= 0.2
 
@@ -6957,7 +6962,7 @@ def _extract_attack_signature(memory_state: list, detection_results: dict, domai
         "attack_type": attack_type,
         "content_hash_prefix": content_hash,
         "downstream_pattern": "high" if max_ds > 10 else "low",
-        "trust_range": "uniform" if var_t < 0.001 else "varied",
+        "trust_range": "uniform" if var_t < 0.005 else "varied",
         "domain": domain,
         "ttl_days": 30,
     }
@@ -10378,7 +10383,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _profile = req.response_profile
     _auto_profile = False
     if not _profile:
-        # Auto-select based on action_type first, then tier
+        # Auto-select: high-risk actions get standard profile; otherwise fall through to tier-based default
         if req.action_type in ("irreversible", "destructive"):
             _profile = "standard"
             _auto_profile = True
@@ -10533,7 +10538,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     else:
         response["boundary_decision"] = False
 
-    # Detection-to-scoring feedback loop — boost components AFTER all module-level modifications
+    # Detection-to-scoring feedback — boosts component_breakdown display values.
+    # Note: does NOT change omega_mem_final (already computed). Display-only enrichment.
     try:
         _dfb_applied = False
         _cb = response.get("component_breakdown", {})
@@ -10554,8 +10560,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _cb["s_interference"] = min(100.0, round(_cb.get("s_interference", 0) + 40, 2)); _dfb_applied = True
         response["component_breakdown"] = _cb
         response["detection_feedback_applied"] = _dfb_applied
+        response["detection_feedback_display_only"] = True
     except Exception:
         response["detection_feedback_applied"] = False
+        response["detection_feedback_display_only"] = True
 
     response["response_profile_used"] = _profile
     if _profile == "compact":

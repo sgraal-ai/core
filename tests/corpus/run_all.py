@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Run all Sgraal corpus tests against the live API."""
+"""Run Rounds 1-4 corpus tests against the live API (329 cases).
+For Rounds 5-8, use: run_round5.py, round6_memory_time_attack.py, round7_identity_drift.py, round8_consensus_collapse.py
+For adversarial compound corpus: run_adversarial.py"""
 import json
 import sys
 import time
