@@ -690,6 +690,123 @@ def get_sla_status(domain: str = Query("general"), key_record: dict = Depends(ve
     }
 
 
+# ---- One-Click Migration ----
+
+class MigrateRequest(BaseModel):
+    source_format: str = "raw"
+    data: list = []
+    domain: str = "general"
+    action_type: str = "reversible"
+    source_trust: float = 0.8
+
+
+@app.post("/v1/migrate")
+def migrate_memory(req: MigrateRequest, key_record: dict = Depends(verify_api_key)):
+    """Convert external memory format to MemCube v3 and run preflight."""
+    # Reuse adapt logic
+    adapt_req = AdaptRequest(data=req.data, provider=req.source_format,
+                             domain=req.domain, source_trust=req.source_trust)
+    adapted = adapt_memory(adapt_req, key_record)
+    migrated = adapted["memory_state"]
+    warnings = []
+
+    if not migrated:
+        return {"migrated_memory_state": [], "entry_count": 0,
+                "source_format_detected": adapted["provider_detected"],
+                "preflight_result": {"recommended_action": "USE_MEMORY"},
+                "migration_warnings": ["No data to migrate"],
+                "ready_to_use": True}
+
+    # Run preflight on migrated data
+    pf_req = PreflightRequest(
+        memory_state=[MemoryEntryRequest(**e) for e in migrated],
+        domain=req.domain,
+        action_type=req.action_type,
+    )
+    pf_result = preflight(pf_req, key_record)
+    ready = pf_result.get("recommended_action") in ("USE_MEMORY", "WARN")
+
+    return {
+        "migrated_memory_state": migrated,
+        "entry_count": len(migrated),
+        "source_format_detected": adapted["provider_detected"],
+        "preflight_result": pf_result,
+        "migration_warnings": warnings,
+        "ready_to_use": ready,
+    }
+
+
+# ---- Policy Registry ----
+
+_policy_store: dict = {}  # in-memory fallback
+
+
+class PolicyCreateRequest(BaseModel):
+    name: str
+    config: dict
+
+
+class PolicyApplyByNameRequest(BaseModel):
+    memory_state: list
+    action_type: str = "reversible"
+
+
+@app.post("/v1/policies")
+def create_policy(req: PolicyCreateRequest, key_record: dict = Depends(verify_api_key)):
+    """Create or update a named policy."""
+    _kh = key_record.get("key_hash", "default")
+    policy = {"name": req.name, "config": req.config, "created_at": _time.time()}
+    _pk = f"policy:{_kh}:{req.name}"
+    redis_set(_pk, policy, ttl=86400 * 90)
+    _policy_store[_pk] = policy
+    return {"policy_id": _pk, "name": req.name, "created_at": policy["created_at"]}
+
+
+@app.get("/v1/policies")
+def list_policies(key_record: dict = Depends(verify_api_key)):
+    """List all policies for this API key."""
+    _kh = key_record.get("key_hash", "default")
+    _prefix = f"policy:{_kh}:"
+    policies = [{"policy_id": k, "name": v["name"], "domain": v["config"].get("domain", "general"),
+                 "created_at": v.get("created_at", 0)}
+                for k, v in _policy_store.items() if k.startswith(_prefix)]
+    return {"policies": policies, "count": len(policies)}
+
+
+@app.get("/v1/policies/{name}")
+def get_policy(name: str, key_record: dict = Depends(verify_api_key)):
+    """Get a specific policy by name."""
+    _kh = key_record.get("key_hash", "default")
+    _pk = f"policy:{_kh}:{name}"
+    pol = _policy_store.get(_pk) or redis_get(_pk)
+    if not pol:
+        raise HTTPException(status_code=404, detail=f"Policy '{name}' not found")
+    return pol
+
+
+@app.delete("/v1/policies/{name}")
+def delete_policy(name: str, key_record: dict = Depends(verify_api_key)):
+    """Delete a policy."""
+    _kh = key_record.get("key_hash", "default")
+    _pk = f"policy:{_kh}:{name}"
+    _policy_store.pop(_pk, None)
+    redis_delete(_pk)
+    return {"deleted": name}
+
+
+@app.post("/v1/policies/{name}/apply")
+def apply_named_policy(name: str, req: PolicyApplyByNameRequest, key_record: dict = Depends(verify_api_key)):
+    """Apply a named policy to a preflight request."""
+    _kh = key_record.get("key_hash", "default")
+    _pk = f"policy:{_kh}:{name}"
+    pol = _policy_store.get(_pk) or redis_get(_pk)
+    if not pol:
+        raise HTTPException(status_code=404, detail=f"Policy '{name}' not found")
+    cfg = pol.get("config", {})
+    apply_req = PolicyApplyRequest(config=cfg, memory_state=req.memory_state, action_type=req.action_type)
+    return apply_policy(apply_req, key_record)
+
+
 # ---- Calibration endpoints ----
 
 _last_calibration_report: dict = {}
