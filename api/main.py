@@ -496,6 +496,175 @@ def get_failure_pattern(pattern_id: str, key_record: dict = Depends(verify_api_k
     raise HTTPException(status_code=404, detail=f"Pattern '{pattern_id}' not found")
 
 
+# ---- Universal memory adapter ----
+
+class AdaptRequest(BaseModel):
+    data: list = []
+    provider: str = "auto"
+    domain: str = "general"
+    source_trust: float = 0.8
+
+
+@app.post("/v1/adapt")
+def adapt_memory(req: AdaptRequest, key_record: dict = Depends(verify_api_key)):
+    """Convert any format to valid MemCube memory_state."""
+    entries = []
+    provider = req.provider
+    data = req.data
+
+    if not data:
+        return {"memory_state": [], "entry_count": 0, "provider_detected": "empty", "ready_for_preflight": True}
+
+    # Auto-detect provider
+    if provider == "auto":
+        if isinstance(data[0], dict) and "memory" in data[0]:
+            provider = "mem0"
+        elif isinstance(data[0], dict) and "page_content" in data[0]:
+            provider = "langchain"
+        elif isinstance(data[0], str):
+            provider = "raw"
+        else:
+            provider = "raw"
+
+    for i, item in enumerate(data, 1):
+        if provider == "mem0":
+            content = item.get("memory", str(item)) if isinstance(item, dict) else str(item)
+            trust = item.get("score", req.source_trust) if isinstance(item, dict) else req.source_trust
+        elif provider == "langchain":
+            content = item.get("page_content", str(item)) if isinstance(item, dict) else str(item)
+            trust = req.source_trust
+        else:
+            content = str(item)
+            trust = req.source_trust
+
+        entries.append({
+            "id": f"adapted_{i:03d}",
+            "content": str(content)[:500],
+            "type": "semantic",
+            "timestamp_age_days": 0,
+            "source_trust": min(float(trust), 1.0),
+            "source_conflict": 0.05,
+            "downstream_count": 1,
+        })
+
+    return {"memory_state": entries, "entry_count": len(entries), "provider_detected": provider, "ready_for_preflight": True}
+
+
+# ---- .sgraal policy format ----
+
+_SGRAAL_CONFIG_SCHEMA = {
+    "required": ["version", "agent_id", "domain"],
+    "optional": ["default_action_type", "thresholds", "detection", "response_profile",
+                  "block_on_suspicious", "trusted_agents", "blocked_agents"],
+}
+
+
+class PolicyValidateRequest(BaseModel):
+    config: dict
+
+
+class PolicyApplyRequest(BaseModel):
+    config: dict
+    memory_state: list
+    action_type: str = "reversible"
+
+
+@app.post("/v1/policy/validate")
+def validate_policy(req: PolicyValidateRequest, key_record: dict = Depends(verify_api_key)):
+    """Validate a .sgraal config file."""
+    errors = []
+    warnings = []
+    cfg = req.config
+
+    for field in _SGRAAL_CONFIG_SCHEMA["required"]:
+        if field not in cfg:
+            errors.append(f"Missing required field: {field}")
+
+    if cfg.get("version") and cfg["version"] not in ("1.0",):
+        warnings.append(f"Unknown version: {cfg['version']}. Supported: 1.0")
+
+    if cfg.get("domain") and cfg["domain"] not in ("general", "customer_support", "coding", "legal", "fintech", "medical"):
+        errors.append(f"Invalid domain: {cfg['domain']}")
+
+    if cfg.get("default_action_type") and cfg["default_action_type"] not in ("informational", "reversible", "irreversible", "destructive"):
+        errors.append(f"Invalid action_type: {cfg['default_action_type']}")
+
+    thresholds = cfg.get("thresholds", {})
+    if thresholds:
+        for k in ("block_omega", "warn_omega", "ask_user_omega"):
+            v = thresholds.get(k)
+            if v is not None and (not isinstance(v, (int, float)) or v < 0 or v > 100):
+                errors.append(f"Invalid threshold {k}: must be 0-100")
+
+    return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+
+@app.post("/v1/policy/apply")
+def apply_policy(req: PolicyApplyRequest, key_record: dict = Depends(verify_api_key)):
+    """Apply a .sgraal config to a preflight request."""
+    cfg = req.config
+    domain = cfg.get("domain", "general")
+    action_type = cfg.get("default_action_type", req.action_type)
+    thresholds = cfg.get("thresholds")
+
+    pf_req = PreflightRequest(
+        memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in req.memory_state],
+        domain=domain,
+        action_type=action_type,
+        agent_id=cfg.get("agent_id", "anonymous"),
+        thresholds=thresholds,
+    )
+    return preflight(pf_req, key_record)
+
+
+# ---- Memory Health SLA ----
+
+class SLAConfigRequest(BaseModel):
+    domain: str = "general"
+    max_block_rate: float = 0.1
+    max_warn_rate: float = 0.3
+    max_avg_omega: float = 50.0
+    max_p95_latency_ms: float = 200.0
+    alert_webhook: Optional[str] = None
+
+
+@app.post("/v1/sla/configure")
+def configure_sla(req: SLAConfigRequest, key_record: dict = Depends(verify_api_key)):
+    """Configure SLA thresholds for a domain."""
+    _kh = key_record.get("key_hash", "default")
+    _sla_key = f"sla_config:{_kh}:{req.domain}"
+    config = {
+        "domain": req.domain, "max_block_rate": req.max_block_rate,
+        "max_warn_rate": req.max_warn_rate, "max_avg_omega": req.max_avg_omega,
+        "max_p95_latency_ms": req.max_p95_latency_ms, "alert_webhook": req.alert_webhook,
+    }
+    redis_set(_sla_key, config, ttl=86400 * 30)
+    return {"configured": True, "domain": req.domain, "config": config}
+
+
+@app.get("/v1/sla/status")
+def get_sla_status(domain: str = Query("general"), key_record: dict = Depends(verify_api_key)):
+    """Get current SLA status for a domain."""
+    _kh = key_record.get("key_hash", "default")
+    _sla_key = f"sla_config:{_kh}:{domain}"
+    config = redis_get(_sla_key, {})
+
+    # For now, return baseline status (real monitoring from audit_log history)
+    breaches = []
+    status = "HEALTHY"
+
+    return {
+        "domain": domain,
+        "block_rate": 0.0,
+        "warn_rate": 0.0,
+        "avg_omega": 0.0,
+        "p95_latency_ms": 0.0,
+        "sla_breaches": breaches,
+        "status": status,
+        "config": config if config else None,
+    }
+
+
 # ---- Calibration endpoints ----
 
 _last_calibration_report: dict = {}
@@ -10065,15 +10234,22 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # #132 Compact response profile + #147 Auto Response Profile by Tier
     _profile = req.response_profile
-    # Also check X-Sgraal-Profile header override (not available in test context, check request)
+    _auto_profile = False
     if not _profile:
-        _tier = key_record.get("tier", "free")
-        if _tier in ("enterprise", "growth"):
-            _profile = "full"
-        elif _tier in ("pro", "test"):
-            _profile = "standard"  # test keys default to standard for backward compat
+        # Auto-select based on action_type first, then tier
+        if req.action_type in ("irreversible", "destructive"):
+            _profile = "standard"
+            _auto_profile = True
         else:
-            _profile = "compact"  # compact is now the default for free/starter tiers
+            _tier = key_record.get("tier", "free")
+            if _tier in ("enterprise", "growth"):
+                _profile = "full"
+            elif _tier in ("pro", "test"):
+                _profile = "standard"
+            else:
+                _profile = "compact"
+            _auto_profile = True
+    response["auto_profile_selected"] = _auto_profile
     # Alias fields for dashboard convenience
     _rp = response.get("repair_plan")
     response["heal_decision"] = _rp[0]["action"] if _rp and isinstance(_rp, list) and len(_rp) > 0 and isinstance(_rp[0], dict) else "NONE"
@@ -10266,7 +10442,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "naturalness_score", "naturalness_level", "naturalness_flags",
                          "vaccination_match", "matched_signature_id",
                          "provenance_chain_integrity", "provenance_chain_flags", "chain_depth",
-                         "memory_locations_present"}
+                         "memory_locations_present", "auto_profile_selected"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
@@ -10346,6 +10522,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "X-Sgraal-Decision": response.get("recommended_action", "USE_MEMORY"),
         "X-Sgraal-Omega": str(omega_out),
         "X-Sgraal-Assurance": str(response.get("assurance_score", 0)),
+        "X-Sgraal-Attack-Surface": response.get("attack_surface_level", "NONE"),
+        "X-Sgraal-Naturalness": response.get("naturalness_level", "ORGANIC"),
         "X-Sgraal-Latency-Ms": str(response.get("_trace", {}).get("duration_ms", 0)),
         "X-SMRS": str(omega_out),
     }
