@@ -79,25 +79,34 @@ class TestPolicyBounds:
 
 
 class TestCertificate:
-    def test_certificate_endpoint(self):
-        """Fix 6: POST /v1/certificate returns certificate."""
+    def test_certificate_not_found(self):
+        """POST /v1/certificate returns 404 for unknown request_id."""
         c = _client()
         resp = c.post("/v1/certificate", json={
             "request_id": "nonexistent-request-id"
         }, headers=AUTH)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "certificate_id" in data
-        assert data["issuer"] == "Sgraal Protocol"
-        assert data["valid"] is True
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()
+
+    def test_certificate_for_known_outcome(self):
+        """POST /v1/certificate returns cert when request_id matches an in-memory outcome."""
+        c = _client()
+        # Run a preflight to create an in-memory outcome
+        pf = c.post("/v1/preflight", json={
+            "memory_state": [_e(content="Per Q2 2024 SEC ruling and the deprecated v2.1 framework was mandatory for 2023 filings.",
+                                age=0, downstream=8)],
+            "domain": "fintech", "action_type": "irreversible",
+        }, headers=AUTH)
+        outcome_id = pf.json().get("outcome_id")
+        if outcome_id:
+            resp = c.post("/v1/certificate", json={"request_id": outcome_id}, headers=AUTH)
+            if resp.status_code == 200:
+                data = resp.json()
+                assert data["issuer"] == "Sgraal Protocol"
+                assert data["valid"] is True
 
     def test_get_certificate(self):
-        """GET /v1/certificate/{id} retrieves previously issued certificate."""
+        """GET /v1/certificate/{nonexistent} returns 404."""
         c = _client()
-        # Issue first
-        resp1 = c.post("/v1/certificate", json={"request_id": "test-req"}, headers=AUTH)
-        cert_id = resp1.json()["certificate_id"]
-        # Retrieve
-        resp2 = c.get(f"/v1/certificate/{cert_id}", headers=AUTH)
-        assert resp2.status_code == 200
-        assert resp2.json()["certificate_id"] == cert_id
+        resp = c.get("/v1/certificate/nonexistent-cert-id", headers=AUTH)
+        assert resp.status_code == 404

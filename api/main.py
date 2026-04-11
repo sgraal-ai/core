@@ -858,14 +858,27 @@ class CertificateRequest(BaseModel):
 @app.post("/v1/certificate")
 def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify_api_key)):
     """Issue a governance certificate for a BLOCK event."""
-    # Look up in _outcomes or Redis
-    _outcome = _outcomes.get(req.request_id) or redis_get(f"outcome:{req.request_id}")
+    # 1. Check in-memory outcomes
+    _outcome = _outcomes.get(req.request_id)
     if not _outcome:
-        # Check if it's an outcome_id instead of request_id
         for _oid, _od in _outcomes.items():
             if _od.get("request_id") == req.request_id:
                 _outcome = _od
                 break
+    # 2. Check Redis
+    if not _outcome:
+        _outcome = redis_get(f"outcome:{req.request_id}")
+    # 3. Check Supabase audit_log
+    if not _outcome and supabase_service_client:
+        try:
+            _audit = supabase_service_client.table("audit_log").select("*").eq("request_id", req.request_id).execute()
+            if _audit.data and len(_audit.data) > 0:
+                _outcome = _audit.data[0]
+        except Exception:
+            pass
+    # 4. If still not found → 404
+    if not _outcome:
+        raise HTTPException(status_code=404, detail="Request ID not found in audit log.")
     cert_id = str(uuid.uuid4())
     cert = {
         "certificate_id": cert_id,
