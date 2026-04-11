@@ -641,7 +641,10 @@ def apply_policy(req: PolicyApplyRequest, key_record: dict = Depends(verify_api_
         agent_id=cfg.get("agent_id", "anonymous"),
         thresholds=thresholds,
     )
-    return preflight(pf_req, key_record)
+    result = preflight(pf_req, key_record)
+    if isinstance(result, dict):
+        result["policy_source"] = "inline"
+    return result
 
 
 # ---- Memory Health SLA ----
@@ -806,7 +809,32 @@ def apply_named_policy(name: str, req: PolicyApplyByNameRequest, key_record: dic
         raise HTTPException(status_code=404, detail=f"Policy '{name}' not found")
     cfg = pol.get("config", {})
     apply_req = PolicyApplyRequest(config=cfg, memory_state=req.memory_state, action_type=req.action_type)
-    return apply_policy(apply_req, key_record)
+    result = apply_policy(apply_req, key_record)
+    if isinstance(result, dict):
+        result["policy_source"] = "registry"
+    return result
+
+
+class PolicyCompareRequest(BaseModel):
+    inline: dict
+    registry_name: str
+
+
+@app.post("/v1/policies/compare")
+def compare_policies(req: PolicyCompareRequest, key_record: dict = Depends(verify_api_key)):
+    """Compare inline config vs named registry policy for conflicts."""
+    _kh = key_record.get("key_hash", "default")
+    _pk = f"policy:{_kh}:{req.registry_name}"
+    pol = _policy_store.get(_pk) or redis_get(_pk)
+    if not pol:
+        raise HTTPException(status_code=404, detail=f"Policy '{req.registry_name}' not found")
+    reg_cfg = pol.get("config", {})
+    conflicts = []
+    for key in set(list(req.inline.keys()) + list(reg_cfg.keys())):
+        if key in req.inline and key in reg_cfg and req.inline[key] != reg_cfg[key]:
+            conflicts.append({"field": key, "inline": req.inline[key], "registry": reg_cfg[key]})
+    return {"conflicts": conflicts, "conflict_count": len(conflicts),
+            "recommendation": "Inline policy takes precedence when both are applied to the same request."}
 
 
 # ---- Calibration endpoints ----
@@ -828,10 +856,16 @@ def run_calibration(req: CalibrationRunRequest, key_record: dict = Depends(verif
     cases = load_corpus_cases(req.corpus)
     if not cases:
         raise HTTPException(status_code=400, detail=f"No cases found for corpus '{req.corpus}'")
+    # Fix 10: quota warning for large corpus runs
+    _quota_cost = len(cases)
+    _quota_warning = f"This run will consume {_quota_cost} preflight calls" if _quota_cost > 100 else None
     engine = CalibrationEngine(api_url="https://api.sgraal.com", api_key="sg_demo_playground")
     report = engine.run_corpus_cases(cases)
     report.corpus_name = req.corpus
     report_dict = report.to_dict()
+    report_dict["calibration_quota_cost"] = _quota_cost
+    if _quota_warning:
+        report_dict["quota_warning"] = _quota_warning
     _last_calibration_report = report_dict
     # Flag ambiguous cases for human review
     if not req.dry_run:
@@ -6635,6 +6669,20 @@ def _check_identity_drift(memory_state: list) -> dict:
             _flags.append("confirmation_erosion:suspicious")
             _risk = max(_risk, 0.5)
 
+    # Fix 6: Cross-entry escalation aggregation
+    _total_cross_esc = 0
+    for entry in _entries:
+        if entry.get("type", "semantic") not in _identity_types:
+            continue
+        _cl = entry.get("content", "").lower()
+        _total_cross_esc += sum(1 for kw in _escalation_keywords if _re.search(r'\b' + _re.escape(kw) + r'\b', _cl))
+    if _total_cross_esc >= 5 and not any("authority_expansion:manipulated" in f for f in _flags):
+        _flags.append("cross_entry_escalation:manipulated")
+        _risk = max(_risk, 1.0)
+    elif _total_cross_esc >= 3 and not any("authority_expansion" in f for f in _flags):
+        _flags.append("cross_entry_escalation:suspicious")
+        _risk = max(_risk, 0.5)
+
     # PATTERN 2 — Permission lattice violation
     _perm_levels = {"read_only": 0, "read-only": 0, "annotate": 1, "recommend": 2,
                     "modify": 3, "approve": 4, "execute": 5, "admin": 6}
@@ -6732,11 +6780,22 @@ def _check_consensus_collapse(memory_state: list) -> dict:
 
     n_similar = max(len(_similar_groups), 1)
 
-    # Count independent roots: entries with unique (source_trust, downstream_count) pairs
-    _signatures = set()
-    for e in _entries:
-        _signatures.add((round(e.get("source_trust", 0), 2), e.get("downstream_count", 0)))
-    independent_roots = max(len(_signatures), 1)
+    # Count independent roots via content clusters (Fix 4: resist metadata-only variation)
+    _content_clusters = []
+    for i in range(n):
+        placed = False
+        for ci, cluster in enumerate(_content_clusters):
+            rep = cluster[0]
+            if all_tokens[i] and all_tokens[rep]:
+                inter = len(all_tokens[i] & all_tokens[rep])
+                uni = len(all_tokens[i] | all_tokens[rep])
+                if uni > 0 and inter / uni >= 0.3:
+                    cluster.append(i)
+                    placed = True
+                    break
+        if not placed:
+            _content_clusters.append([i])
+    independent_roots = max(len(_content_clusters), 1)
 
     collapse_ratio = round(n_similar / independent_roots, 2) if independent_roots > 0 else 0.0
 
@@ -6796,6 +6855,19 @@ def _check_consensus_collapse(memory_state: list) -> dict:
             _risk = max(_risk, 0.5)
             break  # One detection suffices
 
+    # Fix 1: Genuine consensus check — independent sources with natural variance
+    _genuine = False
+    if _flags and n >= 3:
+        _conflicts = [e.get("source_conflict", 0) for e in _entries]
+        _conflict_var = sum((c - sum(_conflicts)/n)**2 for c in _conflicts) / n if n > 0 else 0
+        _chains = [tuple(e.get("provenance_chain") or []) for e in _entries]
+        _nonempty_chains = [c for c in _chains if len(c) > 0]
+        _diverse_chains = len(set(_nonempty_chains)) == len(_nonempty_chains) and len(_nonempty_chains) >= 2
+        if _conflict_var > 0.05 or _diverse_chains:
+            _genuine = True
+            _flags = []
+            _risk = 0.0
+
     # Determine collapse level
     if any("manipulated" in f for f in _flags):
         _collapse = "MANIPULATED"
@@ -6807,6 +6879,7 @@ def _check_consensus_collapse(memory_state: list) -> dict:
     return {
         "consensus_collapse": _collapse,
         "consensus_collapse_flags": _flags,
+        "genuine_corroboration": _genuine,
         "collapse_ratio": collapse_ratio,
         "independent_root_estimate": independent_roots,
     }
@@ -6869,7 +6942,7 @@ def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rge
     return {"provenance_chain_integrity": _integrity, "provenance_chain_flags": _flags, "chain_depth": _max_depth}
 
 
-def _check_naturalness(memory_state: list) -> dict:
+def _check_naturalness(memory_state: list, action_type: str = "reversible") -> dict:
     """Detect synthetic/fabricated memory states via statistical naturalness signals."""
     _entries = []
     for e in memory_state:
@@ -6886,12 +6959,12 @@ def _check_naturalness(memory_state: list) -> dict:
     _score = 1.0
     n = len(_entries)
 
-    # SIGNAL 1 — Trust variance
+    # SIGNAL 1 — Trust variance (Fix 8: only flag if truly identical, not merely similar)
     if n >= 3:
         trusts = [e.get("source_trust", 0.5) for e in _entries]
         mean_t = sum(trusts) / n
         var_t = sum((t - mean_t) ** 2 for t in trusts) / n
-        if var_t < 0.005:
+        if var_t == 0.0 or (var_t < 0.00001 and n >= 3):  # truly identical or near-identical trust values
             _flags.append("uniform_trust")
             _score -= 0.2
 
@@ -6908,10 +6981,11 @@ def _check_naturalness(memory_state: list) -> dict:
             _score -= 0.2
             break
 
-    # SIGNAL 4 — Age distribution
+    # SIGNAL 4 — Age distribution (Fix 8: skip for informational batch imports)
     if n >= 3 and all(e.get("timestamp_age_days", 0) == 0 for e in _entries):
-        _flags.append("all_zero_age")
-        _score -= 0.2
+        if action_type in ("irreversible", "destructive"):
+            _flags.append("all_zero_age")
+            _score -= 0.2
 
     # SIGNAL 5 — Perfect trust scores
     if any(e.get("source_trust", 0) == 1.0 for e in _entries):
@@ -8174,6 +8248,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["provenance_chain_integrity"] = _pc_check["provenance_chain_integrity"]
         response["provenance_chain_flags"] = _pc_check["provenance_chain_flags"]
         response["chain_depth"] = _pc_check["chain_depth"]
+        response["provenance_unverified"] = True  # Fix 5: honest disclosure — chain is caller-provided
         if _pc_check["provenance_chain_integrity"] in ("MANIPULATED", "SUSPICIOUS"):
             repair_plan_out.append({
                 "action": "VERIFY_PROVENANCE", "entry_id": "*",
@@ -8210,7 +8285,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Naturalness score
     try:
-        _nat_check = _check_naturalness(req.memory_state)
+        _nat_check = _check_naturalness(req.memory_state, req.action_type)
         response["naturalness_score"] = _nat_check["naturalness_score"]
         response["naturalness_level"] = _nat_check["naturalness_level"]
         response["naturalness_flags"] = _nat_check["naturalness_flags"]
@@ -8249,22 +8324,23 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         except Exception:
             pass
 
-    # Memory vaccination — store signature on MANIPULATED BLOCK
+    # Memory vaccination — store signature on MANIPULATED BLOCK (Fix 2: require 2+ layers + omega>60)
     if _redis_enabled and response.get("recommended_action") == "BLOCK":
         try:
-            _any_manipulated = (
-                response.get("timestamp_integrity") == "MANIPULATED" or
-                response.get("identity_drift") == "MANIPULATED" or
-                response.get("consensus_collapse") == "MANIPULATED"
-            )
-            if _any_manipulated:
+            _manip_layers = sum(1 for v in [
+                response.get("timestamp_integrity") == "MANIPULATED",
+                response.get("identity_drift") == "MANIPULATED",
+                response.get("consensus_collapse") == "MANIPULATED",
+                response.get("provenance_chain_integrity") == "MANIPULATED",
+            ] if v)
+            if _manip_layers >= 2 and omega_out > 60:
                 _det_results = {
                     "timestamp_integrity": response.get("timestamp_integrity", "VALID"),
                     "identity_drift": response.get("identity_drift", "CLEAN"),
                     "consensus_collapse": response.get("consensus_collapse", "CLEAN"),
                 }
                 _sig = _extract_attack_signature(req.memory_state, _det_results, req.domain)
-                redis_set(f"vaccine:{_sig['signature_id']}", _sig, ttl=2592000)
+                redis_set(f"vaccine:{_sig['signature_id']}", _sig, ttl=604800)  # 7 days, not 30
                 # Update index
                 _vax_idx_key = f"vaccine_index:{req.domain}"
                 if _redis_enabled:
@@ -10469,7 +10545,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["hysteresis_band"] = 35 <= _omega_now <= 55
     response["stability_window"] = "narrow" if 35 <= _omega_now <= 55 else "wide" if (20 <= _omega_now < 35 or 55 < _omega_now <= 70) else "clear"
 
-    # Timestamp integrity override — AFTER all reconciliation, cannot be overridden
+    # Fix 9: Naturalness runs FIRST as context-setter (weakest signal)
+    _nat_level = response.get("naturalness_level", "ORGANIC")
+    if _nat_level == "FABRICATED":
+        _nat_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER", "ASK_USER": "BLOCK"}
+        _nat_cur = response["recommended_action"]
+        if _nat_cur in _nat_sev_map:
+            response["recommended_action"] = _nat_sev_map[_nat_cur]
+
+    # Timestamp integrity override — post-reconciliation
     _ts_integrity = response.get("timestamp_integrity", "VALID")
     if _ts_integrity == "MANIPULATED":
         response["recommended_action"] = "BLOCK"
@@ -10479,7 +10563,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _ts_cur in _ts_sev_map:
             response["recommended_action"] = _ts_sev_map[_ts_cur]
 
-    # Identity drift override — AFTER all reconciliation, cannot be overridden
+    # Identity drift override — post-reconciliation
     _id_drift = response.get("identity_drift", "CLEAN")
     if _id_drift == "MANIPULATED":
         response["recommended_action"] = "BLOCK"
@@ -10489,7 +10573,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _id_cur in _id_sev_map:
             response["recommended_action"] = _id_sev_map[_id_cur]
 
-    # Consensus collapse override — AFTER all reconciliation, cannot be overridden
+    # Consensus collapse override — post-reconciliation
     _cc_collapse = response.get("consensus_collapse", "CLEAN")
     if _cc_collapse == "MANIPULATED":
         response["recommended_action"] = "BLOCK"
@@ -10499,7 +10583,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _cc_cur in _cc_sev_map:
             response["recommended_action"] = _cc_sev_map[_cc_cur]
 
-    # Provenance chain override — AFTER all reconciliation, cannot be overridden
+    # Provenance chain override — post-reconciliation (last = strongest)
     _pc_integrity = response.get("provenance_chain_integrity", "CLEAN")
     if _pc_integrity == "MANIPULATED":
         response["recommended_action"] = "BLOCK"
@@ -10508,14 +10592,6 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _pc_cur = response["recommended_action"]
         if _pc_cur in _pc_sev_map:
             response["recommended_action"] = _pc_sev_map[_pc_cur]
-
-    # Naturalness override — FABRICATED escalates one tier
-    _nat_level = response.get("naturalness_level", "ORGANIC")
-    if _nat_level == "FABRICATED":
-        _nat_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER", "ASK_USER": "BLOCK"}
-        _nat_cur = response["recommended_action"]
-        if _nat_cur in _nat_sev_map:
-            response["recommended_action"] = _nat_sev_map[_nat_cur]
 
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
@@ -10537,6 +10613,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["decision_confidence"] = round(max(0.1, min(1.0, 1.0 - abs(_omega_now - 45) / 45)), 2)
     else:
         response["boundary_decision"] = False
+
+    # Fix 7: Store raw component values before display-only feedback
+    response["component_breakdown_raw"] = dict(response.get("component_breakdown", {}))
 
     # Detection-to-scoring feedback — boosts component_breakdown display values.
     # Note: does NOT change omega_mem_final (already computed). Display-only enrichment.
@@ -10592,7 +10671,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "naturalness_score", "naturalness_level", "naturalness_flags",
                          "vaccination_match", "matched_signature_id",
                          "provenance_chain_integrity", "provenance_chain_flags", "chain_depth",
-                         "memory_locations_present", "auto_profile_selected"}
+                         "memory_locations_present", "auto_profile_selected",
+                         "component_breakdown_raw", "provenance_unverified",
+                         "genuine_corroboration", "detection_feedback_display_only"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
@@ -10638,27 +10719,26 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if key_record.get("demo"):
         response["demo"] = True
 
-    # #138 Circuit Breaker check
+    # #138 Circuit Breaker check (Fix 3: monitor BLOCK decisions, not just omega)
     try:
         _cb_key = f"circuit_breaker:{key_record.get('key_hash','default')}:{req.domain}"
-        _cb_state = _rget(_cb_key, {"state": "CLOSED", "omega_history": [], "last_opened": 0})
-        _cb_hist = _cb_state.get("omega_history", [])
-        _cb_hist.append(omega_out)
-        _cb_hist = _cb_hist[-5:]
+        _cb_state = _rget(_cb_key, {"state": "CLOSED", "decision_history": [], "last_opened": 0})
+        _cb_decision_hist = _cb_state.get("decision_history", [])
+        _final_decision = response.get("recommended_action", "USE_MEMORY")
+        _cb_decision_hist.append(_final_decision)
+        _cb_decision_hist = _cb_decision_hist[-5:]
 
-        _ldt_prob = response.get("levy_flight", {}).get("extreme_event_probability", 0)
         if _cb_state["state"] == "OPEN":
             _last_opened = _cb_state.get("last_opened", 0)
             _recovery_elapsed = _time.time() - _last_opened if _last_opened else 999
-            # Auto-reset after 30-second recovery window OR if current omega is healthy
-            if _recovery_elapsed >= 30 or omega_out < 60:
-                _cb_state = {"state": "CLOSED", "omega_history": _cb_hist, "last_opened": 0}
+            if _recovery_elapsed >= 30 or _final_decision != "BLOCK":
+                _cb_state = {"state": "CLOSED", "decision_history": _cb_decision_hist, "last_opened": 0}
             else:
-                _cb_state = {"state": "OPEN", "omega_history": _cb_hist, "last_opened": _last_opened}
-        elif _ldt_prob > 0.1 or (len(_cb_hist) >= 5 and all(o > 80 for o in _cb_hist)):
-            _cb_state = {"state": "OPEN", "omega_history": _cb_hist, "last_opened": _time.time()}
+                _cb_state = {"state": "OPEN", "decision_history": _cb_decision_hist, "last_opened": _last_opened}
+        elif len(_cb_decision_hist) >= 5 and all(d == "BLOCK" for d in _cb_decision_hist):
+            _cb_state = {"state": "OPEN", "decision_history": _cb_decision_hist, "last_opened": _time.time()}
         else:
-            _cb_state = {"state": "CLOSED", "omega_history": _cb_hist, "last_opened": 0}
+            _cb_state = {"state": "CLOSED", "decision_history": _cb_decision_hist, "last_opened": 0}
 
         if not _is_dry_run:
             redis_set(_cb_key, _cb_state, ttl=300)

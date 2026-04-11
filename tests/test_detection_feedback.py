@@ -67,12 +67,12 @@ class TestDetectionFeedback:
     def test_interference_boost_on_suspicious_consensus(self):
         """Consensus collapse SUSPICIOUS → s_interference +20."""
         entries = [
-            _e(id="m1", content="Refund policy updated for standard customers.",
-               trust=0.88, conflict=0.03, downstream=3),
-            _e(id="m2", content="Standard customer refund policy updated.",
-               trust=0.88, conflict=0.03, downstream=3),
-            _e(id="m3", content="Updated refund policy for customers now active.",
-               trust=0.88, conflict=0.03, downstream=3),
+            _e(id="m1", content="Previously confirmed claim amount validated by prior review on file.",
+               trust=0.88, conflict=0.02, downstream=8),
+            _e(id="m2", content="Claim amount validated and confirmed by prior review on file.",
+               trust=0.88, conflict=0.02, downstream=8),
+            _e(id="m3", content="Prior review confirmed claim amount validated on file.",
+               trust=0.88, conflict=0.02, downstream=8),
         ]
         resp = _preflight(entries)
         assert resp["consensus_collapse"] in ("SUSPICIOUS", "MANIPULATED")

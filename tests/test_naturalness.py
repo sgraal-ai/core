@@ -9,11 +9,11 @@ def _e(id="m1", content="Standard data.", type="semantic", age=1, trust=0.9,
             "source_conflict": conflict, "downstream_count": downstream}
 
 
-def _call_check(entries):
+def _call_check(entries, action_type="reversible"):
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     from api.main import _check_naturalness
-    return _check_naturalness(entries)
+    return _check_naturalness(entries, action_type)
 
 
 def _preflight(entries, domain="general", action_type="informational"):
@@ -72,7 +72,8 @@ class TestNaturalnessDetection:
             _e(id="m2", age=0, trust=0.72, conflict=0.08),
             _e(id="m3", age=0, trust=0.93, conflict=0.12),
         ]
-        r = _call_check(entries)
+        # Fix 8: all_zero_age only flags for irreversible/destructive actions
+        r = _call_check(entries, action_type="irreversible")
         assert "all_zero_age" in r["naturalness_flags"]
 
     def test_multiple_signals_compound(self):
