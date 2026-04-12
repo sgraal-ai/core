@@ -904,6 +904,19 @@ def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify
     # 4. If still not found → 404
     if not _outcome:
         raise HTTPException(status_code=404, detail="Request ID not found in audit log.")
+    # Build memory state snapshot (content hashed for privacy)
+    _mem_snapshot = []
+    _mem_entries = _outcome.get("memory_state") or _outcome.get("entries") or []
+    for _me in _mem_entries:
+        _content = _me.get("content", "") if isinstance(_me, dict) else getattr(_me, "content", "")
+        _mem_snapshot.append({
+            "id": _me.get("id", "?") if isinstance(_me, dict) else getattr(_me, "id", "?"),
+            "content_hash": hashlib.sha256(str(_content).encode()).hexdigest(),
+            "type": _me.get("type", "semantic") if isinstance(_me, dict) else getattr(_me, "type", "semantic"),
+            "timestamp_age_days": _me.get("timestamp_age_days", 0) if isinstance(_me, dict) else getattr(_me, "timestamp_age_days", 0),
+            "source_trust": _me.get("source_trust", 0) if isinstance(_me, dict) else getattr(_me, "source_trust", 0),
+            "downstream_count": _me.get("downstream_count", 0) if isinstance(_me, dict) else getattr(_me, "downstream_count", 0),
+        })
     cert_id = str(uuid.uuid4())
     cert = {
         "certificate_id": cert_id,
@@ -911,6 +924,8 @@ def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify
         "request_id": req.request_id,
         "agent_action": "BLOCKED",
         "decision": "BLOCK",
+        "entry_count": len(_mem_snapshot),
+        "memory_state_snapshot": _mem_snapshot,
         "detection_summary": {
             "timestamp_integrity": (_outcome or {}).get("timestamp_integrity", "UNKNOWN"),
             "identity_drift": (_outcome or {}).get("identity_drift", "UNKNOWN"),
@@ -973,6 +988,7 @@ def run_calibration(req: CalibrationRunRequest, key_record: dict = Depends(verif
     # Fix 10: quota warning for large corpus runs
     _quota_cost = len(cases)
     _quota_warning = f"This run will consume {_quota_cost} preflight calls" if _quota_cost > 100 else None
+    _is_demo_caller = key_record.get("demo", False)
     engine = CalibrationEngine(api_url="https://api.sgraal.com", api_key="sg_demo_playground")
     report = engine.run_corpus_cases(cases)
     report.corpus_name = req.corpus
@@ -980,6 +996,8 @@ def run_calibration(req: CalibrationRunRequest, key_record: dict = Depends(verif
     report_dict["calibration_quota_cost"] = _quota_cost
     if _quota_warning:
         report_dict["quota_warning"] = _quota_warning
+    if not _is_demo_caller:
+        report_dict["calibration_key_warning"] = "Running calibration with a non-demo key. Side effects are suppressed by calibration_mode=True."
     _last_calibration_report = report_dict
     # Flag ambiguous cases for human review
     if not req.dry_run:
@@ -6662,9 +6680,10 @@ def _preprocess_entries(memory_state: list) -> list:
         content = d.get("content", "")
         content_lower = content.lower()
         tokens = set(w for w in content_lower.split() if len(w) >= 4 and w not in _STOPWORDS)
+        tokens_raw = set(content_lower.split())  # unfiltered for scoring engine
         result.append({
             "id": d.get("id", "?"), "content": content, "content_lower": content_lower,
-            "tokens": tokens, "type": d.get("type", "semantic"),
+            "tokens": tokens, "tokens_raw": tokens_raw, "type": d.get("type", "semantic"),
             "timestamp_age_days": d.get("timestamp_age_days", 0),
             "source_trust": d.get("source_trust", 0.5), "source_conflict": d.get("source_conflict", 0),
             "downstream_count": d.get("downstream_count", 0),
@@ -8047,6 +8066,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "component_breakdown": dict(result.component_breakdown),
         "recommended_action": result.recommended_action,
         "domain": req.domain,
+        "memory_state": [{"id": e.id, "content": e.content, "type": e.type,
+                          "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust,
+                          "downstream_count": e.downstream_count} for e in entries[:20]],
     }
 
     # Increment Global State Vector
@@ -10904,14 +10926,27 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         else:
             _cb_state = {"state": "CLOSED", "decision_history": _cb_decision_hist, "last_opened": 0}
 
+        # Fix 4: Cross-domain circuit breaker — if agent is compromised, block in ALL domains
+        _cross_domain = False
+        if _cb_state["state"] == "OPEN" and req.agent_id and _redis_enabled:
+            _comp_agents = _rget("compromised_agents", [])
+            if isinstance(_comp_agents, list) and req.agent_id in _comp_agents:
+                _cross_domain = True
+                # Set OPEN in all domains for this agent
+                for _xd in ("general", "customer_support", "coding", "legal", "fintech", "medical"):
+                    _xd_key = f"circuit_breaker:{key_record.get('key_hash','default')}:{_xd}"
+                    redis_set(_xd_key, {"state": "OPEN", "decision_history": ["BLOCK"] * 5, "last_opened": _time.time()}, ttl=300)
+
         if not _is_dry_run:
             redis_set(_cb_key, _cb_state, ttl=300)
         response["circuit_breaker_state"] = _cb_state["state"]
+        response["cross_domain_block"] = _cross_domain
         # #136 Push circuit_open event
         if _cb_state["state"] == "OPEN":
-            _push_event(_ev_kh, {"type": "circuit_open", "omega": omega_out, "domain": req.domain, "request_id": request_id})
+            _push_event(_ev_kh, {"type": "circuit_open", "omega": omega_out, "domain": req.domain, "request_id": request_id, "cross_domain": _cross_domain})
     except Exception:
         response["circuit_breaker_state"] = "CLOSED"
+        response["cross_domain_block"] = False
 
     # #116 Response headers (added to JSON response for now — actual HTTP headers via middleware)
     response["_headers"] = {
