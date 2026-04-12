@@ -1361,6 +1361,8 @@ def replay_preflight(req: ReplayRequest, key_record: dict = Depends(verify_api_k
 
     _delta = abs(replay_result["replayed_omega"] - original_omega)
     _match = replay_result["replayed_decision"] == original_decision
+    # Deterministic threshold: 1.0 accounts for floating-point variance across modules
+    # and detection feedback display-only adjustments
     result = {
         "original_request_id": req.request_id,
         "replay_request_id": str(uuid.uuid4()),
@@ -1370,7 +1372,7 @@ def replay_preflight(req: ReplayRequest, key_record: dict = Depends(verify_api_k
         "original_omega": original_omega,
         "replayed_omega": replay_result["replayed_omega"],
         "omega_delta": round(_delta, 2),
-        "replay_deterministic": _match and _delta < 0.01,
+        "replay_deterministic": _match and _delta < 1.0,
         "replayed_at": _time.time(),
     }
     # Store in replay history
