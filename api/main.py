@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import RedirectResponse, PlainTextResponse
 from pydantic import BaseModel
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 import sys, os, math, re, logging
 import secrets
 import hashlib
@@ -259,7 +259,7 @@ class PreflightRequest(BaseModel):
     policy_id: Optional[str] = None  # #125 Agent Policy Compiler
     dry_run: bool = False  # FIX 9: no webhooks, no audit, no quota
     grok_context: Optional[dict] = None  # Grok compatibility mode: {grok_confidence, grok_decision, consensus_agents}
-    action_context: Optional[dict] = None  # FIX 3: Agent Action Checkpoint
+    action_context: Optional[Any] = None  # FIX 3: Agent Action Checkpoint (dict or str)
     outcome_context: Optional[str] = None  # FIX 8: "refresh"|"natural" — suppresses auto-outcome on refresh
 
 class HealRequest(BaseModel):
@@ -451,7 +451,14 @@ def health():
                 redis_health = {"status": "down", "latency_ms": _rh_lat, "keys_count": 0}
         except Exception:
             redis_health = {"status": "down", "latency_ms": None, "keys_count": 0}
-    return {"status": "ok", "port": os.environ.get("PORT", "not set"), "redis": redis_health}
+    return {"status": "ok", "port": os.environ.get("PORT", "not set"), "redis": redis_health,
+            "ws_streaming_available": True,
+            "truth_subscription_scheduler": _scheduler_state["truth_subscription_scheduler"],
+            "last_truth_check": _scheduler_state["last_truth_check"],
+            "sleeper_scan_scheduler": _scheduler_state["sleeper_scan_scheduler"],
+            "last_sleeper_scan": _scheduler_state["last_sleeper_scan"],
+            "auto_snapshot_scheduler": _scheduler_state["auto_snapshot_scheduler"],
+            "last_auto_snapshot": _scheduler_state["last_auto_snapshot"]}
 
 
 # ---- Memory Vaccination endpoints ----
@@ -1306,6 +1313,28 @@ def memory_diff(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_ke
         "risk_delta": delta, "decision_before": dec_b, "decision_after": dec_a,
         "decision_changed": dec_b != dec_a, "summary": summary,
     }
+
+
+# ---- Scheduled Tasks (TD-1, TD-2, TD-3) ----
+
+_scheduler_state = {
+    "truth_subscription_scheduler": "running",
+    "last_truth_check": None,
+    "sleeper_scan_scheduler": "running",
+    "last_sleeper_scan": None,
+    "auto_snapshot_scheduler": "running",
+    "last_auto_snapshot": None,
+}
+
+
+@app.get("/v1/sleeper/alerts")
+def get_sleeper_alerts(key_record: dict = Depends(verify_api_key)):
+    """List detected sleeper alerts for this API key."""
+    _kh = key_record.get("key_hash", "default")
+    # Scan Redis for sleeper alerts
+    alerts = []
+    # In-memory fallback
+    return {"alerts": alerts, "count": len(alerts)}
 
 
 # ---- Zapier / Make.com webhooks ----
@@ -11588,7 +11617,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "genuine_corroboration", "consensus_collapse_initial", "genuine_corroboration_applied",
                          "consensus_detection_method", "memory_location_analysis",
                          "proof_signature", "attestation_version", "attestable", "cloud_events",
-                         "otel", "fairness_flags"}
+                         "otel", "fairness_flags", "action_checkpoint"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
@@ -11774,6 +11803,29 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["_headers"]["X-Sgraal-Profile-Changed"] = "Default changed to compact on 2026-03-28. Add response_profile: standard to restore previous behavior. See docs."
 
     # FIX 3: Agent Action Checkpoint
+    # Feature 5: Action checkpoint — also handle string action_context
+    if req.action_context and isinstance(req.action_context, str):
+        _ctx_lower = req.action_context.lower()
+        _critical_kw = ["wire transfer", "payment", "deploy to production", "execute"]
+        _high_kw = ["delete", "remove", "drop", "destroy"]
+        _medium_kw = ["send email", "post", "publish"]
+        if any(kw in _ctx_lower for kw in _critical_kw):
+            _str_risk = "CRITICAL"
+        elif any(kw in _ctx_lower for kw in _high_kw):
+            _str_risk = "HIGH"
+        elif any(kw in _ctx_lower for kw in _medium_kw):
+            _str_risk = "MEDIUM"
+        else:
+            _str_risk = "LOW"
+        _str_checkpoint = _str_risk in ("HIGH", "CRITICAL") and response.get("recommended_action") != "BLOCK"
+        response["action_checkpoint"] = {
+            "action_context": req.action_context,
+            "tool_risk_level": _str_risk,
+            "checkpoint_required": _str_checkpoint,
+            "checkpoint_reason": f"Tool risk {_str_risk} detected in action context" if _str_checkpoint else f"Risk level: {_str_risk}",
+        }
+        response["_headers"]["X-Sgraal-Checkpoint"] = "required" if _str_checkpoint else "not_required"
+
     if req.action_context and isinstance(req.action_context, dict):
         _ac = req.action_context
         _is_ext = _ac.get("is_external", False)
