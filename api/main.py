@@ -1308,6 +1308,161 @@ def memory_diff(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_ke
     }
 
 
+# ---- Zapier / Make.com webhooks ----
+
+_zapier_hooks: dict = {}
+_make_hooks: dict = {}
+
+
+class ZapierWebhookRequest(BaseModel):
+    webhook_url: str
+    trigger: str = "block"
+
+
+@app.post("/v1/zapier/webhook")
+def configure_zapier(req: ZapierWebhookRequest, key_record: dict = Depends(verify_api_key)):
+    """Configure a Zapier webhook trigger."""
+    _kh = key_record.get("key_hash", "default")
+    config = {"webhook_url": req.webhook_url, "trigger": req.trigger, "provider": "zapier", "configured_at": _time.time()}
+    _zapier_hooks[_kh] = config
+    redis_set(f"zapier_hook:{_kh}", config, ttl=86400 * 90)
+    return {"configured": True, "provider": "zapier", "trigger": req.trigger}
+
+
+@app.post("/v1/make/webhook")
+def configure_make(req: ZapierWebhookRequest, key_record: dict = Depends(verify_api_key)):
+    """Configure a Make.com webhook trigger."""
+    _kh = key_record.get("key_hash", "default")
+    config = {"webhook_url": req.webhook_url, "trigger": req.trigger, "provider": "make", "configured_at": _time.time()}
+    _make_hooks[_kh] = config
+    redis_set(f"make_hook:{_kh}", config, ttl=86400 * 90)
+    return {"configured": True, "provider": "make", "trigger": req.trigger}
+
+
+@app.get("/v1/integrations/webhooks")
+def list_webhooks(key_record: dict = Depends(verify_api_key)):
+    """List all configured webhooks for this API key."""
+    _kh = key_record.get("key_hash", "default")
+    hooks = []
+    for src, store, prefix in [("zapier", _zapier_hooks, "zapier_hook"), ("make", _make_hooks, "make_hook")]:
+        h = store.get(_kh) or redis_get(f"{prefix}:{_kh}")
+        if h:
+            hooks.append(h)
+    # Include custom webhook if configured
+    _wh = _webhook_configs.get(_kh) or redis_get(f"webhook_config:{_kh}")
+    if _wh:
+        hooks.append({**_wh, "provider": "custom"})
+    return {"webhooks": hooks, "count": len(hooks)}
+
+
+# ---- Embed SDK ----
+
+_EMBED_JS = '''(function(){
+  var cfg = document.currentScript.dataset;
+  var apiKey = cfg.apiKey || "sg_demo_playground";
+  var domain = cfg.domain || "general";
+  var blockOn = (cfg.blockOn || "BLOCK").split(",");
+
+  window.sgraal = {
+    _listeners: {},
+    preflight: function(memoryState) {
+      return fetch("https://api.sgraal.com/v1/preflight", {
+        method: "POST",
+        headers: {"Authorization": "Bearer " + apiKey, "Content-Type": "application/json"},
+        body: JSON.stringify({memory_state: memoryState, domain: domain, action_type: "reversible"})
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (blockOn.indexOf(d.recommended_action) >= 0) {
+          window.sgraal._emit("block", d);
+        } else if (d.recommended_action === "WARN") {
+          window.sgraal._emit("warn", d);
+        }
+        return d;
+      });
+    },
+    on: function(event, cb) {
+      if (!this._listeners[event]) this._listeners[event] = [];
+      this._listeners[event].push(cb);
+    },
+    _emit: function(event, data) {
+      (this._listeners[event] || []).forEach(function(cb) { cb(data); });
+    }
+  };
+})();'''
+
+
+@app.get("/v1/embed/sgraal-embed.js")
+def serve_embed_js():
+    """Serve the Sgraal embed SDK as JavaScript."""
+    return Response(content=_EMBED_JS, media_type="application/javascript")
+
+
+# ---- GitHub OAuth ----
+
+GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
+GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
+
+
+@app.get("/v1/auth/github")
+def github_oauth_start():
+    """Redirect to GitHub OAuth authorization."""
+    if not GITHUB_CLIENT_ID:
+        return {"error": "GitHub OAuth not configured", "detail": "Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET env vars"}
+    return RedirectResponse(
+        url=f"https://github.com/login/oauth/authorize?client_id={GITHUB_CLIENT_ID}&scope=user:email",
+        status_code=302)
+
+
+@app.get("/v1/auth/github/callback")
+def github_oauth_callback(code: str = Query(...)):
+    """Exchange GitHub OAuth code for API key."""
+    if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="GitHub OAuth not configured")
+    try:
+        # Exchange code for token
+        token_resp = http_requests.post("https://github.com/login/oauth/access_token",
+            json={"client_id": GITHUB_CLIENT_ID, "client_secret": GITHUB_CLIENT_SECRET, "code": code},
+            headers={"Accept": "application/json"}, timeout=10)
+        access_token = token_resp.json().get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=400, detail="GitHub OAuth failed")
+        # Get user info
+        user_resp = http_requests.get("https://api.github.com/user",
+            headers={"Authorization": f"token {access_token}"}, timeout=10)
+        user = user_resp.json()
+        email = user.get("email") or f"{user.get('login')}@github.com"
+        username = user.get("login", "unknown")
+        # Create or retrieve API key
+        api_key = _generate_api_key()
+        key_hash = _hash_key(api_key)
+        if supabase_service_client:
+            try:
+                supabase_service_client.table("api_keys").insert({
+                    "key_hash": key_hash, "customer_id": f"github_{username}",
+                    "email": email, "tier": "free", "calls_this_month": 0,
+                }).execute()
+                redis_set(f"api_key_valid:{key_hash[:16]}", {"valid": True, "user_id": f"github_{username}", "plan": "free"}, ttl=300)
+            except Exception:
+                pass
+        return {"api_key": api_key, "email": email, "github_username": username}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"GitHub OAuth error: {str(e)}")
+
+
+# ---- Playground Share ----
+
+@app.get("/v1/playground/share")
+def playground_share(result: str = Query(...)):
+    """Decode and return a shared playground result."""
+    import base64
+    try:
+        decoded = base64.b64decode(result).decode("utf-8")
+        return _json.loads(decoded)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid shared result")
+
+
 # ---- A2A Protocol support ----
 
 @app.get("/.well-known/agent.json")
