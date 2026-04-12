@@ -12353,7 +12353,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "genuine_corroboration", "consensus_collapse_initial", "genuine_corroboration_applied",
                          "consensus_detection_method", "memory_location_analysis",
                          "proof_signature", "attestation_version", "attestable", "cloud_events",
-                         "otel", "fairness_flags", "action_checkpoint", "zk_proof", "federation_check",
+                         "otel", "fairness_flags", "action_checkpoint", "zk_proof", "federation_check", "omega_adjusted",
+                         "omega_adjustment_reason", "detection_omega_contribution",
                          "provenance_signature", "provenance_signed", "replay_available",
                          "content_independence_score", "content_too_similar",
                          "domain_naturalness_baseline"}
@@ -12490,6 +12491,21 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Feature 4: OpenTelemetry trace IDs
     _trace_id = hashlib.md5(f"{request_id}:{_time.time()}".encode()).hexdigest()
     _span_id = _trace_id[:16]
+    # Feature 5: Three scoring tracks integration — omega_adjusted
+    _det_contrib = {
+        "timestamp_integrity": 30 if response.get("timestamp_integrity") == "MANIPULATED" else (10 if response.get("timestamp_integrity") == "SUSPICIOUS" else 0),
+        "identity_drift": 30 if response.get("identity_drift") == "MANIPULATED" else (10 if response.get("identity_drift") == "SUSPICIOUS" else 0),
+        "consensus_collapse": 30 if response.get("consensus_collapse") == "MANIPULATED" else (10 if response.get("consensus_collapse") == "SUSPICIOUS" else 0),
+        "provenance_chain_integrity": 30 if response.get("provenance_chain_integrity") == "MANIPULATED" else (10 if response.get("provenance_chain_integrity") == "SUSPICIOUS" else 0),
+        "naturalness": 15 if response.get("naturalness_level") == "FABRICATED" else (5 if response.get("naturalness_level") == "SYNTHETIC" else 0),
+    }
+    _total_det = sum(_det_contrib.values())
+    _omega_adj = min(100.0, round(omega_out + _total_det, 1))
+    _adj_reasons = [f"{k}={v}" for k, v in _det_contrib.items() if v > 0]
+    response["omega_adjusted"] = _omega_adj
+    response["omega_adjustment_reason"] = ", ".join(_adj_reasons) if _adj_reasons else "no detection adjustments"
+    response["detection_omega_contribution"] = _det_contrib
+
     # Feature 1: ZK Proof of Governance
     _zk_hash = hashlib.sha256(f"{_input_hash_full}:{omega_out}:{response.get('recommended_action', 'USE_MEMORY')}".encode()).hexdigest()
     response["zk_proof"] = {
