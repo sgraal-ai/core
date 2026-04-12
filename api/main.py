@@ -1452,7 +1452,7 @@ def ego_check(req: EgoCheckRequest, key_record: dict = Depends(verify_api_key)):
 @app.post("/v1/comply")
 def comply_with_court(req: dict = {}, key_record: dict = Depends(verify_api_key)):
     """Run compliance check and auto-open court case on violation."""
-    profile = req.get("profile", "GENERAL")
+    profile = (req.get("profile") or req.get("regulation") or req.get("compliance_profile") or "GENERAL").upper()
     domain = req.get("domain", "general")
     # Compliance check — profile-specific rules
     violations = []
