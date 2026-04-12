@@ -62,17 +62,14 @@ class TestOmegaAdjusted:
         assert "consensus_collapse" in contrib
 
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_WEB_STATIC_AVAILABLE = os.path.isfile(os.path.join(_ROOT, "web-static", "index.html"))
+
+
+@pytest.mark.skipif(not _WEB_STATIC_AVAILABLE, reason="web-static submodule not available in CI")
 class TestPageExists:
     def test_prov_page_exists(self):
-        _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        _path = os.path.join(_root, "web-static", "standard", "prov.html")
-        if not os.path.exists(os.path.join(_root, "web-static")):
-            pytest.skip("web-static submodule not checked out")
-        assert os.path.exists(_path)
+        assert os.path.exists(os.path.join(_ROOT, "web-static", "standard", "prov.html"))
 
     def test_cvss_page_exists(self):
-        _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        _path = os.path.join(_root, "web-static", "standard", "cvss.html")
-        if not os.path.exists(os.path.join(_root, "web-static")):
-            pytest.skip("web-static submodule not checked out")
-        assert os.path.exists(_path)
+        assert os.path.exists(os.path.join(_ROOT, "web-static", "standard", "cvss.html"))
