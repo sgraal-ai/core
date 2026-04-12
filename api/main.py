@@ -1056,6 +1056,90 @@ def verify_attestation(req: VerifyAttestationRequest):
     return {"valid": _valid, "message": "Attestation verified" if _valid else "Invalid attestation signature"}
 
 
+# ---- Webhook Configuration ----
+
+_webhook_configs: dict = {}
+
+
+class WebhookConfigRequest(BaseModel):
+    webhook_url: str
+    events: list = ["block", "warn", "memory_compressed"]
+
+
+@app.post("/v1/webhook/configure")
+def configure_webhook(req: WebhookConfigRequest, key_record: dict = Depends(verify_api_key)):
+    """Configure webhook for real-time event notifications."""
+    _kh = key_record.get("key_hash", "default")
+    config = {"webhook_url": req.webhook_url, "events": req.events, "configured_at": _time.time()}
+    _webhook_configs[_kh] = config
+    redis_set(f"webhook_config:{_kh}", config, ttl=86400 * 90)
+    return {"configured": True, "webhook_url": req.webhook_url, "events": req.events}
+
+
+@app.get("/v1/webhook/status")
+def get_webhook_status(key_record: dict = Depends(verify_api_key)):
+    """Return configured webhook for this API key."""
+    _kh = key_record.get("key_hash", "default")
+    config = _webhook_configs.get(_kh) or redis_get(f"webhook_config:{_kh}")
+    if not config:
+        return {"configured": False}
+    return {"configured": True, **config}
+
+
+# ---- Memory Diff ----
+
+class MemoryDiffRequest(BaseModel):
+    before: list
+    after: list
+    domain: str = "general"
+    action_type: str = "reversible"
+
+
+@app.post("/v1/memory-diff")
+def memory_diff(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_key)):
+    """Compare two memory states and show what changed."""
+    before_ids = {e.get("id") if isinstance(e, dict) else e.id for e in req.before}
+    after_ids = {e.get("id") if isinstance(e, dict) else e.id for e in req.after}
+    before_map = {(e.get("id") if isinstance(e, dict) else e.id): e for e in req.before}
+    after_map = {(e.get("id") if isinstance(e, dict) else e.id): e for e in req.after}
+
+    added = [after_map[eid] for eid in after_ids - before_ids]
+    removed = [before_map[eid] for eid in before_ids - after_ids]
+    modified = []
+    for eid in before_ids & after_ids:
+        b, a = before_map[eid], after_map[eid]
+        changes = []
+        for field in ("content", "source_trust", "source_conflict", "timestamp_age_days", "downstream_count"):
+            bv = b.get(field) if isinstance(b, dict) else getattr(b, field, None)
+            av = a.get(field) if isinstance(a, dict) else getattr(a, field, None)
+            if bv != av:
+                changes.append(f"{field}: {bv} → {av}")
+        if changes:
+            modified.append({"id": eid, "before": b, "after": a, "changes": changes})
+
+    # Run preflight on both states
+    pf_before = preflight(PreflightRequest(
+        memory_state=[MemoryEntryRequest(**(e if isinstance(e, dict) else {"id": e.id, "content": e.content, "type": e.type, "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust})) for e in req.before] if req.before else [MemoryEntryRequest(id="empty", content="", type="semantic", timestamp_age_days=0)],
+        domain=req.domain, action_type=req.action_type), key_record) if req.before else {"omega_mem_final": 0, "recommended_action": "USE_MEMORY"}
+    pf_after = preflight(PreflightRequest(
+        memory_state=[MemoryEntryRequest(**(e if isinstance(e, dict) else {"id": e.id, "content": e.content, "type": e.type, "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust})) for e in req.after] if req.after else [MemoryEntryRequest(id="empty", content="", type="semantic", timestamp_age_days=0)],
+        domain=req.domain, action_type=req.action_type), key_record) if req.after else {"omega_mem_final": 0, "recommended_action": "USE_MEMORY"}
+
+    omega_b = pf_before.get("omega_mem_final", 0) if isinstance(pf_before, dict) else 0
+    omega_a = pf_after.get("omega_mem_final", 0) if isinstance(pf_after, dict) else 0
+    dec_b = pf_before.get("recommended_action", "USE_MEMORY") if isinstance(pf_before, dict) else "USE_MEMORY"
+    dec_a = pf_after.get("recommended_action", "USE_MEMORY") if isinstance(pf_after, dict) else "USE_MEMORY"
+    delta = round(omega_a - omega_b, 2)
+
+    summary = f"{len(added)} added, {len(removed)} removed, {len(modified)} modified. Risk {'increased' if delta > 0 else 'decreased'} by {abs(delta)} points."
+
+    return {
+        "added": added, "removed": removed, "modified": modified,
+        "risk_delta": delta, "decision_before": dec_b, "decision_after": dec_a,
+        "decision_changed": dec_b != dec_a, "summary": summary,
+    }
+
+
 # ---- A2A Protocol support ----
 
 @app.get("/.well-known/agent.json")
@@ -8715,6 +8799,27 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["naturalness_level"] = "ORGANIC"
         response["naturalness_flags"] = []
 
+    # Feature 5: s_fairness scoring component
+    try:
+        import re as _fair_re
+        _fairness_flags = []
+        _unfairness = 0
+        _protected = _fair_re.compile(r'\b(race|gender|age|religion|nationality|sexual orientation|ethnicity|disability)\b', _fair_re.IGNORECASE)
+        _comparative = _fair_re.compile(r'\b(more|less|better|worse|higher|lower)\b.{0,30}\b(race|gender|age|religion|nationality)\b', _fair_re.IGNORECASE)
+        for e in entries:
+            content = e.content if hasattr(e, 'content') else str(e)
+            if _protected.search(content):
+                _unfairness += 20
+                _fairness_flags.append(f"protected_attribute:{e.id}")
+            if _comparative.search(content):
+                _unfairness += 30
+                _fairness_flags.append(f"comparative_bias:{e.id}")
+        _s_fairness = max(0, round(100 - _unfairness, 1))
+        response["component_breakdown"]["s_fairness"] = _s_fairness
+        response["fairness_flags"] = _fairness_flags
+    except Exception:
+        response["fairness_flags"] = []
+
     # Memory location metadata + URI analysis
     _locations = [getattr(e, "memory_location", None) for e in req.memory_state]
     _has_locations = any(_locations)
@@ -11159,7 +11264,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "component_breakdown_raw", "provenance_unverified",
                          "genuine_corroboration", "consensus_collapse_initial", "genuine_corroboration_applied",
                          "consensus_detection_method", "memory_location_analysis",
-                         "proof_signature", "attestation_version", "attestable", "cloud_events"}
+                         "proof_signature", "attestation_version", "attestable", "cloud_events",
+                         "otel", "fairness_flags"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
@@ -11289,6 +11395,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["attestation_version"] = "1.0"
     response["attestable"] = True
 
+    # Feature 4: OpenTelemetry trace IDs
+    _trace_id = hashlib.md5(f"{request_id}:{_time.time()}".encode()).hexdigest()
+    _span_id = _trace_id[:16]
+    response["otel"] = {
+        "trace_id": _trace_id,
+        "span_id": _span_id,
+        "traceparent": f"00-{_trace_id}-{_span_id}-01",
+    }
+
     # Feature 2: CloudEvents for detection transitions
     response["cloud_events"] = []
     _delta = response.get("preflight_delta", {})
@@ -11320,6 +11435,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "X-Sgraal-Naturalness": response.get("naturalness_level", "ORGANIC"),
         "X-Sgraal-Latency-Ms": str(response.get("_trace", {}).get("duration_ms", 0)),
         "X-SMRS": str(omega_out),
+        "traceparent": response.get("otel", {}).get("traceparent", ""),
+        "X-B3-TraceId": response.get("otel", {}).get("trace_id", ""),
     }
     if response.get("degraded_mode"):
         response["_headers"]["X-Sgraal-Degraded"] = "true"
