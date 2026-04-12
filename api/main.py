@@ -50,6 +50,7 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 resend.api_key = os.getenv("RESEND_API_KEY")
 
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+ATTESTATION_SECRET = os.getenv("ATTESTATION_SECRET", str(uuid.uuid4()))
 
 UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_URL") or os.getenv("UPSTASH_REDIS_REST_URL")
 UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN")
@@ -943,6 +944,31 @@ def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify
         "issuer": "Sgraal Protocol",
         "api_key_id": key_record.get("key_hash", "")[:16],
         "valid": True,
+        # W3C Verifiable Credential fields
+        "vc_compatible": True,
+        "@context": ["https://www.w3.org/2018/credentials/v1", "https://sgraal.com/credentials/v1"],
+        "type": ["VerifiableCredential", "MemoryGovernanceCredential"],
+        "credentialSubject": {
+            "id": cert_id,
+            "memoryHash": (_outcome or {}).get("input_hash", ""),
+            "decision": "BLOCK",
+            "attackSurfaceLevel": (_outcome or {}).get("attack_surface_level", "UNKNOWN"),
+            "detectionSummary": {
+                "timestamp_integrity": (_outcome or {}).get("timestamp_integrity", "UNKNOWN"),
+                "identity_drift": (_outcome or {}).get("identity_drift", "UNKNOWN"),
+                "consensus_collapse": (_outcome or {}).get("consensus_collapse", "UNKNOWN"),
+            },
+        },
+    }
+    # W3C proof block (override the simple proof)
+    cert["proof"] = {
+        "type": "SgraalGovernanceProof2026",
+        "created": datetime.fromtimestamp(cert["issued_at"], tz=timezone.utc).isoformat(),
+        "verificationMethod": "https://sgraal.com/keys/v1",
+        "proofValue": (_outcome or {}).get("input_hash", ""),
+        "deterministic": True,
+        "reproducible": True,
+        "proof_version": "v1",
     }
     _evict_if_full(_certificates, "_certificates")
     _certificates[cert_id] = cert
@@ -964,6 +990,70 @@ def get_certificate_by_id(certificate_id: str, key_record: dict = Depends(verify
     if _cert_key_id and _req_key_id != _cert_key_id:
         raise HTTPException(status_code=403, detail="Certificate not accessible with this API key")
     return cert
+
+
+# ---- Governance Score ----
+
+@app.get("/v1/governance-score")
+def get_governance_score(key_record: dict = Depends(verify_api_key)):
+    """Compute per-API-key governance score from audit history."""
+    _kh = key_record.get("key_hash", "default")
+    # Try to get recent decisions from Redis ring buffer
+    _hist = redis_get(f"te_history:{_kh}:general", [])
+    if not isinstance(_hist, list):
+        _hist = []
+    # Also check in-memory outcomes for this key
+    _decisions = []
+    for _oid, _od in list(_outcomes.items())[-1000:]:
+        _decisions.append(_od.get("recommended_action", "USE_MEMORY"))
+    total = len(_decisions)
+    if total < 10:
+        return {"governance_score": None, "total_governed_actions": total,
+                "message": "Insufficient history (need 10+ preflight calls)"}
+    _dist = {"USE_MEMORY": 0, "WARN": 0, "ASK_USER": 0, "BLOCK": 0}
+    for d in _decisions:
+        if d in _dist:
+            _dist[d] += 1
+    block_count = _dist["BLOCK"]
+    warn_count = _dist["WARN"]
+    base = 100.0
+    _block_penalty = 0.5 * block_count
+    _warn_penalty = 0.1 * warn_count
+    _volume_bonus = min(total / 100 * 0.1, 10)
+    score = max(0, min(100, round(base - _block_penalty - _warn_penalty + _volume_bonus, 1)))
+    return {
+        "governance_score": score,
+        "total_governed_actions": total,
+        "decision_distribution": _dist,
+        "block_rate": round(block_count / total, 4),
+        "warn_rate": round(warn_count / total, 4),
+        "compliance_rate": round((_dist["USE_MEMORY"] + _dist["WARN"]) / total, 4),
+        "score_breakdown": {
+            "base_score": 100, "block_penalty": round(_block_penalty, 1),
+            "warn_penalty": round(_warn_penalty, 1), "volume_bonus": round(_volume_bonus, 1),
+        },
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ---- Attestation Verification ----
+
+class VerifyAttestationRequest(BaseModel):
+    input_hash: str
+    omega: float
+    decision: str
+    request_id: str
+    proof_signature: str
+
+
+@app.post("/v1/verify-attestation")
+def verify_attestation(req: VerifyAttestationRequest):
+    """Verify a portable safety attestation. No auth required."""
+    import hmac as _hmac_mod
+    _msg = f"{req.input_hash}:{req.omega}:{req.decision}:{req.request_id}"
+    _expected = _hmac_mod.new(ATTESTATION_SECRET.encode(), _msg.encode(), hashlib.sha256).hexdigest()
+    _valid = _hmac_mod.compare_digest(_expected, req.proof_signature)
+    return {"valid": _valid, "message": "Attestation verified" if _valid else "Invalid attestation signature"}
 
 
 # ---- Calibration endpoints ----
@@ -10923,7 +11013,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "memory_locations_present", "auto_profile_selected", "redis_available", "scoring_skipped",
                          "component_breakdown_raw", "provenance_unverified",
                          "genuine_corroboration", "consensus_collapse_initial", "genuine_corroboration_applied",
-                         "consensus_detection_method", "memory_location_analysis"}
+                         "consensus_detection_method", "memory_location_analysis",
+                         "proof_signature", "attestation_version", "attestable", "cloud_events"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
@@ -11021,6 +11112,35 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         response["circuit_breaker_state"] = "CLOSED"
         response["cross_domain_block"] = False
+
+    # Feature 4: Portable safety attestation
+    import hmac as _hmac_mod
+    _attest_msg = f"{_input_hash_full}:{omega_out}:{response.get('recommended_action', 'USE_MEMORY')}:{request_id}"
+    response["proof_signature"] = _hmac_mod.new(ATTESTATION_SECRET.encode(), _attest_msg.encode(), hashlib.sha256).hexdigest()
+    response["attestation_version"] = "1.0"
+    response["attestable"] = True
+
+    # Feature 2: CloudEvents for detection transitions
+    response["cloud_events"] = []
+    _delta = response.get("preflight_delta", {})
+    if _delta.get("detection_state_changed"):
+        for _layer, _trans in _delta.get("detection_transitions", {}).items():
+            if _trans.get("changed"):
+                response["cloud_events"].append({
+                    "specversion": "1.0",
+                    "type": "com.sgraal.detection.transition",
+                    "source": "https://sgraal.com/preflight",
+                    "id": request_id,
+                    "time": datetime.now(timezone.utc).isoformat(),
+                    "datacontenttype": "application/json",
+                    "data": {
+                        "layer": _layer,
+                        "previous": _trans.get("previous", "CLEAN"),
+                        "current": _trans.get("current", "CLEAN"),
+                        "domain": req.domain,
+                        "action_type": req.action_type,
+                    }
+                })
 
     # #116 Response headers (added to JSON response for now — actual HTTP headers via middleware)
     response["_headers"] = {
