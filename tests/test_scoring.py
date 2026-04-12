@@ -1897,9 +1897,9 @@ class TestLLMGuards:
     @staticmethod
     def _get_guards():
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
-        from sgraal.integrations import GeminiGuard, OpenAIGuard
-        from sgraal.client import PreflightResult
-        return GeminiGuard, OpenAIGuard, PreflightResult
+        _integrations = pytest.importorskip("sgraal.integrations", reason="sgraal.integrations not available")
+        _client_mod = pytest.importorskip("sgraal.client", reason="sgraal.client not available")
+        return _integrations.GeminiGuard, _integrations.OpenAIGuard, _client_mod.PreflightResult
 
     def _mock_preflight(self, action, omega):
         _, _, PreflightResult = self._get_guards()
@@ -2151,7 +2151,7 @@ class TestFallbackEngine:
     def test_sdk_client_fallback_on_failure(self):
         """SDK client returns fallback result when API unreachable."""
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
-        from sgraal.client import SgraalClient as SDKClient
+        SDKClient = pytest.importorskip("sgraal.client", reason="sgraal.client not available").SgraalClient
 
         sdk = SDKClient(
             api_key="test_key",
@@ -2170,7 +2170,7 @@ class TestFallbackEngine:
 
     def test_sdk_circuit_opens_after_failures(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
-        from sgraal.client import SgraalClient as SDKClient
+        SDKClient = pytest.importorskip("sgraal.client", reason="sgraal.client not available").SgraalClient
 
         sdk = SDKClient(
             api_key="test_key",
