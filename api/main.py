@@ -9542,6 +9542,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["naturalness_score"] = _nat_check["naturalness_score"]
         response["naturalness_level"] = _nat_check["naturalness_level"]
         response["naturalness_flags"] = _nat_check["naturalness_flags"]
+        response["domain_naturalness_baseline"] = _nat_check.get("domain_naturalness_baseline", "standard")
         if _nat_check["naturalness_level"] == "SYNTHETIC":
             repair_plan_out.append({
                 "action": "VERIFY_NATURALNESS", "entry_id": "*",
