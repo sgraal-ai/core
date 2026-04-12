@@ -21,10 +21,10 @@ AUTH = {"Authorization": "Bearer sg_demo_playground"}
 
 
 class TestCertificateAccessControl:
-    def test_certificate_access_same_key(self):
-        """Issuing key can retrieve its own certificate."""
+    def test_demo_key_cannot_retrieve_certificate(self):
+        """Demo key gets 403 when trying to retrieve any certificate."""
         c = _client()
-        # Issue
+        # Issue a certificate first (demo key can issue)
         pf = c.post("/v1/preflight", json={
             "memory_state": [_e(content="Per Q2 2024 SEC ruling and deprecated v2.1 framework was mandatory for 2023 filings.",
                                 age=0, downstream=8)],
@@ -35,9 +35,10 @@ class TestCertificateAccessControl:
             cert_resp = c.post("/v1/certificate", json={"request_id": outcome_id}, headers=AUTH)
             if cert_resp.status_code == 200:
                 cert_id = cert_resp.json()["certificate_id"]
-                # Retrieve with same key → should work
+                # Demo key trying to GET → must get 403
                 get_resp = c.get(f"/v1/certificate/{cert_id}", headers=AUTH)
-                assert get_resp.status_code == 200
+                assert get_resp.status_code == 403
+                assert "Demo key" in get_resp.json()["detail"]
 
 
 class TestDictBounds:

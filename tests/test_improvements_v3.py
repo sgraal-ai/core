@@ -105,8 +105,8 @@ class TestCertificate:
                 assert data["issuer"] == "Sgraal Protocol"
                 assert data["valid"] is True
 
-    def test_get_certificate(self):
-        """GET /v1/certificate/{nonexistent} returns 404."""
+    def test_get_certificate_demo_blocked(self):
+        """GET /v1/certificate/{id} with demo key returns 403."""
         c = _client()
         resp = c.get("/v1/certificate/nonexistent-cert-id", headers=AUTH)
-        assert resp.status_code == 404
+        assert resp.status_code == 403

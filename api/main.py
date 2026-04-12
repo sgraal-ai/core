@@ -938,13 +938,15 @@ def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify
 @app.get("/v1/certificate/{certificate_id}")
 def get_certificate_by_id(certificate_id: str, key_record: dict = Depends(verify_api_key)):
     """Retrieve a previously issued certificate. Access restricted to issuing API key."""
+    # Access control — demo key blocked entirely
+    if key_record.get("demo"):
+        raise HTTPException(status_code=403, detail="Demo key cannot retrieve certificates")
     cert = _certificates.get(certificate_id) or redis_get(f"certificate:{certificate_id}")
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    # Fix 1: Access control — only the issuing key can retrieve
     _req_key_id = (key_record.get("key_hash") or "")[:16]
     _cert_key_id = cert.get("api_key_id", "")
-    if _req_key_id and _cert_key_id and _req_key_id != _cert_key_id:
+    if _cert_key_id and _req_key_id != _cert_key_id:
         raise HTTPException(status_code=403, detail="Certificate not accessible with this API key")
     return cert
 
