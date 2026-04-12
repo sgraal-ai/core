@@ -140,7 +140,7 @@ python3 tests/corpus/run_all.py
 
 **API** (api.sgraal.com) — Deployed on Railway via `Procfile`, auto-deploys from main:
 ```
-web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
+web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers 4
 ```
 
 **Dashboard** (app.sgraal.com) — Deployed on Vercel from `dashboard/`:
