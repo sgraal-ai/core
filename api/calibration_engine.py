@@ -50,6 +50,12 @@ class CalibrationEngine:
         self.api_url = api_url
         self.api_key = api_key
         self.headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        if api_key != "sg_demo_playground":
+            import logging
+            logging.getLogger(__name__).warning(
+                "Calibration with non-demo key '%s...' may pollute production state "
+                "(vaccines, compromised agents, circuit breaker). Use sg_demo_playground for safe calibration.",
+                api_key[:12])
 
     def _call_preflight(self, case: dict) -> Optional[dict]:
         if not http_requests:

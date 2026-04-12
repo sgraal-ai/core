@@ -130,6 +130,18 @@ async def sgraal_headers_middleware(request, call_next):
                              headers=dict(response.headers), media_type=response.media_type)
 
 
+_DICT_MAX_SIZE = 10000
+_DICT_EVICT_BATCH = 1000
+
+def _evict_if_full(d: dict, name: str = "cache"):
+    """Evict oldest entries if dict exceeds max size. Python 3.7+ dicts preserve insertion order."""
+    if len(d) > _DICT_MAX_SIZE:
+        keys_to_remove = list(d.keys())[:_DICT_EVICT_BATCH]
+        for k in keys_to_remove:
+            d.pop(k, None)
+        logger.info("Cache eviction: removed %d oldest entries from %s (was %d)", _DICT_EVICT_BATCH, name, _DICT_MAX_SIZE + 1)
+
+
 # In-memory API key store: api_key -> stripe_customer_id
 API_KEYS: dict[str, str] = {
     "sg_test_key_001": "cus_test_001",
@@ -784,6 +796,7 @@ def create_policy(req: PolicyCreateRequest, key_record: dict = Depends(verify_ap
     policy = {"name": req.name, "config": req.config, "created_at": _time.time()}
     _pk = f"policy:{_kh}:{req.name}"
     redis_set(_pk, policy, ttl=86400 * 90)
+    _evict_if_full(_policy_store, "_policy_store")
     _policy_store[_pk] = policy
     return {"policy_id": _pk, "name": req.name, "created_at": policy["created_at"]}
 
@@ -916,17 +929,23 @@ def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify
         "api_key_id": key_record.get("key_hash", "")[:16],
         "valid": True,
     }
+    _evict_if_full(_certificates, "_certificates")
     _certificates[cert_id] = cert
     redis_set(f"certificate:{cert_id}", cert, ttl=86400 * 90)
     return cert
 
 
 @app.get("/v1/certificate/{certificate_id}")
-def get_certificate(certificate_id: str, key_record: dict = Depends(verify_api_key)):
-    """Retrieve a previously issued certificate."""
+def get_certificate_by_id(certificate_id: str, key_record: dict = Depends(verify_api_key)):
+    """Retrieve a previously issued certificate. Access restricted to issuing API key."""
     cert = _certificates.get(certificate_id) or redis_get(f"certificate:{certificate_id}")
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
+    # Fix 1: Access control — only the issuing key can retrieve
+    _req_key_id = (key_record.get("key_hash") or "")[:16]
+    _cert_key_id = cert.get("api_key_id", "")
+    if _req_key_id and _cert_key_id and _req_key_id != _cert_key_id:
+        raise HTTPException(status_code=403, detail="Certificate not accessible with this API key")
     return cert
 
 
@@ -2626,6 +2645,7 @@ def async_preflight(req: PreflightRequest, key_record: dict = Depends(verify_api
         prompt_embedding=e.prompt_embedding, healing_counter=e.healing_counter)
         for e in req.memory_state]
     result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
+    _evict_if_full(_async_preflight_jobs, "_async_preflight_jobs")
     _async_preflight_jobs[job_id] = {
         "status": "complete",
         "api_key_hash": kh,
@@ -6944,6 +6964,9 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
             _risk = max(_risk, 0.5)
             break  # One detection suffices
 
+    # Capture initial result before genuine corroboration may clear it
+    _initial_collapse = "MANIPULATED" if any("manipulated" in f for f in _flags) else ("SUSPICIOUS" if _flags else "CLEAN")
+
     # Fix 1: Genuine consensus check — independent sources with natural variance
     _genuine = False
     if _flags and n >= 3:
@@ -6972,6 +6995,8 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
         "consensus_collapse": _collapse,
         "consensus_collapse_flags": _flags,
         "genuine_corroboration": _genuine,
+        "consensus_collapse_initial": _initial_collapse,
+        "genuine_corroboration_applied": _genuine and _initial_collapse != "CLEAN",
         "collapse_ratio": collapse_ratio,
         "independent_root_estimate": independent_roots,
     }
@@ -8007,6 +8032,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         for k in expired_jobs[:100]:
             _async_preflight_jobs.pop(k, None)
 
+    _evict_if_full(_outcomes, "_outcomes")
     _outcomes[outcome_id] = {
         "status": "open",
         "agent_id": req.agent_id,
@@ -8337,6 +8363,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["consensus_collapse"] = _cc_check["consensus_collapse"]
         response["consensus_collapse_flags"] = _cc_check["consensus_collapse_flags"]
         response["collapse_ratio"] = _cc_check["collapse_ratio"]
+        response["consensus_collapse_initial"] = _cc_check.get("consensus_collapse_initial", _cc_check["consensus_collapse"])
+        response["genuine_corroboration_applied"] = _cc_check.get("genuine_corroboration_applied", False)
         if _cc_check["consensus_collapse"] in ("MANIPULATED", "SUSPICIOUS"):
             repair_plan_out.append({
                 "action": "VERIFY_CONSENSUS", "entry_id": "*",
@@ -10797,7 +10825,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "provenance_chain_integrity", "provenance_chain_flags", "chain_depth",
                          "memory_locations_present", "auto_profile_selected", "redis_available", "scoring_skipped",
                          "component_breakdown_raw", "provenance_unverified",
-                         "genuine_corroboration"}
+                         "genuine_corroboration", "consensus_collapse_initial", "genuine_corroboration_applied"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
