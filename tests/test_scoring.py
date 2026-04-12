@@ -2089,6 +2089,15 @@ class TestCustomWeights:
 
 
 class TestFallbackEngine:
+    @classmethod
+    def setup_class(cls):
+        sdk_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python")
+        if sdk_path not in sys.path:
+            sys.path.insert(0, sdk_path)
+        for mk in list(sys.modules.keys()):
+            if mk.startswith("sgraal") and mk not in ("sgraal.integrations",):
+                sys.modules.pop(mk, None)
+
     def test_circuit_opens_after_threshold(self):
         cb = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
         assert cb.state == CircuitState.CLOSED
