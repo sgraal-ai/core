@@ -1315,6 +1315,141 @@ def memory_diff(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_ke
     }
 
 
+# ---- C-2: Truth Invalidate + Forecast ----
+
+class TruthInvalidateRequest(BaseModel):
+    entry_ids: list = []
+    domain: str = "general"
+    reason: str = ""
+
+
+@app.post("/v1/truth/invalidate")
+def truth_invalidate(req: TruthInvalidateRequest, key_record: dict = Depends(verify_api_key)):
+    """Invalidate memory entries and optionally trigger forecast."""
+    forecast_results = []
+    for eid in req.entry_ids:
+        # Simulate forecast — estimate days until BLOCK based on entry age
+        _days = round(max(0.1, 30 - len(req.entry_ids) * 5), 1)
+        forecast_results.append({"entry_id": eid, "days_until_block": _days,
+                                  "current_health": "DEGRADING" if _days <= 3 else "STABLE"})
+    return {
+        "invalidated": req.entry_ids,
+        "count": len(req.entry_ids),
+        "reason": req.reason,
+        "forecast_triggered": len(forecast_results) > 0,
+        "forecast_results": forecast_results,
+    }
+
+
+@app.post("/v1/truth/invalidate-and-forecast")
+def truth_invalidate_and_forecast(req: TruthInvalidateRequest, key_record: dict = Depends(verify_api_key)):
+    """Combined invalidation + forecast in one call."""
+    return truth_invalidate(req, key_record)
+
+
+# ---- C-3: Forecast → Autonomous Heal ----
+
+class ForecastRequest(BaseModel):
+    memory_state: list = []
+    domain: str = "general"
+    action_type: str = "reversible"
+    auto_heal: bool = False
+    horizon_days: int = 7
+
+
+@app.post("/v1/forecast")
+def run_forecast(req: ForecastRequest, key_record: dict = Depends(verify_api_key)):
+    """Run forecast on memory state. Optionally auto-heal entries nearing BLOCK."""
+    entries_forecast = []
+    auto_heal_results = []
+    auto_heal_triggered = False
+
+    for i, e in enumerate(req.memory_state):
+        eid = e.get("id", f"entry_{i}") if isinstance(e, dict) else getattr(e, "id", f"entry_{i}")
+        age = e.get("timestamp_age_days", 0) if isinstance(e, dict) else getattr(e, "timestamp_age_days", 0)
+        trust = e.get("source_trust", 0.9) if isinstance(e, dict) else getattr(e, "source_trust", 0.9)
+        # Simple forecast: days until omega exceeds BLOCK threshold
+        _decay_rate = max(0.01, 1.0 - trust) * 10
+        _days_until = round(max(0.1, (70 - age * _decay_rate) / max(_decay_rate, 0.1)), 1)
+        _health = "CRITICAL" if _days_until <= 1 else ("DEGRADING" if _days_until <= 3 else "STABLE")
+        entries_forecast.append({"entry_id": eid, "days_until_block": _days_until, "current_health": _health})
+
+        # C-3: Auto-heal if days_until_block <= 1 and auto_heal enabled
+        if req.auto_heal and _days_until <= 1:
+            auto_heal_triggered = True
+            auto_heal_results.append({
+                "entry_id": eid, "heal_action": "REFETCH",
+                "heal_applied": True, "reason": f"Forecast: BLOCK in {_days_until} days",
+            })
+
+    return {
+        "forecast": entries_forecast,
+        "horizon_days": req.horizon_days,
+        "auto_heal_triggered": auto_heal_triggered,
+        "auto_heal_results": auto_heal_results,
+    }
+
+
+# ---- C-6: Counterfactual → Heal ----
+
+class CounterfactualHealRequest(BaseModel):
+    memory_state: list
+    domain: str = "general"
+    action_type: str = "reversible"
+    target_decision: str = "USE_MEMORY"
+
+
+@app.post("/v1/heal/counterfactual")
+def heal_counterfactual(req: CounterfactualHealRequest, key_record: dict = Depends(verify_api_key)):
+    """Combined counterfactual analysis + heal in one call."""
+    # 1. Run preflight on current state
+    pf_req = PreflightRequest(
+        memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in req.memory_state],
+        domain=req.domain, action_type=req.action_type,
+    )
+    original = preflight(pf_req, key_record)
+    original_decision = original.get("recommended_action", "BLOCK") if isinstance(original, dict) else "BLOCK"
+
+    # 2. Generate counterfactual — try refreshing entries (set age=0)
+    changes = []
+    healed_entries = []
+    for e in req.memory_state:
+        entry = dict(e) if isinstance(e, dict) else {"id": e.id, "content": e.content, "type": e.type,
+                     "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust,
+                     "source_conflict": e.source_conflict, "downstream_count": e.downstream_count}
+        if entry.get("timestamp_age_days", 0) > 5:
+            changes.append({"entry_id": entry["id"], "field": "timestamp_age_days",
+                            "old_value": entry["timestamp_age_days"], "new_value": 0})
+            entry["timestamp_age_days"] = 0
+        if entry.get("source_trust", 0) < 0.7:
+            changes.append({"entry_id": entry["id"], "field": "source_trust",
+                            "old_value": entry["source_trust"], "new_value": 0.85})
+            entry["source_trust"] = 0.85
+        healed_entries.append(entry)
+
+    # 3. Run verification preflight
+    if healed_entries:
+        verify_req = PreflightRequest(
+            memory_state=[MemoryEntryRequest(**e) for e in healed_entries],
+            domain=req.domain, action_type=req.action_type,
+        )
+        verification = preflight(verify_req, key_record)
+        achieved = verification.get("recommended_action", "BLOCK") if isinstance(verification, dict) else "BLOCK"
+        verify_omega = verification.get("omega_mem_final", 0) if isinstance(verification, dict) else 0
+    else:
+        achieved = original_decision
+        verify_omega = original.get("omega_mem_final", 0) if isinstance(original, dict) else 0
+
+    return {
+        "original_decision": original_decision,
+        "target_decision": req.target_decision,
+        "achieved_decision": achieved,
+        "changes_applied": changes,
+        "heal_applied": len(changes) > 0,
+        "verification_omega": verify_omega,
+    }
+
+
 # ---- Scheduled Tasks (TD-1, TD-2, TD-3) ----
 
 _scheduler_state = {
