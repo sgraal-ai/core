@@ -1454,10 +1454,14 @@ def comply_with_court(req: dict = {}, key_record: dict = Depends(verify_api_key)
     """Run compliance check and auto-open court case on violation."""
     profile = req.get("profile", "GENERAL")
     domain = req.get("domain", "general")
-    # Simple compliance check
+    # Compliance check — profile-specific rules
     violations = []
     if profile == "EU_AI_ACT" and domain in ("medical", "legal"):
         violations.append({"article": "Article 12", "description": "Traceability required", "severity": "VIOLATION"})
+    if profile == "HIPAA" and domain == "medical":
+        violations.append({"article": "HIPAA §164.502", "description": "Patient data requires explicit consent for disclosure", "severity": "VIOLATION"})
+    if profile == "GDPR" and domain in ("general", "customer_support", "legal"):
+        violations.append({"article": "GDPR Art. 6", "description": "Lawful basis for processing required", "severity": "VIOLATION"})
     court_opened = False
     court_id = None
     if any(v.get("severity") == "VIOLATION" for v in violations):
