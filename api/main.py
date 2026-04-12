@@ -1093,7 +1093,8 @@ def register_memory(req: RegistryRegisterRequest, key_record: dict = Depends(ver
     now = _time.time()
     entry = {
         "registry_id": reg_id, "agent_id": req.agent_id, "memory_hash": _mem_hash,
-        "governance_score": pf_result.get("omega_mem_final", 0) if isinstance(pf_result, dict) else 0,
+        "governance_score": None,
+        "governance_score_note": "Insufficient history for governance score",
         "registered_at": now, "valid_until": now + 86400, "status": "VERIFIED",
         "api_key_id": key_record.get("key_hash", "")[:16],
     }
@@ -1206,6 +1207,13 @@ def subscribe_feed(req: FeedSubscribeRequest, key_record: dict = Depends(verify_
     return {"subscribed": True, "feed_id": req.feed_id}
 
 
+@app.get("/v1/feed/list")
+def list_feeds(key_record: dict = Depends(verify_api_key)):
+    """List available public feeds."""
+    return {"feeds": [{"feed_id": fid, "description": f.get("description", ""), "entry_count": len(f.get("entries", []))}
+                      for fid, f in _feeds.items()]}
+
+
 @app.get("/v1/feed/{feed_id}")
 def get_feed(feed_id: str, key_record: dict = Depends(verify_api_key)):
     """Get latest entries from a trusted feed."""
@@ -1214,13 +1222,6 @@ def get_feed(feed_id: str, key_record: dict = Depends(verify_api_key)):
         raise HTTPException(status_code=404, detail=f"Feed '{feed_id}' not found")
     return {"feed_id": feed_id, "description": feed.get("description", ""),
             "entries": feed.get("entries", []), "count": len(feed.get("entries", []))}
-
-
-@app.get("/v1/feed/list")
-def list_feeds(key_record: dict = Depends(verify_api_key)):
-    """List available public feeds."""
-    return {"feeds": [{"feed_id": fid, "description": f.get("description", ""), "entry_count": len(f.get("entries", []))}
-                      for fid, f in _feeds.items()]}
 
 
 # ---- Webhook Configuration ----
