@@ -680,6 +680,7 @@ class SLAConfigRequest(BaseModel):
     max_avg_omega: float = 50.0
     max_p95_latency_ms: float = 200.0
     alert_webhook: Optional[str] = None
+    alert_threshold: int = 3
 
 
 @app.post("/v1/sla/configure")
@@ -691,6 +692,7 @@ def configure_sla(req: SLAConfigRequest, key_record: dict = Depends(verify_api_k
         "domain": req.domain, "max_block_rate": req.max_block_rate,
         "max_warn_rate": req.max_warn_rate, "max_avg_omega": req.max_avg_omega,
         "max_p95_latency_ms": req.max_p95_latency_ms, "alert_webhook": req.alert_webhook,
+        "alert_threshold": req.alert_threshold,
     }
     redis_set(_sla_key, config, ttl=86400 * 30)
     return {"configured": True, "domain": req.domain, "config": config}
@@ -707,6 +709,10 @@ def get_sla_status(domain: str = Query("general"), key_record: dict = Depends(ve
     breaches = []
     status = "HEALTHY"
 
+    _day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    _breach_count = redis_get(f"sla_breach:{_kh}:{_day_key}", 0)
+    if isinstance(_breach_count, str):
+        _breach_count = int(_breach_count)
     return {
         "domain": domain,
         "block_rate": 0.0,
@@ -714,6 +720,9 @@ def get_sla_status(domain: str = Query("general"), key_record: dict = Depends(ve
         "avg_omega": 0.0,
         "p95_latency_ms": 0.0,
         "sla_breaches": breaches,
+        "consecutive_breaches": _breach_count,
+        "alert_webhook_configured": bool(config.get("alert_webhook")),
+        "last_breach_at": None,
         "status": status,
         "config": config if config else None,
     }
@@ -1054,6 +1063,164 @@ def verify_attestation(req: VerifyAttestationRequest):
     _expected = _hmac_mod.new(ATTESTATION_SECRET.encode(), _msg.encode(), hashlib.sha256).hexdigest()
     _valid = _hmac_mod.compare_digest(_expected, req.proof_signature)
     return {"valid": _valid, "message": "Attestation verified" if _valid else "Invalid attestation signature"}
+
+
+# ---- Verified Memory Registry ----
+
+_registry: dict = {}
+
+
+class RegistryRegisterRequest(BaseModel):
+    agent_id: str
+    memory_state: list
+    domain: str = "general"
+    action_type: str = "reversible"
+
+
+@app.post("/v1/registry/register")
+def register_memory(req: RegistryRegisterRequest, key_record: dict = Depends(verify_api_key)):
+    """Register agent memory as verified — only USE_MEMORY passes."""
+    pf_req = PreflightRequest(
+        memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in req.memory_state],
+        domain=req.domain, action_type=req.action_type, agent_id=req.agent_id,
+    )
+    pf_result = preflight(pf_req, key_record)
+    decision = pf_result.get("recommended_action", "BLOCK") if isinstance(pf_result, dict) else "BLOCK"
+    if decision != "USE_MEMORY":
+        raise HTTPException(status_code=422, detail=f"Memory not clean enough for registry: {decision}. Only USE_MEMORY qualifies.")
+    _mem_hash = pf_result.get("input_hash", "") if isinstance(pf_result, dict) else ""
+    reg_id = str(uuid.uuid4())
+    now = _time.time()
+    entry = {
+        "registry_id": reg_id, "agent_id": req.agent_id, "memory_hash": _mem_hash,
+        "governance_score": pf_result.get("omega_mem_final", 0) if isinstance(pf_result, dict) else 0,
+        "registered_at": now, "valid_until": now + 86400, "status": "VERIFIED",
+        "api_key_id": key_record.get("key_hash", "")[:16],
+    }
+    _registry[req.agent_id] = entry
+    redis_set(f"registry:{req.agent_id}", entry, ttl=86400)
+    return entry
+
+
+@app.get("/v1/registry/{agent_id}")
+def get_registry_entry(agent_id: str):
+    """Public: check if an agent has verified memory (no auth)."""
+    entry = _registry.get(agent_id) or redis_get(f"registry:{agent_id}")
+    if not entry:
+        raise HTTPException(status_code=404, detail="Agent not registered or registration expired")
+    if entry.get("valid_until", 0) < _time.time():
+        raise HTTPException(status_code=404, detail="Registration expired")
+    return entry
+
+
+@app.get("/v1/registry")
+def list_registry(key_record: dict = Depends(verify_api_key)):
+    """List all registered agents for this API key."""
+    _kh = key_record.get("key_hash", "")[:16]
+    entries = [v for v in _registry.values() if v.get("api_key_id") == _kh and v.get("valid_until", 0) > _time.time()]
+    return {"agents": entries, "count": len(entries)}
+
+
+# ---- Lineage Export ----
+
+@app.get("/v1/lineage/export")
+def export_lineage(format: str = Query("graphml"), agent_id: Optional[str] = None,
+                   limit: int = Query(50, le=200), key_record: dict = Depends(verify_api_key)):
+    """Export memory lineage graph in GraphML, JSON, or DOT format."""
+    # Build nodes/edges from recent outcomes
+    nodes = []
+    edges = []
+    for _oid, _od in list(_outcomes.items())[-limit:]:
+        if agent_id and _od.get("agent_id") != agent_id:
+            continue
+        _ms = _od.get("memory_state", [])
+        node = {
+            "id": _oid, "content_hash": _od.get("input_hash", _oid)[:16],
+            "decision": _od.get("recommended_action", "USE_MEMORY"),
+            "omega": _od.get("omega_mem_final", 0),
+            "timestamp": _od.get("created_at", ""),
+        }
+        nodes.append(node)
+        # Build edges from provenance chains
+        for e in _ms:
+            chain = e.get("provenance_chain", []) if isinstance(e, dict) else []
+            for i in range(len(chain) - 1):
+                edges.append({"source": chain[i], "target": chain[i + 1], "propagation_type": "direct"})
+
+    if format == "graphml":
+        xml_nodes = "\n".join(
+            f'    <node id="{n["id"]}">\n      <data key="content_hash">{n["content_hash"]}</data>\n'
+            f'      <data key="decision">{n["decision"]}</data>\n      <data key="omega">{n["omega"]}</data>\n'
+            f'      <data key="timestamp">{n["timestamp"]}</data>\n    </node>' for n in nodes)
+        xml_edges = "\n".join(
+            f'    <edge source="{e["source"]}" target="{e["target"]}">\n'
+            f'      <data key="propagation_type">{e["propagation_type"]}</data>\n    </edge>' for e in edges)
+        graphml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<graphml>
+  <graph id="memory_lineage" edgedefault="directed">
+{xml_nodes}
+{xml_edges}
+  </graph>
+</graphml>'''
+        return Response(content=graphml, media_type="application/xml")
+    elif format == "dot":
+        dot_nodes = "\n".join(f'  "{n["id"]}" [label="{n["decision"]}\\nomega={n["omega"]}"];' for n in nodes)
+        dot_edges = "\n".join(f'  "{e["source"]}" -> "{e["target"]}";' for e in edges)
+        dot = f"digraph memory_lineage {{\n{dot_nodes}\n{dot_edges}\n}}"
+        return PlainTextResponse(content=dot, media_type="text/plain")
+    else:
+        return {"nodes": nodes, "edges": edges, "count": len(nodes)}
+
+
+# ---- Trusted Memory Feed ----
+
+_feeds: dict = {"sgraal-public-policies": {
+    "feed_id": "sgraal-public-policies",
+    "description": "Sgraal governance policy entries — verified and safe to use",
+    "entries": [
+        {"id": "policy_001", "content": "All agent actions must be validated via preflight before execution.",
+         "type": "policy", "timestamp_age_days": 0, "source_trust": 1.0, "source_conflict": 0.0, "downstream_count": 0},
+        {"id": "policy_002", "content": "Memory entries older than 30 days must be refreshed before irreversible actions.",
+         "type": "policy", "timestamp_age_days": 0, "source_trust": 1.0, "source_conflict": 0.0, "downstream_count": 0},
+        {"id": "policy_003", "content": "Agent identity drift exceeding two escalation markers requires human review.",
+         "type": "policy", "timestamp_age_days": 0, "source_trust": 1.0, "source_conflict": 0.0, "downstream_count": 0},
+    ],
+}}
+_feed_subscribers: dict = {}
+
+
+class FeedSubscribeRequest(BaseModel):
+    feed_id: str
+    domain: str = "general"
+    webhook_url: Optional[str] = None
+
+
+@app.post("/v1/feed/subscribe")
+def subscribe_feed(req: FeedSubscribeRequest, key_record: dict = Depends(verify_api_key)):
+    """Subscribe to a trusted memory feed."""
+    if req.feed_id not in _feeds:
+        raise HTTPException(status_code=404, detail=f"Feed '{req.feed_id}' not found")
+    _kh = key_record.get("key_hash", "default")
+    _feed_subscribers[f"{_kh}:{req.feed_id}"] = {"feed_id": req.feed_id, "domain": req.domain,
+                                                    "webhook_url": req.webhook_url, "subscribed_at": _time.time()}
+    return {"subscribed": True, "feed_id": req.feed_id}
+
+
+@app.get("/v1/feed/{feed_id}")
+def get_feed(feed_id: str, key_record: dict = Depends(verify_api_key)):
+    """Get latest entries from a trusted feed."""
+    feed = _feeds.get(feed_id)
+    if not feed:
+        raise HTTPException(status_code=404, detail=f"Feed '{feed_id}' not found")
+    return {"feed_id": feed_id, "description": feed.get("description", ""),
+            "entries": feed.get("entries", []), "count": len(feed.get("entries", []))}
+
+
+@app.get("/v1/feed/list")
+def list_feeds(key_record: dict = Depends(verify_api_key)):
+    """List available public feeds."""
+    return {"feeds": [{"feed_id": fid, "description": f.get("description", ""), "entry_count": len(f.get("entries", []))}
+                      for fid, f in _feeds.items()]}
 
 
 # ---- Webhook Configuration ----
