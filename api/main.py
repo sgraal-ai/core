@@ -6676,7 +6676,8 @@ def _preprocess_entries(memory_state: list) -> list:
                  "type": getattr(e, "type", "semantic"), "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
                  "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
                  "downstream_count": getattr(e, "downstream_count", 0),
-                 "provenance_chain": getattr(e, "provenance_chain", None) or []}
+                 "provenance_chain": getattr(e, "provenance_chain", None) or [],
+                 "prompt_embedding": getattr(e, "prompt_embedding", None)}
         content = d.get("content", "")
         content_lower = content.lower()
         tokens = set(w for w in content_lower.split() if len(w) >= 4 and w not in _STOPWORDS)
@@ -6688,6 +6689,7 @@ def _preprocess_entries(memory_state: list) -> list:
             "source_trust": d.get("source_trust", 0.5), "source_conflict": d.get("source_conflict", 0),
             "downstream_count": d.get("downstream_count", 0),
             "provenance_chain": d.get("provenance_chain") or [],
+            "prompt_embedding": d.get("prompt_embedding"),
         })
     return result
 
@@ -6883,6 +6885,7 @@ def _check_identity_drift(memory_state: list, _preprocessed: list = None) -> dic
 def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) -> dict:
     """Detect silent consensus collapse — amplification mistaken for corroboration."""
     import re as _re
+    import math
     _flags = []
     _risk = 0.0
     _entries = _preprocessed if _preprocessed else _preprocess_entries(memory_state)
@@ -6895,34 +6898,48 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
     # Use preprocessed tokens if available, otherwise compute
     all_tokens = [e.get("tokens") or set(w for w in e.get("content", "").lower().split() if len(w) >= 4) for e in _entries]
 
+    # Check for embeddings — use cosine similarity if all entries have them
+    _embeddings = [e.get("prompt_embedding") for e in _entries]
+    _use_embeddings = all(emb and isinstance(emb, list) and len(emb) > 0 for emb in _embeddings)
+    _detection_method = "embedding" if _use_embeddings else "jaccard"
+
+    def _sim(i, j):
+        """Compute similarity between entries i and j."""
+        if _use_embeddings:
+            a, b = _embeddings[i], _embeddings[j]
+            dot = sum(x * y for x, y in zip(a, b))
+            na = math.sqrt(sum(x * x for x in a))
+            nb = math.sqrt(sum(x * x for x in b))
+            return dot / (na * nb) if na > 0 and nb > 0 else 0.0
+        else:
+            if not all_tokens[i] or not all_tokens[j]:
+                return 0.0
+            inter = len(all_tokens[i] & all_tokens[j])
+            uni = len(all_tokens[i] | all_tokens[j])
+            return inter / uni if uni > 0 else 0.0
+
+    _sim_threshold = 0.85 if _use_embeddings else 0.3
+
     # PATTERN 1 — Collapse Ratio
-    # Group similar entries (Jaccard > 0.2 with any other entry)
     _similar_groups = set()
     for i in range(n):
         for j in range(i + 1, n):
-            if not all_tokens[i] or not all_tokens[j]:
-                continue
-            intersection = len(all_tokens[i] & all_tokens[j])
-            union = len(all_tokens[i] | all_tokens[j])
-            if union > 0 and intersection / union >= 0.3:  # Unified with content cluster threshold
+            if _sim(i, j) >= _sim_threshold:
                 _similar_groups.add(i)
                 _similar_groups.add(j)
 
     n_similar = max(len(_similar_groups), 1)
 
-    # Count independent roots via content clusters (Fix 4: resist metadata-only variation)
+    # Count independent roots via content clusters
     _content_clusters = []
     for i in range(n):
         placed = False
         for ci, cluster in enumerate(_content_clusters):
             rep = cluster[0]
-            if all_tokens[i] and all_tokens[rep]:
-                inter = len(all_tokens[i] & all_tokens[rep])
-                uni = len(all_tokens[i] | all_tokens[rep])
-                if uni > 0 and inter / uni >= 0.3:
-                    cluster.append(i)
-                    placed = True
-                    break
+            if _sim(i, rep) >= _sim_threshold:
+                cluster.append(i)
+                placed = True
+                break
         if not placed:
             _content_clusters.append([i])
     independent_roots = max(len(_content_clusters), 1)
@@ -7020,6 +7037,7 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
         "genuine_corroboration_applied": _genuine and _initial_collapse != "CLEAN",
         "collapse_ratio": collapse_ratio,
         "independent_root_estimate": independent_roots,
+        "consensus_detection_method": _detection_method,
     }
 
 
@@ -8390,6 +8408,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["collapse_ratio"] = _cc_check["collapse_ratio"]
         response["consensus_collapse_initial"] = _cc_check.get("consensus_collapse_initial", _cc_check["consensus_collapse"])
         response["genuine_corroboration_applied"] = _cc_check.get("genuine_corroboration_applied", False)
+        response["consensus_detection_method"] = _cc_check.get("consensus_detection_method", "jaccard")
         if _cc_check["consensus_collapse"] in ("MANIPULATED", "SUSPICIOUS"):
             repair_plan_out.append({
                 "action": "VERIFY_CONSENSUS", "entry_id": "*",
@@ -8461,8 +8480,53 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["naturalness_level"] = "ORGANIC"
         response["naturalness_flags"] = []
 
-    # Memory location metadata
-    response["memory_locations_present"] = any(getattr(e, "memory_location", None) for e in req.memory_state)
+    # Memory location metadata + URI analysis
+    _locations = [getattr(e, "memory_location", None) for e in req.memory_state]
+    _has_locations = any(_locations)
+    response["memory_locations_present"] = _has_locations
+
+    if _has_locations:
+        _schemes = []
+        _external_sources = []
+        for loc in _locations:
+            if not loc:
+                continue
+            parts = str(loc).split("://", 1)
+            scheme = parts[0] if len(parts) == 2 else "unknown"
+            host = parts[1].split("/")[0] if len(parts) == 2 and "/" in parts[1] else ""
+            _schemes.append(scheme)
+            if scheme == "external":
+                _external_sources.append(host or parts[1] if len(parts) == 2 else loc)
+        _unique_schemes = set(_schemes) if _schemes else set()
+        _source_diversity = round(len(_unique_schemes) / max(len(_schemes), 1), 2)
+        # Cross-source risk: if entries from different schemes have similar content
+        _cross_risk = 0.0
+        try:
+            _loc_pp = _pp_entries
+        except NameError:
+            _loc_pp = _preprocess_entries(req.memory_state)
+        if len(_unique_schemes) >= 2 and len(_loc_pp) >= 2:
+            for i in range(len(_loc_pp)):
+                for j in range(i + 1, len(_loc_pp)):
+                    loc_i = _locations[i] if i < len(_locations) else None
+                    loc_j = _locations[j] if j < len(_locations) else None
+                    if loc_i and loc_j:
+                        s_i = str(loc_i).split("://")[0]
+                        s_j = str(loc_j).split("://")[0]
+                        if s_i != s_j:
+                            # Different schemes — check content similarity
+                            t_i = _loc_pp[i].get("tokens", set())
+                            t_j = _loc_pp[j].get("tokens", set())
+                            if t_i and t_j:
+                                _j_sim = len(t_i & t_j) / len(t_i | t_j) if len(t_i | t_j) > 0 else 0
+                                if _j_sim > 0.3:
+                                    _cross_risk = max(_cross_risk, round(_j_sim, 2))
+        response["memory_location_analysis"] = {
+            "sources_detected": sorted(_unique_schemes),
+            "source_diversity": _source_diversity,
+            "external_sources": _external_sources,
+            "cross_source_risk": _cross_risk,
+        }
 
     # Memory vaccination — check for known attack signatures
     response["vaccination_match"] = False
@@ -10858,7 +10922,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "provenance_chain_integrity", "provenance_chain_flags", "chain_depth",
                          "memory_locations_present", "auto_profile_selected", "redis_available", "scoring_skipped",
                          "component_breakdown_raw", "provenance_unverified",
-                         "genuine_corroboration", "consensus_collapse_initial", "genuine_corroboration_applied"}
+                         "genuine_corroboration", "consensus_collapse_initial", "genuine_corroboration_applied",
+                         "consensus_detection_method", "memory_location_analysis"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
