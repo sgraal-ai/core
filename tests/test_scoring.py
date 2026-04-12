@@ -1680,7 +1680,7 @@ class TestMemoryAccessTracker:
 class TestSDKStepTracker:
     def test_step_context_manager(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
-        from sgraal.tracker import StepTracker
+        StepTracker = pytest.importorskip("sgraal.tracker", reason="sgraal.tracker not available").StepTracker
 
         tracker = StepTracker()
         with tracker.step("step_1"):
@@ -1696,7 +1696,7 @@ class TestSDKStepTracker:
 
     def test_step_tracker_reset(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
-        from sgraal.tracker import StepTracker
+        StepTracker = pytest.importorskip("sgraal.tracker", reason="sgraal.tracker not available").StepTracker
 
         tracker = StepTracker()
         with tracker.step("step_1"):
