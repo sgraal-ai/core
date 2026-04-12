@@ -1343,14 +1343,16 @@ def replay_preflight(req: ReplayRequest, key_record: dict = Depends(verify_api_k
     original_omega = _outcome.get("omega_mem_final", 0)
     _ms = _outcome.get("memory_state", [])
 
-    # Re-run preflight on same memory state
+    # Re-run preflight on same memory state with same parameters
+    _original_action_type = _outcome.get("action_type", "reversible")
+    _original_domain = _outcome.get("domain", "general")
     replay_result = {"replayed_decision": original_decision, "replayed_omega": original_omega}
     if _ms:
         try:
             pf_req = PreflightRequest(
                 memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in _ms],
-                domain=_outcome.get("domain", "general"),
-                action_type="reversible",
+                domain=_original_domain,
+                action_type=_original_action_type,
             )
             pf = preflight(pf_req, key_record)
             if isinstance(pf, dict):
@@ -1361,8 +1363,7 @@ def replay_preflight(req: ReplayRequest, key_record: dict = Depends(verify_api_k
 
     _delta = abs(replay_result["replayed_omega"] - original_omega)
     _match = replay_result["replayed_decision"] == original_decision
-    # Deterministic threshold: 1.0 accounts for floating-point variance across modules
-    # and detection feedback display-only adjustments
+    # Deterministic: same decision AND core omega within 0.01 (A2 axiom — same input → same score)
     result = {
         "original_request_id": req.request_id,
         "replay_request_id": str(uuid.uuid4()),
@@ -1372,7 +1373,7 @@ def replay_preflight(req: ReplayRequest, key_record: dict = Depends(verify_api_k
         "original_omega": original_omega,
         "replayed_omega": replay_result["replayed_omega"],
         "omega_delta": round(_delta, 2),
-        "replay_deterministic": _match and _delta < 1.0,
+        "replay_deterministic": _match and _delta < 0.01,
         "replayed_at": _time.time(),
     }
     # Store in replay history
@@ -9314,9 +9315,11 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "component_breakdown": dict(result.component_breakdown),
         "recommended_action": result.recommended_action,
         "domain": req.domain,
+        "action_type": req.action_type,
         "memory_state": [{"id": e.id, "content": e.content, "type": e.type,
                           "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust,
-                          "downstream_count": e.downstream_count} for e in entries[:20]],
+                          "source_conflict": e.source_conflict, "downstream_count": e.downstream_count}
+                         for e in entries[:20]],
     }
 
     # Increment Global State Vector
