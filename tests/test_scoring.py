@@ -1680,6 +1680,8 @@ class TestMemoryAccessTracker:
 class TestSDKStepTracker:
     def test_step_context_manager(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+        for _mk in ["sgraal.client", "sgraal.tracker"]:
+            sys.modules.pop(_mk, None)
         StepTracker = pytest.importorskip("sgraal.tracker", reason="sgraal.tracker not available").StepTracker
 
         tracker = StepTracker()
@@ -1696,6 +1698,8 @@ class TestSDKStepTracker:
 
     def test_step_tracker_reset(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+        for _mk in ["sgraal.client", "sgraal.tracker"]:
+            sys.modules.pop(_mk, None)
         StepTracker = pytest.importorskip("sgraal.tracker", reason="sgraal.tracker not available").StepTracker
 
         tracker = StepTracker()
@@ -2150,7 +2154,11 @@ class TestFallbackEngine:
 
     def test_sdk_client_fallback_on_failure(self):
         """SDK client returns fallback result when API unreachable."""
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+        _sdk_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python")
+        sys.path.insert(0, _sdk_path)
+        # Force reimport from local SDK (not cached pip version)
+        for _mk in ["sgraal.client", "sgraal.tracker"]:
+            sys.modules.pop(_mk, None)
         SDKClient = pytest.importorskip("sgraal.client", reason="sgraal.client not available").SgraalClient
 
         sdk = SDKClient(
@@ -2169,7 +2177,10 @@ class TestFallbackEngine:
         assert result.circuit_state in ("CLOSED", "OPEN")
 
     def test_sdk_circuit_opens_after_failures(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python"))
+        _sdk_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python")
+        sys.path.insert(0, _sdk_path)
+        for _mk in ["sgraal.client", "sgraal.tracker"]:
+            sys.modules.pop(_mk, None)
         SDKClient = pytest.importorskip("sgraal.client", reason="sgraal.client not available").SgraalClient
 
         sdk = SDKClient(
