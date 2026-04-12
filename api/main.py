@@ -105,10 +105,12 @@ app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS, allow_methods
 @app.middleware("http")
 async def sgraal_headers_middleware(request, call_next):
     """Copy _headers from JSON response body into actual HTTP response headers.
-    Skips streaming responses (text/event-stream) to avoid breaking SSE."""
+    Only processes /v1/preflight responses. Skips all other endpoints."""
+    # Fix 1: Only apply to preflight endpoints
+    if not request.url.path.startswith("/v1/preflight"):
+        return await call_next(request)
     response = await call_next(request)
     content_type = response.headers.get("content-type", "")
-    # Skip non-JSON and streaming responses
     if response.status_code != 200 or "application/json" not in content_type or "text/event-stream" in content_type:
         return response
     body_parts = []
@@ -739,6 +741,16 @@ def migrate_memory(req: MigrateRequest, key_record: dict = Depends(verify_api_ke
     )
     pf_result = preflight(pf_req, key_record)
     ready = pf_result.get("recommended_action") in ("USE_MEMORY", "WARN")
+
+    # Fix 4: Audit logging for migrate calls (same as preflight)
+    try:
+        _audit_log("migrate", str(uuid.uuid4()), key_record,
+                   pf_result.get("recommended_action", "USE_MEMORY"),
+                   pf_result.get("omega_mem_final", 0),
+                   {"migration_source": "v1/migrate", "source_format": req.source_format,
+                    "entry_count": len(migrated)})
+    except Exception:
+        pass
 
     return {
         "migrated_memory_state": migrated,
@@ -7070,7 +7082,7 @@ def _check_naturalness(memory_state: list, action_type: str = "reversible", _pre
     return {"naturalness_score": _score, "naturalness_level": _level, "naturalness_flags": _flags}
 
 
-def _extract_attack_signature(memory_state: list, detection_results: dict, domain: str) -> dict:
+def _extract_attack_signature(memory_state: list, detection_results: dict, domain: str, content_hash: str = None) -> dict:
     """Extract vaccine signature from a blocked attack for fleet-wide immunity."""
     _entries = []
     for e in memory_state:
@@ -7080,7 +7092,8 @@ def _extract_attack_signature(memory_state: list, detection_results: dict, domai
             _entries.append({"content": getattr(e, "content", ""), "downstream_count": getattr(e, "downstream_count", 0),
                 "source_trust": getattr(e, "source_trust", 0.5)})
 
-    content_hash = hashlib.sha256(_entries[0].get("content", "").encode()).hexdigest()[:16] if _entries else ""
+    if not content_hash:
+        content_hash = hashlib.sha256(_entries[0].get("content", "").encode()).hexdigest()[:16] if _entries else ""
     max_ds = max((e.get("downstream_count", 0) for e in _entries), default=0)
     trusts = [e.get("source_trust", 0.5) for e in _entries]
     mean_t = sum(trusts) / max(len(trusts), 1)
@@ -7900,10 +7913,28 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _snapshot = None
         _snapshot_taken = False
 
-    _module_times = {}
-    _mt_start = _time.monotonic()
-    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, _effective_weights, req.thresholds, req.use_pagerank)
-    _module_times["scoring_engine"] = round((_time.monotonic() - _mt_start) * 1000, 1)
+    # Fix 3: Detection-first short circuit for obvious MANIPULATED cases
+    _scoring_skipped = False
+    _pp_early = _preprocess_entries(req.memory_state)
+    _early_ts = _check_timestamp_integrity(req.memory_state, _preprocessed=_pp_early)
+    _early_id = _check_identity_drift(req.memory_state, _preprocessed=_pp_early)
+    _early_cc = _check_consensus_collapse(req.memory_state, _preprocessed=_pp_early)
+    _manip_count = sum(1 for r in [
+        _early_ts.get("timestamp_integrity"), _early_id.get("identity_drift"), _early_cc.get("consensus_collapse")
+    ] if r == "MANIPULATED")
+    if _manip_count >= 2 and req.action_type in ("irreversible", "destructive"):
+        # Short circuit: skip 83-module scoring pipeline
+        _scoring_skipped = True
+        from scoring_engine.omega_mem import PreflightResult
+        result = PreflightResult(omega_mem_final=100.0, recommended_action="BLOCK", assurance_score=0.0,
+                             explainability_note="Detection short circuit: multiple MANIPULATED layers on irreversible action",
+                             component_breakdown={}, repair_plan=[], healing_counter=0)
+        _module_times = {"scoring_engine": 0.0}
+    else:
+        _module_times = {}
+        _mt_start = _time.monotonic()
+        result = compute(entries, req.action_type, req.domain, req.current_goal_embedding, _effective_weights, req.thresholds, req.use_pagerank)
+        _module_times["scoring_engine"] = round((_time.monotonic() - _mt_start) * 1000, 1)
 
     # Fetch te_history ONCE for all time-series modules (eliminates 10 redundant Redis calls)
     # Use snapshot if available, fall back to live Redis
@@ -8217,6 +8248,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "omega_mem_final": omega_out,
         "memcube_version": "2.0.0",
         "input_hash": _input_hash_full,
+        "scoring_skipped": _scoring_skipped,
         "deterministic": True,
         "reproducible": True,
         "proof_version": "v1",
@@ -8373,7 +8405,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["matched_signature_id"] = None
     if _redis_enabled and len(entries) > 0:
         try:
-            _vax_hash = hashlib.sha256(entries[0].content.encode()).hexdigest()[:16]
+            _vax_hash = _input_hash_full[:16]  # Fix 2: reuse canonical hash
             _vax_idx_key = f"vaccine_index:{req.domain}"
             _vax_ids = _rget(_vax_idx_key, [])
             if isinstance(_vax_ids, list):
@@ -8404,7 +8436,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "identity_drift": response.get("identity_drift", "CLEAN"),
                     "consensus_collapse": response.get("consensus_collapse", "CLEAN"),
                 }
-                _sig = _extract_attack_signature(req.memory_state, _det_results, req.domain)
+                _sig = _extract_attack_signature(req.memory_state, _det_results, req.domain, content_hash=_input_hash_full[:16])
                 redis_set(f"vaccine:{_sig['signature_id']}", _sig, ttl=604800)  # 7 days, not 30
                 # Update index
                 _vax_idx_key = f"vaccine_index:{req.domain}"
@@ -10752,7 +10784,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                          "naturalness_score", "naturalness_level", "naturalness_flags",
                          "vaccination_match", "matched_signature_id",
                          "provenance_chain_integrity", "provenance_chain_flags", "chain_depth",
-                         "memory_locations_present", "auto_profile_selected", "redis_available",
+                         "memory_locations_present", "auto_profile_selected", "redis_available", "scoring_skipped",
                          "component_breakdown_raw", "provenance_unverified",
                          "genuine_corroboration"}
         # Truncate repair_plan to top 3 in compact mode
