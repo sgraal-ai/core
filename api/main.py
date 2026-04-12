@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, Response, Cookie, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import Literal, Optional
 import sys, os, math, re, logging
@@ -1054,6 +1054,103 @@ def verify_attestation(req: VerifyAttestationRequest):
     _expected = _hmac_mod.new(ATTESTATION_SECRET.encode(), _msg.encode(), hashlib.sha256).hexdigest()
     _valid = _hmac_mod.compare_digest(_expected, req.proof_signature)
     return {"valid": _valid, "message": "Attestation verified" if _valid else "Invalid attestation signature"}
+
+
+# ---- Sgraal Certified Badge ----
+
+@app.get("/v1/badge")
+def get_badge():
+    """Returns an SVG badge: Sgraal Certified | Memory Governed."""
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" width="220" height="20">
+<rect width="80" height="20" fill="#0B0F14" rx="3"/>
+<rect x="80" width="140" height="20" fill="#c9a962" rx="3"/>
+<rect x="80" width="4" height="20" fill="#c9a962"/>
+<text x="12" y="14" font-family="sans-serif" font-size="11" fill="#fff">&#x1F6E1; Sgraal</text>
+<text x="92" y="14" font-family="sans-serif" font-size="11" fill="#0B0F14">Memory Governed</text>
+</svg>'''
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@app.get("/v1/badge/status/{api_key_id}")
+def get_badge_status(api_key_id: str):
+    """Public endpoint: check if an API key is governance-certified."""
+    # Look up governance score from recent outcomes
+    _score = None
+    _total = 0
+    _decisions = [od.get("recommended_action", "USE_MEMORY") for od in list(_outcomes.values())[-1000:]]
+    _total = len(_decisions)
+    if _total >= 10:
+        _blocks = sum(1 for d in _decisions if d == "BLOCK")
+        _warns = sum(1 for d in _decisions if d == "WARN")
+        _score = max(0, min(100, round(100 - 0.5 * _blocks - 0.1 * _warns + min(_total / 100 * 0.1, 10), 1)))
+    return {"certified": _score is not None and _score >= 80, "governance_score": _score, "total_governed": _total}
+
+
+# ---- Governance-as-Code Config Validation ----
+
+class ConfigValidateRequest(BaseModel):
+    config: dict
+
+
+@app.post("/v1/config/validate")
+def validate_config(req: ConfigValidateRequest, key_record: dict = Depends(verify_api_key)):
+    """Validate a .sgraal YAML/JSON config file."""
+    cfg = req.config
+    errors = []
+    if cfg.get("version") not in ("1.0", "1", 1):
+        errors.append("version must be '1.0'")
+    if cfg.get("domain") and cfg["domain"] not in ("general", "customer_support", "coding", "legal", "fintech", "medical"):
+        errors.append(f"Invalid domain: {cfg['domain']}")
+    if cfg.get("action_type") and cfg["action_type"] not in ("informational", "reversible", "irreversible", "destructive"):
+        errors.append(f"Invalid action_type: {cfg['action_type']}")
+    _pol = cfg.get("policy", {})
+    _bounds = {"block_omega": (50, 95), "warn_omega": (20, 60), "ask_user_omega": (30, 70)}
+    for k, (lo, hi) in _bounds.items():
+        v = _pol.get(k)
+        if v is not None and (not isinstance(v, (int, float)) or v < lo or v > hi):
+            errors.append(f"policy.{k} must be between {lo} and {hi}")
+    return {"valid": len(errors) == 0, "errors": errors, "parsed": cfg}
+
+
+# ---- SIEM Export ----
+
+_CEF_SEVERITY = {"USE_MEMORY": 1, "WARN": 5, "ASK_USER": 7, "BLOCK": 10}
+
+
+@app.get("/v1/audit/export")
+def export_audit_log(format: str = Query("json"), limit: int = Query(100, le=1000),
+                     since: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
+    """Export audit log in SIEM-compatible format (json, cef, leef)."""
+    # Get recent outcomes as audit entries
+    _entries = []
+    for _oid, _od in list(_outcomes.items())[-limit:]:
+        _entry = {
+            "request_id": _od.get("request_id", _oid),
+            "decision": _od.get("recommended_action", "USE_MEMORY"),
+            "omega": _od.get("omega_mem_final", 0),
+            "domain": _od.get("domain", "general"),
+            "agent_id": _od.get("agent_id", "anonymous"),
+            "timestamp": _od.get("created_at", ""),
+        }
+        _entries.append(_entry)
+
+    if format == "json":
+        return {"format": "json", "count": len(_entries), "entries": _entries}
+    elif format == "cef":
+        lines = []
+        for e in _entries:
+            sev = _CEF_SEVERITY.get(e["decision"], 1)
+            lines.append(f"CEF:0|Sgraal|MemoryGovernance|1.0|{e['decision']}|Memory preflight {e['decision']}|{sev}|"
+                         f"request={e['request_id']} omega={e['omega']} domain={e['domain']} agent={e['agent_id']}")
+        return PlainTextResponse(content="\n".join(lines), media_type="text/plain")
+    elif format == "leef":
+        lines = []
+        for e in _entries:
+            lines.append(f"LEEF:2.0|Sgraal|MemoryGovernance|1.0|{e['decision']}|"
+                         f"request={e['request_id']}\tomega={e['omega']}\tdomain={e['domain']}\tagent={e['agent_id']}")
+        return PlainTextResponse(content="\n".join(lines), media_type="text/plain")
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported format: {format}. Use json, cef, or leef.")
 
 
 # ---- Calibration endpoints ----
@@ -11048,14 +11145,38 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["per_module_latency"] = _module_times
     response["pipeline_ms"] = round((_time.monotonic() - _t_start) * 1000, 1)
 
+    _duration_ms = round(_duration * 1000, 2)
     response["_trace"] = {
         "span": "preflight",
         "api_key_id": key_record.get("key_hash", "in_memory"),
         "decision": result.recommended_action,
         "omega_score": omega_out,
         "request_id": request_id,
-        "duration_ms": round(_duration * 1000, 2),
+        "duration_ms": _duration_ms,
     }
+
+    # Feature 5: SLA enforcement
+    if _redis_enabled:
+        _sla_cfg = _rget(f"sla_config:{key_record.get('key_hash','default')}:{req.domain}")
+        if _sla_cfg and isinstance(_sla_cfg, dict):
+            _max_ms = _sla_cfg.get("max_p95_latency_ms", 0)
+            if _max_ms > 0:
+                _breached = _duration_ms > _max_ms
+                _day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                _breach_count = 0
+                if _breached:
+                    _bk = f"sla_breach:{key_record.get('key_hash','default')}:{_day_key}"
+                    _breach_count = _rget(_bk, 0)
+                    if isinstance(_breach_count, str):
+                        _breach_count = int(_breach_count)
+                    _breach_count += 1
+                    redis_set(_bk, _breach_count, ttl=86400)
+                response["sla_status"] = {
+                    "configured_ms": _max_ms,
+                    "actual_ms": _duration_ms,
+                    "breached": _breached,
+                    "breach_count_today": _breach_count,
+                }
 
     if key_record.get("demo"):
         response["demo"] = True
@@ -11154,6 +11275,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     }
     if response.get("degraded_mode"):
         response["_headers"]["X-Sgraal-Degraded"] = "true"
+    if response.get("sla_status", {}).get("breached"):
+        response["_headers"]["X-Sgraal-SLA-Breached"] = "true"
     # FIX 9: Add dry_run header after _headers is created
     if response.get("dry_run"):
         response["_headers"]["X-Sgraal-Dry-Run"] = "true"

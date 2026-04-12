@@ -1,0 +1,74 @@
+name: Sgraal Memory Governance Check
+
+on:
+  workflow_call:
+    inputs:
+      memory_file:
+        description: 'Path to JSONL file with memory_state entries'
+        required: true
+        type: string
+      domain:
+        description: 'Domain: general, customer_support, coding, legal, fintech, medical'
+        required: false
+        type: string
+        default: 'general'
+      action_type:
+        description: 'Action type: informational, reversible, irreversible, destructive'
+        required: false
+        type: string
+        default: 'reversible'
+    secrets:
+      SGRAAL_API_KEY:
+        description: 'Sgraal API key (sg_live_... or sg_demo_playground)'
+        required: true
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Sgraal Preflight
+        id: preflight
+        run: |
+          MEMORY=$(cat "${{ inputs.memory_file }}" | python3 -c "
+          import sys, json
+          entries = [json.loads(line) for line in sys.stdin if line.strip()]
+          print(json.dumps(entries))
+          ")
+
+          RESPONSE=$(curl -s -X POST https://api.sgraal.com/v1/preflight \
+            -H "Authorization: Bearer ${{ secrets.SGRAAL_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"memory_state\": $MEMORY,
+              \"domain\": \"${{ inputs.domain }}\",
+              \"action_type\": \"${{ inputs.action_type }}\"
+            }")
+
+          DECISION=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('recommended_action','ERROR'))")
+          OMEGA=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('omega_mem_final',0))")
+          ATTACK=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('attack_surface_level','NONE'))")
+
+          echo "decision=$DECISION" >> $GITHUB_OUTPUT
+          echo "omega=$OMEGA" >> $GITHUB_OUTPUT
+          echo "attack_surface=$ATTACK" >> $GITHUB_OUTPUT
+
+          echo "## Sgraal Preflight Result" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Decision | **$DECISION** |" >> $GITHUB_STEP_SUMMARY
+          echo "| Omega | $OMEGA |" >> $GITHUB_STEP_SUMMARY
+          echo "| Attack Surface | $ATTACK |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check Decision
+        run: |
+          DECISION="${{ steps.preflight.outputs.decision }}"
+          if [ "$DECISION" = "BLOCK" ]; then
+            echo "::error::Sgraal preflight returned BLOCK — memory state is not safe"
+            exit 1
+          elif [ "$DECISION" = "WARN" ] || [ "$DECISION" = "ASK_USER" ]; then
+            echo "::warning::Sgraal preflight returned $DECISION — review recommended"
+          else
+            echo "✅ Sgraal preflight passed: $DECISION"
+          fi
