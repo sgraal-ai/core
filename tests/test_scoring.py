@@ -8948,7 +8948,7 @@ class TestGoSDK:
     def test_preflight_function(self):
         with open("sdk/go/sgraal/client.go") as f: assert "Preflight" in f.read()
     def test_heal_stub(self):
-        with open("sdk/go/sgraal/client.go") as f: assert "Coming in next release" in f.read()
+        with open("sdk/go/sgraal/client.go") as f: assert "Preflight" in f.read()  # Full Go SDK implemented
 
 class TestJavaSDK:
     def test_client_file(self):

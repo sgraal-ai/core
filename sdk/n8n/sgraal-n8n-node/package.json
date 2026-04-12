@@ -1,0 +1,17 @@
+{
+  "name": "n8n-nodes-sgraal",
+  "version": "0.1.0",
+  "description": "n8n community node for Sgraal Memory Governance",
+  "keywords": ["n8n-community-node-package", "n8n", "sgraal", "memory-governance", "ai-safety"],
+  "license": "Apache-2.0",
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": ["dist/credentials/SgraalApi.credentials.js"],
+    "nodes": ["dist/nodes/SgraalPreflight/SgraalPreflight.node.js"]
+  },
+  "main": "index.js",
+  "scripts": {"build": "tsc", "dev": "tsc --watch"},
+  "devDependencies": {"n8n-workflow": "*", "typescript": "^5.0.0"},
+  "homepage": "https://sgraal.com",
+  "repository": {"type": "git", "url": "https://github.com/sgraal-ai/core"}
+}

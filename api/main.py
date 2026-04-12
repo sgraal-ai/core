@@ -1056,6 +1056,54 @@ def verify_attestation(req: VerifyAttestationRequest):
     return {"valid": _valid, "message": "Attestation verified" if _valid else "Invalid attestation signature"}
 
 
+# ---- A2A Protocol support ----
+
+@app.get("/.well-known/agent.json")
+def a2a_agent_card():
+    """A2A agent card — describes Sgraal's capabilities."""
+    return {
+        "name": "Sgraal Memory Governance",
+        "description": "Preflight memory validation for AI agents",
+        "version": "1.0",
+        "capabilities": ["memory/validate", "memory/explain", "memory/heal"],
+        "endpoint": "https://api.sgraal.com/v1/a2a",
+        "authentication": {"type": "bearer"},
+    }
+
+
+class A2ARequest(BaseModel):
+    jsonrpc: str = "2.0"
+    method: str = "memory/validate"
+    params: dict = {}
+    id: Optional[str] = None
+
+
+@app.post("/v1/a2a/preflight")
+def a2a_preflight(req: A2ARequest, key_record: dict = Depends(verify_api_key)):
+    """A2A-compatible preflight validation."""
+    params = req.params
+    memory_state = params.get("memory_state", [])
+    if not memory_state:
+        return {"jsonrpc": "2.0", "error": {"code": -32602, "message": "memory_state required"}, "id": req.id}
+    pf_req = PreflightRequest(
+        memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in memory_state],
+        domain=params.get("domain", "general"),
+        action_type=params.get("action_type", "reversible"),
+    )
+    pf_result = preflight(pf_req, key_record)
+    decision = pf_result.get("recommended_action", "USE_MEMORY") if isinstance(pf_result, dict) else "ERROR"
+    return {
+        "jsonrpc": "2.0",
+        "result": {
+            "recommended_action": decision,
+            "omega_mem_final": pf_result.get("omega_mem_final", 0) if isinstance(pf_result, dict) else 0,
+            "attack_surface_level": pf_result.get("attack_surface_level", "NONE") if isinstance(pf_result, dict) else "NONE",
+            "safe_to_act": decision in ("USE_MEMORY", "WARN"),
+        },
+        "id": req.id,
+    }
+
+
 # ---- Sgraal Certified Badge ----
 
 @app.get("/v1/badge")
