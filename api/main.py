@@ -883,16 +883,16 @@ class CertificateRequest(BaseModel):
 @app.post("/v1/certificate")
 def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify_api_key)):
     """Issue a governance certificate for a BLOCK event."""
-    # 1. Check in-memory outcomes
+    # 1. Check in-memory outcomes — try as outcome_id key first, then scan by request_id
     _outcome = _outcomes.get(req.request_id)
     if not _outcome:
         for _oid, _od in _outcomes.items():
-            if _od.get("request_id") == req.request_id:
+            if _od.get("request_id") == req.request_id or _oid == req.request_id:
                 _outcome = _od
                 break
-    # 2. Check Redis
+    # 2. Check Redis (try both outcome: and request: prefixes)
     if not _outcome:
-        _outcome = redis_get(f"outcome:{req.request_id}")
+        _outcome = redis_get(f"outcome:{req.request_id}") or redis_get(f"request:{req.request_id}")
     # 3. Check Supabase audit_log
     if not _outcome and supabase_service_client:
         try:
@@ -8055,6 +8055,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     _evict_if_full(_outcomes, "_outcomes")
     _outcomes[outcome_id] = {
+        "request_id": request_id,
         "status": "open",
         "agent_id": req.agent_id,
         "task_id": req.task_id,
@@ -8540,6 +8541,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if outcome_id in _outcomes:
         _outcomes[outcome_id]["compliance_result"] = response.get("compliance_result", {})
         _outcomes[outcome_id]["repair_plan"] = repair_plan_out
+        # Store detection states for certificate generation
+        _outcomes[outcome_id]["timestamp_integrity"] = response.get("timestamp_integrity", "VALID")
+        _outcomes[outcome_id]["identity_drift"] = response.get("identity_drift", "CLEAN")
+        _outcomes[outcome_id]["consensus_collapse"] = response.get("consensus_collapse", "CLEAN")
+        _outcomes[outcome_id]["provenance_chain_integrity"] = response.get("provenance_chain_integrity", "CLEAN")
+        _outcomes[outcome_id]["naturalness_level"] = response.get("naturalness_level", "ORGANIC")
+        _outcomes[outcome_id]["attack_surface_level"] = response.get("attack_surface_level", "NONE")
+        _outcomes[outcome_id]["input_hash"] = response.get("input_hash", "")
 
     # #127 Decision Cost Engine
     if req.cost_config:
