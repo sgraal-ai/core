@@ -7919,15 +7919,26 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _early_ts = _check_timestamp_integrity(req.memory_state, _preprocessed=_pp_early)
     _early_id = _check_identity_drift(req.memory_state, _preprocessed=_pp_early)
     _early_cc = _check_consensus_collapse(req.memory_state, _preprocessed=_pp_early)
-    _manip_count = sum(1 for r in [
-        _early_ts.get("timestamp_integrity"), _early_id.get("identity_drift"), _early_cc.get("consensus_collapse")
-    ] if r == "MANIPULATED")
-    if _manip_count >= 2 and req.action_type in ("irreversible", "destructive"):
-        # Short circuit: skip 83-module scoring pipeline
+    _early_levels = [
+        _early_ts.get("timestamp_integrity", "VALID"),
+        _early_id.get("identity_drift", "CLEAN"),
+        _early_cc.get("consensus_collapse", "CLEAN"),
+    ]
+    _manip_count = sum(1 for r in _early_levels if r == "MANIPULATED")
+    _susp_count = sum(1 for r in _early_levels if r == "SUSPICIOUS")
+    # Compute early attack surface to check HIGH/CRITICAL
+    _early_as = _compute_attack_surface_score(
+        {"timestamp_integrity": _early_levels[0]},
+        {"identity_drift": _early_levels[1]},
+        {"consensus_collapse": _early_levels[2]},
+    )
+    _early_level = _early_as.get("attack_surface_level", "NONE")
+    if (_manip_count >= 1 and _early_level in ("HIGH", "CRITICAL")
+            and req.action_type in ("irreversible", "destructive")):
         _scoring_skipped = True
         from scoring_engine.omega_mem import PreflightResult
         result = PreflightResult(omega_mem_final=100.0, recommended_action="BLOCK", assurance_score=0.0,
-                             explainability_note="Detection short circuit: multiple MANIPULATED layers on irreversible action",
+                             explainability_note=f"Detection short circuit: {_manip_count} MANIPULATED + {_susp_count} SUSPICIOUS on {req.action_type} action",
                              component_breakdown={}, repair_plan=[], healing_counter=0)
         _module_times = {"scoring_engine": 0.0}
     else:
