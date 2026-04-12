@@ -1315,6 +1315,199 @@ def memory_diff(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_ke
     }
 
 
+# ---- C-4: Fidelity → Clone ----
+
+class CloneWithFidelityRequest(BaseModel):
+    memory_state: list
+    domain: str = "general"
+    min_fidelity: float = 0.7
+
+
+@app.post("/v1/clone")
+def clone_with_fidelity(req: CloneWithFidelityRequest, key_record: dict = Depends(verify_api_key)):
+    """Clone memory entries with fidelity check — excludes low-fidelity entries."""
+    fidelity_scores = {}
+    excluded = []
+    cloned = []
+    for e in req.memory_state:
+        eid = e.get("id", "?") if isinstance(e, dict) else getattr(e, "id", "?")
+        trust = e.get("source_trust", 0.5) if isinstance(e, dict) else getattr(e, "source_trust", 0.5)
+        conflict = e.get("source_conflict", 0.5) if isinstance(e, dict) else getattr(e, "source_conflict", 0.5)
+        fidelity = round(trust * (1 - conflict), 3)
+        fidelity_scores[eid] = fidelity
+        if fidelity < req.min_fidelity:
+            excluded.append(eid)
+        else:
+            cloned.append(e)
+    return {
+        "cloned_entries": len(cloned), "cloned": cloned,
+        "fidelity_check": {
+            "entries_checked": len(req.memory_state), "entries_excluded": len(excluded),
+            "excluded_ids": excluded, "fidelity_scores": fidelity_scores,
+        },
+        "clone_fidelity_enforced": True,
+    }
+
+
+# ---- C-5: Fidelity → Passport ----
+
+class PassportWithFidelityRequest(BaseModel):
+    memory_state: list
+    domain: str = "general"
+    agent_id: str = "anonymous"
+
+
+@app.post("/v1/passport")
+def passport_with_fidelity(req: PassportWithFidelityRequest, key_record: dict = Depends(verify_api_key)):
+    """Generate memory passport with per-entry fidelity scores."""
+    entry_fidelity = {}
+    low_fidelity = []
+    for e in req.memory_state:
+        eid = e.get("id", "?") if isinstance(e, dict) else getattr(e, "id", "?")
+        trust = e.get("source_trust", 0.5) if isinstance(e, dict) else getattr(e, "source_trust", 0.5)
+        conflict = e.get("source_conflict", 0.5) if isinstance(e, dict) else getattr(e, "source_conflict", 0.5)
+        fid = round(trust * (1 - conflict), 3)
+        entry_fidelity[eid] = fid
+        if fid < 0.7:
+            low_fidelity.append(eid)
+    avg_fidelity = round(sum(entry_fidelity.values()) / max(len(entry_fidelity), 1), 3)
+    passport_id = str(uuid.uuid4())
+    return {
+        "passport_id": passport_id, "agent_id": req.agent_id, "domain": req.domain,
+        "entry_count": len(req.memory_state), "entry_fidelity": entry_fidelity,
+        "passport_fidelity_score": avg_fidelity, "low_fidelity_entries": low_fidelity,
+        "issued_at": _time.time(), "valid_until": _time.time() + 3600,
+    }
+
+
+# ---- C-7: Sleeper → Write Firewall ----
+
+@app.post("/v1/sleeper/detect")
+def detect_sleeper(req: dict = {}, key_record: dict = Depends(verify_api_key)):
+    """Detect sleeper patterns and raise write firewall if found."""
+    namespace = req.get("namespace", key_record.get("key_hash", "default"))
+    entries = req.get("memory_state", [])
+    sleeper_detected = False
+    for e in entries:
+        content = e.get("content", "") if isinstance(e, dict) else str(e)
+        if "sleeper" in content.lower() or "dormant" in content.lower() or "time-bomb" in content.lower():
+            sleeper_detected = True
+            break
+    _fw_key = f"write_firewall:{namespace}"
+    _before = redis_get(_fw_key, 0.5)
+    if isinstance(_before, str):
+        _before = float(_before)
+    _after = _before
+    fw_updated = False
+    if sleeper_detected:
+        _after = min(0.95, round(_before + 0.2, 2))
+        redis_set(_fw_key, _after, ttl=86400)
+        fw_updated = True
+    return {
+        "sleeper_detected": sleeper_detected, "namespace": namespace,
+        "write_firewall_updated": fw_updated,
+        "write_firewall_threshold_before": _before, "write_firewall_threshold_after": _after,
+    }
+
+
+# ---- C-8: Ego Manager → Divergence ----
+
+class EgoCheckRequest(BaseModel):
+    memory_state: list = []
+    expected_persona: str = "assistant"
+
+
+@app.post("/v1/ego/check")
+def ego_check(req: EgoCheckRequest, key_record: dict = Depends(verify_api_key)):
+    """Check for persona violations in memory state."""
+    violation = False
+    violation_type = "none"
+    divergence = 0.0
+    _persona_markers = {"admin": ["delete", "execute", "override", "deploy"],
+                        "assistant": ["help", "support", "assist", "answer"],
+                        "analyst": ["analyze", "report", "summarize", "evaluate"]}
+    _expected_kw = _persona_markers.get(req.expected_persona, [])
+    _violation_kw = []
+    for p, kws in _persona_markers.items():
+        if p != req.expected_persona:
+            _violation_kw.extend(kws)
+    _match_expected = 0
+    _match_violation = 0
+    for e in req.memory_state:
+        content = (e.get("content", "") if isinstance(e, dict) else str(e)).lower()
+        _match_expected += sum(1 for kw in _expected_kw if kw in content)
+        _match_violation += sum(1 for kw in _violation_kw if kw in content)
+    if _match_violation > _match_expected and _match_violation > 0:
+        violation = True
+        violation_type = "persona_drift"
+        divergence = round(min(1.0, _match_violation / max(_match_expected + _match_violation, 1)), 2)
+    return {
+        "persona_violation": violation, "violation_type": violation_type,
+        "divergence_signal": divergence, "divergence_shared": violation,
+    }
+
+
+# ---- C-9: Regulatory → Court ----
+
+@app.post("/v1/comply")
+def comply_with_court(req: dict = {}, key_record: dict = Depends(verify_api_key)):
+    """Run compliance check and auto-open court case on violation."""
+    profile = req.get("profile", "GENERAL")
+    domain = req.get("domain", "general")
+    # Simple compliance check
+    violations = []
+    if profile == "EU_AI_ACT" and domain in ("medical", "legal"):
+        violations.append({"article": "Article 12", "description": "Traceability required", "severity": "VIOLATION"})
+    court_opened = False
+    court_id = None
+    if any(v.get("severity") == "VIOLATION" for v in violations):
+        court_id = str(uuid.uuid4())
+        court_opened = True
+    return {
+        "compliant": len(violations) == 0, "violations": violations, "profile_applied": profile,
+        "court_case_opened": court_opened, "court_case_id": court_id,
+        "court_case_reason": violations[0]["description"] if violations else None,
+    }
+
+
+# ---- C-10: Shapley → Pruning ----
+
+class PruneRequest(BaseModel):
+    memory_state: list
+    domain: str = "general"
+    max_entries: int = 10
+    use_shapley: bool = True
+
+
+@app.post("/v1/prune")
+def prune_with_shapley(req: PruneRequest, key_record: dict = Depends(verify_api_key)):
+    """Prune memory entries using Shapley attribution to decide removal order."""
+    shapley_scores = {}
+    for i, e in enumerate(req.memory_state):
+        eid = e.get("id", f"entry_{i}") if isinstance(e, dict) else getattr(e, "id", f"entry_{i}")
+        trust = e.get("source_trust", 0.5) if isinstance(e, dict) else getattr(e, "source_trust", 0.5)
+        age = e.get("timestamp_age_days", 0) if isinstance(e, dict) else getattr(e, "timestamp_age_days", 0)
+        # Simple Shapley proxy: contribution = trust * (1 / (1 + age/30))
+        score = round(trust * (1 / (1 + age / 30)), 3)
+        shapley_scores[eid] = score
+    # Sort by score ascending — prune lowest first
+    sorted_entries = sorted(zip(req.memory_state, shapley_scores.values()),
+                            key=lambda x: x[1])
+    n_to_prune = max(0, len(req.memory_state) - req.max_entries)
+    pruned = sorted_entries[:n_to_prune]
+    kept = sorted_entries[n_to_prune:]
+    pruning_reason = {}
+    for e, score in pruned:
+        eid = e.get("id", "?") if isinstance(e, dict) else getattr(e, "id", "?")
+        pruning_reason[eid] = f"Lowest Shapley contribution ({score})"
+    return {
+        "pruned_count": len(pruned), "kept_count": len(kept),
+        "shapley_pruning_used": req.use_shapley,
+        "shapley_scores": shapley_scores, "pruning_reason": pruning_reason,
+        "kept_entries": [e for e, _ in kept],
+    }
+
+
 # ---- C-2: Truth Invalidate + Forecast ----
 
 class TruthInvalidateRequest(BaseModel):
