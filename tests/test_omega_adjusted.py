@@ -65,8 +65,14 @@ class TestOmegaAdjusted:
 class TestPageExists:
     def test_prov_page_exists(self):
         _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        assert os.path.exists(os.path.join(_root, "web-static", "standard", "prov.html"))
+        _path = os.path.join(_root, "web-static", "standard", "prov.html")
+        if not os.path.exists(os.path.join(_root, "web-static")):
+            pytest.skip("web-static submodule not checked out")
+        assert os.path.exists(_path)
 
     def test_cvss_page_exists(self):
         _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        assert os.path.exists(os.path.join(_root, "web-static", "standard", "cvss.html"))
+        _path = os.path.join(_root, "web-static", "standard", "cvss.html")
+        if not os.path.exists(os.path.join(_root, "web-static")):
+            pytest.skip("web-static submodule not checked out")
+        assert os.path.exists(_path)
