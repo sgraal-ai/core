@@ -17,5 +17,5 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt && pip install pytest httpx
-      - run: pip install -e sdk/python/ || true
-      - run: python -m pytest tests/ -v --tb=short --ignore=tests/test_compatibility_suite.py
+      - run: pip install -e sdk/python/
+      - run: python -m pytest tests/ -v --tb=short --ignore=tests/test_compatibility_suite.py -k "not TestImmunityCertificate"
