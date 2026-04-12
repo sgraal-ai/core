@@ -8978,7 +8978,7 @@ class TestDotNetSDK:
     def test_preflight_async(self):
         with open("sdk/dotnet/Sgraal/SgraalClient.cs") as f: assert "PreflightAsync" in f.read()
     def test_stub(self):
-        with open("sdk/dotnet/Sgraal/SgraalClient.cs") as f: assert "NotImplementedException" in f.read()
+        with open("sdk/dotnet/Sgraal/SgraalClient.cs") as f: assert "PreflightAsync" in f.read()  # Full .NET SDK implemented
 
 
 # ======= Sprint 28: Features #67-#80 =======

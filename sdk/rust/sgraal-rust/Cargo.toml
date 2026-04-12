@@ -1,0 +1,13 @@
+[package]
+name = "sgraal"
+version = "0.1.0"
+edition = "2021"
+description = "Rust client for the Sgraal Memory Governance API"
+license = "Apache-2.0"
+repository = "https://github.com/sgraal-ai/core"
+
+[dependencies]
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }

@@ -1,0 +1,26 @@
+{
+  "name": "sgraal-vscode",
+  "displayName": "Sgraal Memory Governance",
+  "description": "Validate AI agent memory directly from VS Code",
+  "version": "0.1.0",
+  "publisher": "sgraal-ai",
+  "engines": {"vscode": "^1.80.0"},
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:sgraal.preflight"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {"command": "sgraal.preflight", "title": "Sgraal: Run Preflight on Selection"},
+      {"command": "sgraal.preflightFile", "title": "Sgraal: Run Preflight on File"}
+    ],
+    "configuration": {
+      "title": "Sgraal",
+      "properties": {
+        "sgraal.apiKey": {"type": "string", "default": "sg_demo_playground", "description": "Sgraal API key"},
+        "sgraal.apiUrl": {"type": "string", "default": "https://api.sgraal.com", "description": "Sgraal API URL"},
+        "sgraal.defaultDomain": {"type": "string", "default": "general", "description": "Default domain"}
+      }
+    }
+  },
+  "scripts": {"compile": "tsc -p ./", "watch": "tsc -watch -p ./"}
+}

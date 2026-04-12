@@ -1,0 +1,51 @@
+syntax = "proto3";
+package sgraal.v1;
+
+service MemoryGovernance {
+  rpc Preflight(PreflightRequest) returns (PreflightResponse);
+  rpc Batch(BatchRequest) returns (BatchResponse);
+  rpc GovernanceScore(GovernanceScoreRequest) returns (GovernanceScoreResponse);
+  rpc StreamPreflight(stream PreflightRequest) returns (stream PreflightResponse);
+}
+
+message MemoryEntry {
+  string id = 1;
+  string content = 2;
+  string type = 3;
+  int32 timestamp_age_days = 4;
+  float source_trust = 5;
+  float source_conflict = 6;
+  int32 downstream_count = 7;
+}
+
+message PreflightRequest {
+  repeated MemoryEntry memory_state = 1;
+  string domain = 2;
+  string action_type = 3;
+  string api_key = 4;
+}
+
+message PreflightResponse {
+  string recommended_action = 1;
+  float omega_mem_final = 2;
+  string attack_surface_level = 3;
+  string request_id = 4;
+  bool safe_to_act = 5;
+}
+
+message BatchRequest {
+  repeated PreflightRequest requests = 1;
+}
+
+message BatchResponse {
+  repeated PreflightResponse responses = 1;
+}
+
+message GovernanceScoreRequest {
+  string api_key = 1;
+}
+
+message GovernanceScoreResponse {
+  float governance_score = 1;
+  int32 total_governed_actions = 2;
+}
