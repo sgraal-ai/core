@@ -9371,6 +9371,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Rate limit check — atomic via Redis INCR (skip for dry_run/test/demo)
     tier = key_record.get("tier", "free")
+    calls = key_record.get("calls_this_month", 0)  # stale Supabase count as baseline
     limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
     _skip_quota = req.dry_run or key_record.get("demo", False) or tier == "test"
     if not _skip_quota and UPSTASH_REDIS_URL:
@@ -9689,7 +9690,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         except Exception as e:
             logger.error("api_keys call count update failed: %s", e)
 
-    if stripe.api_key:
+    if stripe.api_key and not key_record.get("demo") and key_record.get("customer_id") != "demo":
         try:
             stripe.billing.MeterEvent.create(
                 event_name="omega_mem_preflight",
@@ -9703,7 +9704,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     if supabase_client:
         try:
-            supabase_client.table("memory_ledger").insert({
+            _ledger_record = {
                 "agent_id": req.agent_id,
                 "task_id": req.task_id,
                 "omega_mem_final": result.omega_mem_final,
@@ -9714,8 +9715,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "explainability_note": result.explainability_note,
                 "component_breakdown": result.component_breakdown,
                 "healing_counter": result.healing_counter,
-                "gsv": gsv,
-            }).execute()
+            }
+            supabase_client.table("memory_ledger").insert(_ledger_record).execute()
         except Exception as e:
             logger.error("memory_ledger write failed: %s", e)
 
