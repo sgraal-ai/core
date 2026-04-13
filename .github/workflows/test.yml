@@ -20,6 +20,18 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt && pip install pytest httpx
       - run: pip install -e sdk/python/ || pip install sdk/python/ || true
+      - name: Debug - show actual file
+        run: |
+          echo "=== HEAD commit ==="
+          git log --oneline -1
+          echo "=== test_omega_adjusted.py line count ==="
+          wc -l tests/test_omega_adjusted.py
+          echo "=== grep TestPageExists ==="
+          grep "TestPageExists" tests/test_omega_adjusted.py || echo "NOT FOUND IN FILE"
+          echo "=== all test files ==="
+          ls tests/test_*.py
+          echo "=== find all python files with TestPageExists ==="
+          grep -rn "TestPageExists" . --include="*.py" || echo "NOT FOUND ANYWHERE"
       - name: Clear bytecode cache
         run: find . -name "*.pyc" -delete && find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
       - name: Run tests
