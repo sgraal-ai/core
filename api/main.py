@@ -12922,4 +12922,164 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         else:
             response["formal_override"] = False
 
+    # -----------------------------------------------------------------------
+    # NEW FIELD 1: days_until_block — weighted multi-model time-to-BLOCK estimate
+    # Combines: OU half-life, Cox survival, Kalman forecast, BOCPD changepoint
+    # -----------------------------------------------------------------------
+    _block_threshold = req.thresholds.get("block", 70) if req.thresholds else 70
+    if omega_out >= _block_threshold:
+        response["days_until_block"] = 0.0
+        response["days_until_block_confidence"] = 1.0
+    elif not _is_dry_run and len(_te_history_cache) >= 3:
+        _dub_estimates = []
+        _dub_weights = []
+
+        # OU estimate
+        _ou_data = response.get("ornstein_uhlenbeck")
+        if _ou_data and _ou_data.get("half_life") and _ou_data.get("equilibrium"):
+            _ou_eq = _ou_data["equilibrium"]
+            _ou_hl = _ou_data["half_life"]
+            if _ou_eq > omega_out and _ou_eq > 0:
+                _ou_days = _ou_hl * (_block_threshold - omega_out) / max(_ou_eq - omega_out, 0.01)
+                _dub_estimates.append(max(0.0, _ou_days))
+                _dub_weights.append(0.3)
+            elif _ou_data.get("mean_reverting") and _ou_eq < _block_threshold:
+                _dub_estimates.append(999.0)  # mean-reverting away from block
+                _dub_weights.append(0.3)
+
+        # Cox estimate: find t where P(survive) = 0.5
+        _cox_data = response.get("cox_hazard")
+        if _cox_data and _cox_data.get("hazard_rate") and _cox_data["hazard_rate"] > 0:
+            _cox_median = 0.693 / _cox_data["hazard_rate"]  # ln(2) / hazard_rate
+            _dub_estimates.append(max(0.0, _cox_median))
+            _dub_weights.append(0.3)
+
+        # Kalman estimate: linear extrapolation from recent trend
+        if len(_te_history_cache) >= 5:
+            _recent = _te_history_cache[-5:]
+            _slope = (_recent[-1] - _recent[0]) / max(len(_recent) - 1, 1)
+            if _slope > 0.01:
+                _kalman_days = (_block_threshold - omega_out) / _slope
+                _dub_estimates.append(max(0.0, min(999.0, _kalman_days)))
+                _dub_weights.append(0.3)
+            elif _slope <= 0:
+                _dub_estimates.append(999.0)  # trending down, no block imminent
+                _dub_weights.append(0.3)
+
+        # BOCPD adjustment: halve estimate if regime change imminent
+        _bocpd_factor = 1.0
+        _td = response.get("trend_detection", {})
+        _bocpd_data = _td.get("bocpd") if isinstance(_td, dict) else None
+        if _bocpd_data and _bocpd_data.get("p_changepoint", 0) > 0.7:
+            _bocpd_factor = 0.5
+            _dub_weights.append(0.1)
+            _dub_estimates.append(0.0)  # placeholder, the factor does the work
+
+        if _dub_estimates and _dub_weights:
+            _w_sum = sum(_dub_weights)
+            _weighted = sum(e * w for e, w in zip(_dub_estimates, _dub_weights))
+            _dub_raw = (_weighted / _w_sum) * _bocpd_factor if _w_sum > 0 else None
+            if _dub_raw is not None:
+                _dub_final = round(min(999.0, max(0.0, _dub_raw)), 1)
+                # Confidence: agreement between methods (low std = high confidence)
+                if len(_dub_estimates) >= 2:
+                    _dub_mean = sum(_dub_estimates) / len(_dub_estimates)
+                    _dub_var = sum((e - _dub_mean) ** 2 for e in _dub_estimates) / len(_dub_estimates)
+                    _dub_conf = round(max(0.0, min(1.0, 1.0 / (1.0 + math.sqrt(_dub_var) / max(_dub_mean, 1.0)))), 2)
+                else:
+                    _dub_conf = 0.3
+                response["days_until_block"] = _dub_final
+                response["days_until_block_confidence"] = _dub_conf
+            else:
+                response["days_until_block"] = None
+                response["days_until_block_confidence"] = None
+        else:
+            response["days_until_block"] = None
+            response["days_until_block_confidence"] = None
+    else:
+        response["days_until_block"] = None
+        response["days_until_block_confidence"] = None
+
+    # -----------------------------------------------------------------------
+    # NEW FIELD 2: confidence_calibration — overconfident / underconfident / calibrated
+    # Combines: r_belief + s_drift + sheaf h1_rank
+    # -----------------------------------------------------------------------
+    _cb = response.get("component_breakdown", {})
+    _cc_belief = _cb.get("r_belief", 50.0)  # 0-100 (higher = more belief divergence = less trust)
+    _cc_drift = _cb.get("s_drift", 0.0)
+    _cc_h1 = response.get("consistency_analysis", {}).get("h1_rank", 0) if isinstance(response.get("consistency_analysis"), dict) else 0
+    # r_belief in component_breakdown is (1 - belief) * 100, so low value = high belief
+    _agent_trusts = _cc_belief < 30  # belief score < 30 means agent trusts itself (r_belief > 0.7)
+    _agent_doubts = _cc_belief > 70  # belief score > 70 means agent doubts itself (r_belief < 0.3)
+    _drift_high = _cc_drift > 60
+    _consistent = _cc_h1 == 0
+
+    if _agent_trusts and _drift_high and _consistent:
+        _cal_state = "OVERCONFIDENT"
+        _cal_score = round(min(1.0, 0.5 + (_cc_drift / 200) + (0.2 if _consistent else 0)), 2)
+    elif _agent_doubts and omega_out < 25:
+        _cal_state = "UNDERCONFIDENT"
+        _cal_score = round(max(0.0, 0.5 - (100 - _cc_belief) / 200 - (25 - omega_out) / 100), 2)
+    else:
+        _cal_state = "CALIBRATED"
+        _cal_score = 0.5
+
+    response["confidence_calibration"] = {
+        "state": _cal_state,
+        "score": _cal_score,
+        "r_belief": round(_cc_belief, 1),
+        "s_drift": round(_cc_drift, 1),
+        "h1_rank": _cc_h1,
+    }
+
+    # -----------------------------------------------------------------------
+    # NEW FIELD 3: Signal vector logging for κ_MEM production data
+    # Logs normalized scoring signal vector to Redis for phase constant computation
+    # -----------------------------------------------------------------------
+    _sv_logged = False
+    if _redis_enabled and not _is_dry_run:
+        try:
+            _sv = {
+                "s_freshness": round(_cb.get("s_freshness", 0) / 100, 4),
+                "s_drift": round(_cb.get("s_drift", 0) / 100, 4),
+                "s_provenance": round(_cb.get("s_provenance", 0) / 100, 4),
+                "s_propagation": round(_cb.get("s_propagation", 0) / 100, 4),
+                "r_recall": round(_cb.get("r_recall", 0) / 100, 4),
+                "r_encode": round(_cb.get("r_encode", 0) / 100, 4),
+                "s_interference": round(_cb.get("s_interference", 0) / 100, 4),
+                "s_recovery": round(_cb.get("s_recovery", 0) / 100, 4),
+                "r_belief": round(_cb.get("r_belief", 0) / 100, 4),
+                "s_relevance": round(_cb.get("s_relevance", 0) / 100, 4),
+                "omega": round(omega_out / 100, 4),
+                "assurance": round(response.get("assurance_score", 0) / 100, 4),
+                "drift_ensemble": round(response.get("drift_details", {}).get("ensemble_score", 0) / 100, 4),
+                "hawkes_lambda": round(min(1.0, response.get("hawkes_intensity", {}).get("current_lambda", 0) / 5.0), 4) if isinstance(response.get("hawkes_intensity"), dict) else 0,
+                "copula_rho": round((response.get("copula_analysis", {}).get("rho", 0) + 1) / 2, 4) if isinstance(response.get("copula_analysis"), dict) else 0.5,
+                "mewma_t2": round(min(1.0, response.get("mewma", {}).get("T2_stat", 0) / 50), 4) if isinstance(response.get("mewma"), dict) else 0,
+                "consolidation": round(response.get("consolidation", {}).get("mean_consolidation", 0.5), 4) if isinstance(response.get("consolidation"), dict) else 0.5,
+                "stability": round(response.get("stability_score", {}).get("score", 0.5), 4) if isinstance(response.get("stability_score"), dict) else 0.5,
+                "h1_rank": _cc_h1,
+                "confidence_cal": _cal_score,
+                "agent_id": req.agent_id or "",
+                "domain": req.domain,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+            _sv_key = f"signal_vector:{req.agent_id or 'anon'}:{int(_time.time())}"
+            _persist_store_bg(_sv_key, _sv, ttl=604800)  # 7 days
+            # Also append to rolling list (capped at 10,000)
+            if UPSTASH_REDIS_URL:
+                try:
+                    _get_redis_session().post(
+                        f"{UPSTASH_REDIS_URL}/RPUSH/signal_vectors:recent/{urllib.parse.quote(_json.dumps(_sv), safe='')}",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+                    _get_redis_session().post(
+                        f"{UPSTASH_REDIS_URL}/LTRIM/signal_vectors:recent/-10000/-1",
+                        headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+                except Exception:
+                    pass
+            _sv_logged = True
+        except Exception:
+            pass
+    response["signal_vector_logged"] = _sv_logged
+
     return response
