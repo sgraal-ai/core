@@ -162,8 +162,11 @@ def _evict_if_full(d: dict, name: str = "cache"):
 
 def _safe_key_hash(key_record: dict) -> str:
     """Return a tenant-scoped key_hash. Never returns 'default' or empty string.
-    Test keys get a deterministic hash derived from their customer_id.
-    Demo keys get 'demo'. Production keys return their actual key_hash."""
+    Demo keys get 'demo'. Test keys get a deterministic hash derived from their customer_id.
+    Production keys return their actual key_hash."""
+    # Demo keys: always return "demo" bucket
+    if key_record.get("demo"):
+        return "demo"
     kh = key_record.get("key_hash")
     if kh and kh != "default":
         return kh
@@ -296,8 +299,18 @@ class MemoryEntryRequest(BaseModel):
     id: str
     content: str
     type: str
-    timestamp_age_days: float
+    timestamp_age_days: Optional[float] = None  # falls back to age_days, then 0
+    age_days: Optional[float] = None            # alias for timestamp_age_days
     source_trust: float = 0.9
+
+    @property
+    def effective_age_days(self) -> float:
+        """Resolve timestamp_age_days with age_days fallback, then 0."""
+        if self.timestamp_age_days is not None:
+            return self.timestamp_age_days
+        if self.age_days is not None:
+            return self.age_days
+        return 0.0
     source_conflict: Optional[float] = None  # None = auto-compute via sheaf cohomology
     downstream_count: int = 1
     r_belief: float = 0.5
@@ -2888,7 +2901,7 @@ def preflight_stream(req: PreflightRequest, key_record: dict = Depends(verify_ap
 
     entries = [MemoryEntry(
         id=e.id, content=e.content, type=e.type,
-        timestamp_age_days=e.timestamp_age_days if e.ttl_seconds is None else min(e.timestamp_age_days, e.ttl_seconds / 86400),
+        timestamp_age_days=e.effective_age_days if e.ttl_seconds is None else min(e.effective_age_days, e.ttl_seconds / 86400),
         source_trust=e.source_trust,
         source_conflict=e.source_conflict if e.source_conflict is not None else 0.1,
         downstream_count=e.downstream_count,
@@ -4119,7 +4132,7 @@ def async_preflight(req: PreflightRequest, key_record: dict = Depends(verify_api
     # Process synchronously but return async-style response
     entries = [MemoryEntry(
         id=e.id, content=e.content, type=e.type,
-        timestamp_age_days=e.timestamp_age_days if e.ttl_seconds is None else min(e.timestamp_age_days, e.ttl_seconds / 86400),
+        timestamp_age_days=e.effective_age_days if e.ttl_seconds is None else min(e.effective_age_days, e.ttl_seconds / 86400),
         source_trust=e.source_trust,
         source_conflict=e.source_conflict if e.source_conflict is not None else 0.1,
         downstream_count=e.downstream_count, r_belief=e.r_belief,
@@ -7267,7 +7280,7 @@ def shadow_test(name: str, req: PreflightRequest, key_record: dict = Depends(ver
 
     # Default run
     entries = [MemoryEntry(id=e.id, content=e.content, type=e.type,
-        timestamp_age_days=e.timestamp_age_days if e.ttl_seconds is None else min(e.timestamp_age_days, e.ttl_seconds / 86400),
+        timestamp_age_days=e.effective_age_days if e.ttl_seconds is None else min(e.effective_age_days, e.ttl_seconds / 86400),
         source_trust=e.source_trust, source_conflict=e.source_conflict or 0.1,
         downstream_count=e.downstream_count) for e in req.memory_state]
     default_result = compute(entries, action_type=req.action_type, domain=req.domain)
@@ -8168,8 +8181,9 @@ def _preprocess_entries(memory_state: list) -> list:
         if isinstance(e, dict):
             d = e
         else:
+            _age = getattr(e, "effective_age_days", None) or getattr(e, "timestamp_age_days", None) or getattr(e, "age_days", None) or 0
             d = {"id": getattr(e, "id", "?"), "content": getattr(e, "content", ""),
-                 "type": getattr(e, "type", "semantic"), "timestamp_age_days": getattr(e, "timestamp_age_days", 0),
+                 "type": getattr(e, "type", "semantic"), "timestamp_age_days": _age,
                  "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
                  "downstream_count": getattr(e, "downstream_count", 0),
                  "provenance_chain": getattr(e, "provenance_chain", None) or [],
@@ -8211,7 +8225,7 @@ def _check_timestamp_integrity(memory_state: list, _preprocessed: list = None) -
 
     for entry in _entries:
         content = entry.get("content", "")
-        age = entry.get("timestamp_age_days", 0)
+        age = entry.get("timestamp_age_days") or entry.get("age_days") or 0
         if age >= 2:
             continue
         marker_count = 0
@@ -8246,7 +8260,7 @@ def _check_timestamp_integrity(memory_state: list, _preprocessed: list = None) -
     # PATTERN 4 — Anchor inconsistency
     for entry in _entries:
         ds = entry.get("downstream_count", 0)
-        age = entry.get("timestamp_age_days", 0)
+        age = entry.get("timestamp_age_days", 0) or 0
         if ds > 5 and age < 1:
             _flags.append("anchor_inconsistency:suspicious")
             _risk = max(_risk, 0.5)
@@ -8358,7 +8372,7 @@ def _check_identity_drift(memory_state: list, _preprocessed: list = None) -> dic
         if entry.get("type", "semantic") not in _identity_types:
             continue
         content = entry.get("content", "")
-        age = entry.get("timestamp_age_days", 0)
+        age = entry.get("timestamp_age_days", 0) or 0
         if age > 0.5 and any(pat.search(content) for pat in _time_bound_pats):
             _flags.append("time_bounded_replay:suspicious")
             _risk = max(_risk, 0.5)
@@ -8890,7 +8904,7 @@ def preflight_batch(req: BatchRequest, key_record: dict = Depends(verify_api_key
     for e in req.entries:
         entry = MemoryEntry(
             id=e.id, content=e.content, type=e.type,
-            timestamp_age_days=e.timestamp_age_days,
+            timestamp_age_days=e.effective_age_days,
             source_trust=e.source_trust,
             source_conflict=e.source_conflict,
             downstream_count=e.downstream_count,
@@ -9443,7 +9457,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     entries = [MemoryEntry(
         id=e.id, content=e.content, type=e.type,
-        timestamp_age_days=e.timestamp_age_days if e.ttl_seconds is None else min(e.timestamp_age_days, e.ttl_seconds / 86400),
+        timestamp_age_days=e.effective_age_days if e.ttl_seconds is None else min(e.effective_age_days, e.ttl_seconds / 86400),
         source_trust=e.source_trust,
         source_conflict=e.source_conflict if e.source_conflict is not None else auto_conflict,
         downstream_count=e.downstream_count,
