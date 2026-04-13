@@ -1,6 +1,5 @@
-"""Tests for omega_adjusted, detection_omega_contribution, and page existence."""
+"""Tests for omega_adjusted and detection_omega_contribution."""
 import pytest
-import os
 
 
 def _e(id="m1", content="Standard data.", type="semantic", age=1, trust=0.9,
