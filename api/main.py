@@ -8772,10 +8772,11 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
     now = datetime.now(timezone.utc)
     projected = _HEAL_IMPROVEMENTS.get(req.action, 0.0)
 
-    # Log healing event to Supabase
-    if supabase_client:
+    # Log healing event to Supabase (service_client bypasses RLS)
+    _heal_sb = supabase_service_client or supabase_client
+    if _heal_sb:
         try:
-            supabase_client.table("memory_ledger").insert({
+            _heal_sb.table("memory_ledger").insert({
                 "agent_id": req.agent_id,
                 "action_type": f"heal:{req.action}",
                 "omega_mem_final": 0,
@@ -8784,7 +8785,7 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
                 "domain": "general",
             }).execute()
         except Exception:
-            pass
+            pass  # non-critical write
 
     lyap = compute_lyapunov(
         healing_counter=prev + 1,
@@ -9699,12 +9700,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         except Exception as e:
             logger.error("Stripe billing meter event failed: %s", e)
 
-    if supabase_client:
+    # Use service_client (bypasses RLS) with anon fallback; non-critical write
+    _ledger_sb = supabase_service_client or supabase_client
+    if _ledger_sb:
         try:
-            # Only insert columns that exist in the Supabase memory_ledger table.
-            # Columns confirmed: agent_id, task_id, omega_mem_final, recommended_action,
-            # assurance_score, domain, action_type. Columns NOT in table: gsv,
-            # healing_counter, explainability_note, component_breakdown.
             _ledger_record = {
                 "agent_id": req.agent_id,
                 "task_id": req.task_id,
@@ -9714,9 +9713,13 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "domain": req.domain,
                 "action_type": req.action_type,
             }
-            supabase_client.table("memory_ledger").insert(_ledger_record).execute()
+            _ledger_sb.table("memory_ledger").insert(_ledger_record).execute()
         except Exception as e:
-            logger.error("memory_ledger write failed: %s", e)
+            _err_str = str(e)
+            if "42501" in _err_str or "RLS" in _err_str:
+                logger.debug("memory_ledger RLS skip (non-critical): %s", _err_str[:120])
+            else:
+                logger.error("memory_ledger write failed: %s", e)
 
     # Importance detection with VoI — find at-risk entries sorted by ROI
     importance_results = compute_importance_with_voi(entries, req.action_type, req.domain)
