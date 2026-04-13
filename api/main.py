@@ -8778,13 +8778,10 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
             supabase_client.table("memory_ledger").insert({
                 "agent_id": req.agent_id,
                 "action_type": f"heal:{req.action}",
-                "healing_counter": prev + 1,
-                "explainability_note": f"Heal action {req.action} applied to {req.entry_id}",
                 "omega_mem_final": 0,
                 "recommended_action": "HEAL",
                 "assurance_score": 0,
                 "domain": "general",
-                "component_breakdown": {"entry_id": req.entry_id},
             }).execute()
         except Exception:
             pass
@@ -9704,6 +9701,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     if supabase_client:
         try:
+            # Only insert columns that exist in the Supabase memory_ledger table.
+            # Columns confirmed: agent_id, task_id, omega_mem_final, recommended_action,
+            # assurance_score, domain, action_type. Columns NOT in table: gsv,
+            # healing_counter, explainability_note, component_breakdown.
             _ledger_record = {
                 "agent_id": req.agent_id,
                 "task_id": req.task_id,
@@ -9712,9 +9713,6 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "assurance_score": result.assurance_score,
                 "domain": req.domain,
                 "action_type": req.action_type,
-                "explainability_note": result.explainability_note,
-                "component_breakdown": result.component_breakdown,
-                "healing_counter": result.healing_counter,
             }
             supabase_client.table("memory_ledger").insert(_ledger_record).execute()
         except Exception as e:
@@ -10523,9 +10521,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass  # graceful degradation
 
-    # Subjective Logic (P-04)
+    # Subjective Logic (P-04) — clamp trust + conflict ≤ 1.0
     try:
-        _sl_entries = [{"id": e.id, "source_trust": e.source_trust, "source_conflict": e.source_conflict} for e in entries]
+        _sl_entries = []
+        for e in entries:
+            _sl_t, _sl_c = e.source_trust, e.source_conflict
+            if _sl_t + _sl_c > 1.0:
+                _sl_c = max(0.0, 1.0 - _sl_t)
+            _sl_entries.append({"id": e.id, "source_trust": _sl_t, "source_conflict": _sl_c})
         sl = compute_subjective_logic(_sl_entries)
         if sl:
             _sl_opinions = [{"entry_id": eid, "belief": op.belief, "disbelief": op.disbelief,
