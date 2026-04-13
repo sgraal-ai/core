@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 import stripe
 import requests as http_requests
 import resend
-from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx, redis_delete
+from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx, redis_delete, _get_session as _get_redis_session
 
 
 from concurrent.futures import ThreadPoolExecutor
@@ -532,7 +532,7 @@ def health():
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
             _rh_start = _time.monotonic()
-            _rh_r = http_requests.get(f"{UPSTASH_REDIS_URL}/DBSIZE",
+            _rh_r = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/DBSIZE",
                 headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=3)
             _rh_lat = round((_time.monotonic() - _rh_start) * 1000, 2)
             if _rh_r.ok:
@@ -996,16 +996,14 @@ class CertificateRequest(BaseModel):
 @app.post("/v1/certificate")
 def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify_api_key)):
     """Issue a governance certificate for a BLOCK event."""
-    # 1. Check in-memory outcomes — try as outcome_id key first, then scan by request_id
-    _outcome = _outcomes.get(req.request_id)
+    # 1. Check L1 cache + Redis (cross-worker) via _outcome_get
+    _outcome = _outcome_get(req.request_id)
     if not _outcome:
+        # Scan L1 by request_id field (slower, L1 only)
         for _oid, _od in _outcomes.items():
             if _od.get("request_id") == req.request_id or _oid == req.request_id:
                 _outcome = _od
                 break
-    # 2. Check Redis (try both outcome: and request: prefixes)
-    if not _outcome:
-        _outcome = redis_get(f"outcome:{req.request_id}") or redis_get(f"request:{req.request_id}")
     # 3. Check Supabase audit_log
     if not _outcome and supabase_service_client:
         try:
@@ -1426,15 +1424,13 @@ class ReplayRequest(BaseModel):
 @app.post("/v1/replay")
 def replay_preflight(req: ReplayRequest, key_record: dict = Depends(verify_api_key)):
     """Replay a previous preflight call to verify determinism."""
-    # Find original outcome
-    _outcome = _outcomes.get(req.request_id)
+    # Find original outcome (L1 cache + Redis cross-worker)
+    _outcome = _outcome_get(req.request_id)
     if not _outcome:
         for _oid, _od in _outcomes.items():
             if _od.get("request_id") == req.request_id:
                 _outcome = _od
                 break
-    if not _outcome:
-        _outcome = redis_get(f"outcome:{req.request_id}")
     if not _outcome:
         raise HTTPException(status_code=404, detail="Request ID not found — cannot replay")
 
@@ -3423,7 +3419,7 @@ def analytics_summary(key_record: dict = Depends(verify_api_key)):
     first_pf = None
     try:
         if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
-            _fp_r = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/first_preflight:{key_record.get('key_hash', 'default')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+            _fp_r = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/first_preflight:{key_record.get('key_hash', 'default')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
             if _fp_r.ok and _fp_r.json().get("result"):
                 first_pf = _fp_r.json()["result"]
     except Exception:
@@ -3440,7 +3436,7 @@ def get_memory_type_distribution(key_record: dict = Depends(verify_api_key)):
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         for t in _types:
             try:
-                r = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/mem_type_dist:{kh}:{t}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                r = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/mem_type_dist:{kh}:{t}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if r.ok:
                     val = r.json().get("result")
                     distribution[t] = int(val) if val else 0
@@ -3599,7 +3595,7 @@ def memory_access_log(memory_id: str, key_record: dict = Depends(verify_api_key)
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
             _alk = f"access_log:{key_record.get('key_hash','default')}:{memory_id}"
-            r = http_requests.get(f"{UPSTASH_REDIS_URL}/LRANGE/{_alk}/0/99",
+            r = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/LRANGE/{_alk}/0/99",
                 headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
             if r.ok: entries = r.json().get("result", [])
         except Exception: pass
@@ -6829,7 +6825,7 @@ def eu_ai_act_report(key_record: dict = Depends(verify_api_key), force_refresh: 
     if not force_refresh and UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
             _ck = f"eu_act_report:{kh}"
-            _cr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_ck}",
+            _cr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_ck}",
                 headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
             if _cr.ok and _cr.json().get("result"):
                 cached = _json.loads(_cr.json()["result"])
@@ -6870,7 +6866,7 @@ def eu_ai_act_report(key_record: dict = Depends(verify_api_key), force_refresh: 
     # Cache for 1 hour
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
-            http_requests.post(f"{UPSTASH_REDIS_URL}/SET/eu_act_report:{kh}/{_json.dumps(report)}/EX/3600",
+            _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SET/eu_act_report:{kh}/{_json.dumps(report)}/EX/3600",
                 headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
         except Exception:
             pass
@@ -8120,9 +8116,39 @@ def _set_healing_counter(entry_id: str, count: int):
 # Thread manager for adaptive sampling
 _thread_manager = ThreadManager()
 
-# In-memory outcome registry (outcome_id -> outcome record)
+# In-memory outcome registry (L1 cache) + Redis (L2, cross-worker)
+# Writes go to both in-memory and Redis. Reads check in-memory first, then Redis.
 _outcomes: dict[str, dict] = {}
 _outcomes_lock = threading.Lock()
+_OUTCOME_TTL = 3600  # 1 hour in Redis
+
+
+def _outcome_set(outcome_id: str, data: dict):
+    """Write outcome to L1 (in-memory) + L2 (Redis). Thread-safe."""
+    _outcomes[outcome_id] = data
+    _persist_store_bg(f"outcome:{outcome_id}", data, ttl=_OUTCOME_TTL)
+
+
+def _outcome_get(outcome_id: str) -> Optional[dict]:
+    """Read outcome from L1 (in-memory) then L2 (Redis)."""
+    val = _outcomes.get(outcome_id)
+    if val:
+        return val
+    # L1 miss — check Redis (cross-worker)
+    val = redis_get(f"outcome:{outcome_id}")
+    if val and isinstance(val, dict):
+        _outcomes[outcome_id] = val  # Populate L1 cache
+        return val
+    return None
+
+
+def _outcome_update(outcome_id: str, updates: dict):
+    """Update specific fields on an existing outcome. Thread-safe."""
+    rec = _outcome_get(outcome_id)
+    if rec:
+        rec.update(updates)
+        _outcomes[outcome_id] = rec
+        _persist_store_bg(f"outcome:{outcome_id}", rec, ttl=_OUTCOME_TTL)
 
 # Projected improvement estimates per action type
 _HEAL_IMPROVEMENTS = {
@@ -8906,17 +8932,19 @@ def preflight_batch(req: BatchRequest, key_record: dict = Depends(verify_api_key
 def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     with _outcomes_lock:
-        if req.outcome_id not in _outcomes:
+        outcome = _outcome_get(req.outcome_id)
+        if not outcome:
             raise HTTPException(status_code=404, detail=f"Outcome {req.outcome_id} not found")
 
-        outcome = _outcomes[req.outcome_id]
         if outcome["status"] != "open":
             raise HTTPException(status_code=409, detail=f"Outcome {req.outcome_id} already closed")
 
         now = datetime.now(timezone.utc)
-        outcome["status"] = req.status
-        outcome["closed_at"] = now.isoformat()
-        outcome["component_attribution"] = req.failure_components
+        _outcome_update(req.outcome_id, {
+            "status": req.status,
+            "closed_at": now.isoformat(),
+            "component_attribution": req.failure_components,
+        })
 
     # Log to Supabase outcome_log
     if supabase_client:
@@ -9028,16 +9056,16 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
                     _c = _dt_parse.fromisoformat(_created.replace("Z", "+00:00"))
                     _dur = (now - _c).total_seconds() / 60.0  # minutes
                     _mttr_k = f"mttr_history:{_outcome_key_hash}:{_outcome_domain}"
-                    http_requests.post(f"{UPSTASH_REDIS_URL}/RPUSH/{_mttr_k}/{round(_dur,2)}", headers=_auth_h, timeout=2)
-                    http_requests.post(f"{UPSTASH_REDIS_URL}/LTRIM/{_mttr_k}/-50/-1", headers=_auth_h, timeout=2)
-                    http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_mttr_k}/86400", headers=_auth_h, timeout=2)
+                    _get_redis_session().post(f"{UPSTASH_REDIS_URL}/RPUSH/{_mttr_k}/{round(_dur,2)}", headers=_auth_h, timeout=2)
+                    _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/{_mttr_k}/-50/-1", headers=_auth_h, timeout=2)
+                    _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_mttr_k}/86400", headers=_auth_h, timeout=2)
                 except Exception:
                     pass
 
             # 2. Poisson lambda: failure_count / total from attribution
             try:
                 _pl_k = f"poisson_lambda:{_outcome_key_hash}:{_outcome_domain}"
-                _plr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_pl_k}", headers=_auth_h, timeout=2)
+                _plr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_pl_k}", headers=_auth_h, timeout=2)
                 _old_lam_data = {"failures": 0, "total": 0}
                 if _plr.ok and _plr.json().get("result"):
                     _old_lam_data = _json.loads(_plr.json()["result"])
@@ -9046,7 +9074,7 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
                     _old_lam_data["failures"] = _old_lam_data.get("failures", 0) + 1
                 _new_lam = _old_lam_data["failures"] / max(_old_lam_data["total"], 1)
                 _old_lam_data["lambda"] = round(_new_lam, 4)
-                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_pl_k}/{_json.dumps(_old_lam_data)}/EX/86400", headers=_auth_h, timeout=2)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SET/{_pl_k}/{_json.dumps(_old_lam_data)}/EX/86400", headers=_auth_h, timeout=2)
             except Exception:
                 pass
 
@@ -9057,21 +9085,21 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
                 _s_next = "SAFE" if req.status == "success" else "DEGRADED" if req.status == "partial" else "CRITICAL"
                 _action = outcome.get("recommended_action", "USE_MEMORY")
                 _mdp_k = f"mdp_transitions:{_outcome_key_hash}:{_outcome_domain}"
-                _mdpr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_mdp_k}", headers=_auth_h, timeout=2)
+                _mdpr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_mdp_k}", headers=_auth_h, timeout=2)
                 _mdp_data = {"transitions": {}, "n_outcomes": 0}
                 if _mdpr.ok and _mdpr.json().get("result"):
                     _mdp_data = _json.loads(_mdpr.json()["result"])
                 _mdp_data["n_outcomes"] = _mdp_data.get("n_outcomes", 0) + 1
                 _tk = f"{_s}:{_action}:{_s_next}"
                 _mdp_data["transitions"][_tk] = _mdp_data.get("transitions", {}).get(_tk, 0) + 1
-                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_mdp_k}/{_json.dumps(_mdp_data)}/EX/86400", headers=_auth_h, timeout=2)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SET/{_mdp_k}/{_json.dumps(_mdp_data)}/EX/86400", headers=_auth_h, timeout=2)
             except Exception:
                 pass
 
             # 4. ROC history: append (omega_score, outcome_bool)
             try:
                 _roc_k = f"roc_history:{_outcome_key_hash}:{_outcome_domain}"
-                _rocr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_roc_k}", headers=_auth_h, timeout=2)
+                _rocr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_roc_k}", headers=_auth_h, timeout=2)
                 _roc_data = {"predictions": [], "actuals": []}
                 if _rocr.ok and _rocr.json().get("result"):
                     _roc_data = _json.loads(_rocr.json()["result"])
@@ -9080,19 +9108,19 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
                 # Keep last 100
                 _roc_data["predictions"] = _roc_data["predictions"][-100:]
                 _roc_data["actuals"] = _roc_data["actuals"][-100:]
-                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_roc_k}/{_json.dumps(_roc_data)}/EX/86400", headers=_auth_h, timeout=2)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SET/{_roc_k}/{_json.dumps(_roc_data)}/EX/86400", headers=_auth_h, timeout=2)
             except Exception:
                 pass
 
             # 5. Frontdoor probs: increment n_outcomes
             try:
                 _fd_k = f"frontdoor_probs:{_outcome_key_hash}:{_outcome_domain}"
-                _fdr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_fd_k}", headers=_auth_h, timeout=2)
+                _fdr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_fd_k}", headers=_auth_h, timeout=2)
                 _fd_data = {"n_outcomes": 0}
                 if _fdr.ok and _fdr.json().get("result"):
                     _fd_data = _json.loads(_fdr.json()["result"])
                 _fd_data["n_outcomes"] = _fd_data.get("n_outcomes", 0) + 1
-                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_fd_k}/{_json.dumps(_fd_data)}/EX/86400", headers=_auth_h, timeout=2)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SET/{_fd_k}/{_json.dumps(_fd_data)}/EX/86400", headers=_auth_h, timeout=2)
             except Exception:
                 pass
 
@@ -9102,7 +9130,7 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
                 _pf_k = f"pf_particles:{_outcome_key_hash}:{_outcome_domain}"
                 _omega_pf = outcome.get("omega_mem_final", 50)
                 _pf_init = {"particles": [_omega_pf + (i - 25) * 0.4 for i in range(50)], "weights": [1/50]*50}
-                http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_pf_k}/{_json.dumps(_pf_init)}/EX/3600", headers=_auth_h, timeout=2)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SET/{_pf_k}/{_json.dumps(_pf_init)}/EX/3600", headers=_auth_h, timeout=2)
             except Exception:
                 pass
         except Exception:
@@ -9384,7 +9412,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     try:
         _first_pf_key = f"first_preflight:{key_record.get('key_hash', 'default')}"
         if _redis_enabled:
-            http_requests.post(f"{UPSTASH_REDIS_URL}/SETNX/{_first_pf_key}/{datetime.now(timezone.utc).isoformat()}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+            _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SETNX/{_first_pf_key}/{datetime.now(timezone.utc).isoformat()}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
     except Exception:
         pass
 
@@ -9434,8 +9462,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         for _entry in entries:
             _type_k = f"{_mt_dist_key}:{_entry.type}"
             if _redis_enabled:
-                http_requests.post(f"{UPSTASH_REDIS_URL}/INCR/{_type_k}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
-                http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_type_k}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/INCR/{_type_k}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_type_k}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
     except Exception:
         pass
 
@@ -9605,7 +9633,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     with _outcomes_lock:
         _evict_if_full(_outcomes, "_outcomes")
-        _outcomes[outcome_id] = {
+        _outcome_set(outcome_id, {
             "request_id": request_id,
             "status": "open",
             "agent_id": req.agent_id,
@@ -9623,7 +9651,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                               "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust,
                               "source_conflict": e.source_conflict, "downstream_count": e.downstream_count}
                              for e in entries[:20]],
-        }
+        })
 
     # Increment Global State Vector
     gsv = _increment_gsv()
@@ -10146,9 +10174,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _vax_idx_key = f"vaccine_index:{req.domain}"
                 if _redis_enabled:
                     import urllib.parse as _urlp
-                    http_requests.post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key}/{_urlp.quote(_sig['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
-                    http_requests.post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
-                    http_requests.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)  # Match vaccine TTL: 7 days
+                    _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key}/{_urlp.quote(_sig['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                    _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                    _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)  # Match vaccine TTL: 7 days
         except Exception:
             pass
 
@@ -10179,17 +10207,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
     with _outcomes_lock:
-        if outcome_id in _outcomes:
-            _outcomes[outcome_id]["compliance_result"] = response.get("compliance_result", {})
-            _outcomes[outcome_id]["repair_plan"] = repair_plan_out
-            # Store detection states for certificate generation
-            _outcomes[outcome_id]["timestamp_integrity"] = response.get("timestamp_integrity", "VALID")
-            _outcomes[outcome_id]["identity_drift"] = response.get("identity_drift", "CLEAN")
-            _outcomes[outcome_id]["consensus_collapse"] = response.get("consensus_collapse", "CLEAN")
-            _outcomes[outcome_id]["provenance_chain_integrity"] = response.get("provenance_chain_integrity", "CLEAN")
-            _outcomes[outcome_id]["naturalness_level"] = response.get("naturalness_level", "ORGANIC")
-            _outcomes[outcome_id]["attack_surface_level"] = response.get("attack_surface_level", "NONE")
-            _outcomes[outcome_id]["input_hash"] = response.get("input_hash", "")
+        _outcome_update(outcome_id, {
+            "compliance_result": response.get("compliance_result", {}),
+            "repair_plan": repair_plan_out,
+            "timestamp_integrity": response.get("timestamp_integrity", "VALID"),
+            "identity_drift": response.get("identity_drift", "CLEAN"),
+            "consensus_collapse": response.get("consensus_collapse", "CLEAN"),
+            "provenance_chain_integrity": response.get("provenance_chain_integrity", "CLEAN"),
+            "naturalness_level": response.get("naturalness_level", "ORGANIC"),
+            "attack_surface_level": response.get("attack_surface_level", "NONE"),
+            "input_hash": response.get("input_hash", ""),
+        })
 
     # #127 Decision Cost Engine
     if req.cost_config:
@@ -11051,7 +11079,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _pr_lam = 0.1
         if _redis_enabled:
             try:
-                _prr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_pr_key}",
+                _prr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_pr_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if _prr.ok and _prr.json().get("result") is not None:
                     _pr_lam = float(_prr.json()["result"])
@@ -11071,7 +11099,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _roc_key = f"roc_history:{key_record.get('key_hash', 'default')}:{req.domain}"
         if _redis_enabled:
             try:
-                _rocr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_roc_key}",
+                _rocr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_roc_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if _rocr.ok and _rocr.json().get("result"):
                     _roc_data = _json.loads(_rocr.json()["result"])
@@ -11091,7 +11119,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _fd_data = None
         if _redis_enabled:
             try:
-                _fdr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_fd_key}",
+                _fdr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_fd_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if _fdr.ok and _fdr.json().get("result"):
                     _fd_data = _json.loads(_fdr.json()["result"])
@@ -11168,7 +11196,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _sa_prev = None
         if _redis_enabled:
             try:
-                _sar = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_sa_key}",
+                _sar = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_sa_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if _sar.ok and _sar.json().get("result"):
                     _sa_prev = _json.loads(_sar.json()["result"])
@@ -11180,7 +11208,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             if sa.sa_active and _redis_enabled:
                 try:
                     _sa_store = _json.dumps({"temperature": sa.current_temperature, "accepted": sa.accepted_moves, "best_loss": sa.best_loss, "iteration": _sa_prev.get("iteration", 0) + 1 if _sa_prev else 1})
-                    http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_sa_key}/{_sa_store}/EX/86400",
+                    _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SET/{_sa_key}/{_sa_store}/EX/86400",
                         headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 except Exception:
                     pass
@@ -11247,7 +11275,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _pf_parts, _pf_weights = None, None
         if _redis_enabled:
             try:
-                _pfr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_pf_key}",
+                _pfr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_pf_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if _pfr.ok and _pfr.json().get("result"):
                     _pfd = _json.loads(_pfr.json()["result"])
@@ -11303,7 +11331,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _mk_stored = None
         if _redis_enabled:
             try:
-                _mkr = http_requests.get(f"{UPSTASH_REDIS_URL}/GET/{_mk_key}",
+                _mkr = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/GET/{_mk_key}",
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if _mkr.ok and _mkr.json().get("result"):
                     _mk_stored = _mkr.json()["result"]
@@ -11316,7 +11344,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 response["compliance_result"]["merkle_integrity_proof"] = True
             if _redis_enabled:
                 try:
-                    http_requests.post(f"{UPSTASH_REDIS_URL}/SET/{_mk_key}/{mk.root_hash}/EX/86400",
+                    _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SET/{_mk_key}/{mk.root_hash}/EX/86400",
                         headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 except Exception: pass
     except Exception: pass
