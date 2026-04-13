@@ -20,6 +20,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt && pip install pytest httpx
       - run: pip install -e sdk/python/ || pip install sdk/python/ || true
+      - name: Clear bytecode cache
+        run: find . -name "*.pyc" -delete && find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}/sdk/python:${{ github.workspace }}
