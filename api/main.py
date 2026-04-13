@@ -12,6 +12,9 @@ import hmac as _hmac
 import json as _json
 import threading
 import uuid
+import socket
+import ipaddress
+import asyncio
 from datetime import datetime, timezone, timedelta
 import stripe
 import requests as http_requests
@@ -19,10 +22,20 @@ import resend
 from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx, redis_delete
 
 
+from concurrent.futures import ThreadPoolExecutor
+_redis_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="redis_bg")
+
 def _persist_store(key: str, value, ttl: int = 0):
     """Write to Redis with graceful fallback. Never crash."""
     try:
         redis_set(key, value, ttl=ttl)
+    except Exception:
+        pass
+
+def _persist_store_bg(key: str, value, ttl: int = 0):
+    """Fire-and-forget Redis write in background thread. Never blocks the caller."""
+    try:
+        _redis_pool.submit(_persist_store, key, value, ttl)
     except Exception:
         pass
 
@@ -50,7 +63,7 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 resend.api_key = os.getenv("RESEND_API_KEY")
 
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
-ATTESTATION_SECRET = os.getenv("ATTESTATION_SECRET", str(uuid.uuid4()))
+ATTESTATION_SECRET = os.getenv("ATTESTATION_SECRET", "")
 
 UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_URL") or os.getenv("UPSTASH_REDIS_REST_URL")
 UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN")
@@ -143,6 +156,86 @@ def _evict_if_full(d: dict, name: str = "cache"):
         logger.info("Cache eviction: removed %d oldest entries from %s (was %d)", _DICT_EVICT_BATCH, name, _DICT_MAX_SIZE + 1)
 
 
+# ---------------------------------------------------------------------------
+# Security helpers (Batch 1 audit fixes)
+# ---------------------------------------------------------------------------
+
+def _safe_key_hash(key_record: dict) -> str:
+    """Return a tenant-scoped key_hash. Never returns 'default' or empty string.
+    Test keys get a deterministic hash derived from their customer_id.
+    Demo keys get 'demo'. Production keys return their actual key_hash."""
+    kh = key_record.get("key_hash")
+    if kh and kh != "default":
+        return kh
+    # Fallback: derive from customer_id for test keys
+    cid = key_record.get("customer_id", "")
+    if cid:
+        return f"test_{hashlib.sha256(cid.encode()).hexdigest()[:16]}"
+    raise HTTPException(status_code=403, detail="API key has no valid key_hash — cannot identify tenant")
+
+
+def _validate_webhook_url(url: str) -> str:
+    """Validate a webhook URL for SSRF safety. Returns the URL if valid, raises 422 otherwise.
+    DNS resolution check is skipped in test environments (SGRAAL_SKIP_DNS_CHECK=1)."""
+    if not url:
+        raise HTTPException(status_code=422, detail="Webhook URL cannot be empty")
+    parsed = urllib.parse.urlparse(url)
+    # Scheme check
+    if parsed.scheme != "https":
+        raise HTTPException(status_code=422, detail="Invalid webhook URL: only https:// is allowed")
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=422, detail="Invalid webhook URL: no hostname")
+    # Block dangerous hostnames
+    _blocked_hostnames = {"localhost", "ip6-localhost", "ip6-loopback"}
+    _blocked_suffixes = (".local", ".internal", ".localhost", ".svc", ".cluster.local")
+    if hostname.lower() in _blocked_hostnames or any(hostname.lower().endswith(s) for s in _blocked_suffixes):
+        raise HTTPException(status_code=422, detail="Invalid webhook URL: blocked hostname")
+    # Check if hostname is a raw IP address (no DNS needed)
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            raise HTTPException(status_code=422, detail="Invalid webhook URL: resolves to blocked IP range")
+        return url
+    except ValueError:
+        pass  # Not an IP — proceed to DNS resolution
+    # Skip DNS resolution in test environments (avoids flaky tests due to DNS)
+    if os.getenv("SGRAAL_SKIP_DNS_CHECK") == "1":
+        return url
+    # Resolve and check IP
+    try:
+        addrs = socket.getaddrinfo(hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise HTTPException(status_code=422, detail="Invalid webhook URL: hostname cannot be resolved")
+    for family, _, _, _, sockaddr in addrs:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            raise HTTPException(status_code=422, detail="Invalid webhook URL: resolves to blocked IP range")
+    return url
+
+
+def _validate_required_secrets():
+    """Validate that all required cryptographic secrets are set. Called at startup."""
+    missing = []
+    if not os.getenv("ATTESTATION_SECRET"):
+        missing.append("ATTESTATION_SECRET")
+    if not os.getenv("PASSPORT_SIGNING_KEY_V1"):
+        missing.append("PASSPORT_SIGNING_KEY_V1")
+    if not os.getenv("UNSUB_HMAC_SECRET"):
+        missing.append("UNSUB_HMAC_SECRET")
+    if missing:
+        logger.warning("Missing required secrets: %s — using insecure defaults. "
+                       "Set these environment variables in production.", ", ".join(missing))
+
+
+# Supabase retry queue for compliance-critical writes
+_supabase_retry_queue: list = []
+_supabase_retry_lock = threading.Lock()
+
+# Validate required secrets at startup (warning only — not fatal for dev/test)
+_validate_required_secrets()
+
+
 # In-memory API key store: api_key -> stripe_customer_id
 API_KEYS: dict[str, str] = {
     "sg_test_key_001": "cus_test_001",
@@ -163,7 +256,8 @@ def verify_api_key(
 
     # Check in-memory store first (test keys skip rate limiting, default to standard profile)
     if api_key in API_KEYS:
-        return {"customer_id": API_KEYS[api_key], "tier": "test", "calls_this_month": 0, "key_hash": None}
+        _test_kh = hashlib.sha256(api_key.encode()).hexdigest()
+        return {"customer_id": API_KEYS[api_key], "tier": "test", "calls_this_month": 0, "key_hash": _test_kh}
 
     # Fall back to Supabase hash lookup (with Redis cache)
     key_hash = _hash_key(api_key)
@@ -693,7 +787,9 @@ class SLAConfigRequest(BaseModel):
 @app.post("/v1/sla/configure")
 def configure_sla(req: SLAConfigRequest, key_record: dict = Depends(verify_api_key)):
     """Configure SLA thresholds for a domain."""
-    _kh = key_record.get("key_hash", "default")
+    if req.alert_webhook:
+        _validate_webhook_url(req.alert_webhook)
+    _kh = _safe_key_hash(key_record)
     _sla_key = f"sla_config:{_kh}:{req.domain}"
     config = {
         "domain": req.domain, "max_block_rate": req.max_block_rate,
@@ -708,7 +804,7 @@ def configure_sla(req: SLAConfigRequest, key_record: dict = Depends(verify_api_k
 @app.get("/v1/sla/status")
 def get_sla_status(domain: str = Query("general"), key_record: dict = Depends(verify_api_key)):
     """Get current SLA status for a domain."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _sla_key = f"sla_config:{_kh}:{domain}"
     config = redis_get(_sla_key, {})
 
@@ -809,7 +905,7 @@ class PolicyApplyByNameRequest(BaseModel):
 @app.post("/v1/policies")
 def create_policy(req: PolicyCreateRequest, key_record: dict = Depends(verify_api_key)):
     """Create or update a named policy."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     policy = {"name": req.name, "config": req.config, "created_at": _time.time()}
     _pk = f"policy:{_kh}:{req.name}"
     redis_set(_pk, policy, ttl=86400 * 90)
@@ -821,7 +917,7 @@ def create_policy(req: PolicyCreateRequest, key_record: dict = Depends(verify_ap
 @app.get("/v1/policies")
 def list_policies(key_record: dict = Depends(verify_api_key)):
     """List all policies for this API key."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _prefix = f"policy:{_kh}:"
     policies = [{"policy_id": k, "name": v["name"], "domain": v["config"].get("domain", "general"),
                  "created_at": v.get("created_at", 0)}
@@ -832,7 +928,7 @@ def list_policies(key_record: dict = Depends(verify_api_key)):
 @app.get("/v1/policies/{name}")
 def get_policy(name: str, key_record: dict = Depends(verify_api_key)):
     """Get a specific policy by name."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _pk = f"policy:{_kh}:{name}"
     pol = _policy_store.get(_pk) or redis_get(_pk)
     if not pol:
@@ -843,7 +939,7 @@ def get_policy(name: str, key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/policies/{name}")
 def delete_policy(name: str, key_record: dict = Depends(verify_api_key)):
     """Delete a policy."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _pk = f"policy:{_kh}:{name}"
     _policy_store.pop(_pk, None)
     redis_delete(_pk)
@@ -853,7 +949,7 @@ def delete_policy(name: str, key_record: dict = Depends(verify_api_key)):
 @app.post("/v1/policies/{name}/apply")
 def apply_named_policy(name: str, req: PolicyApplyByNameRequest, key_record: dict = Depends(verify_api_key)):
     """Apply a named policy to a preflight request."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _pk = f"policy:{_kh}:{name}"
     pol = _policy_store.get(_pk) or redis_get(_pk)
     if not pol:
@@ -874,7 +970,7 @@ class PolicyCompareRequest(BaseModel):
 @app.post("/v1/policies/compare")
 def compare_policies(req: PolicyCompareRequest, key_record: dict = Depends(verify_api_key)):
     """Compare inline config vs named registry policy for conflicts."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _pk = f"policy:{_kh}:{req.registry_name}"
     pol = _policy_store.get(_pk) or redis_get(_pk)
     if not pol:
@@ -958,7 +1054,7 @@ def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify
             "proof_version": "v1",
         },
         "issuer": "Sgraal Protocol",
-        "api_key_id": key_record.get("key_hash", "")[:16],
+        "api_key_id": _safe_key_hash(key_record)[:16],
         "valid": True,
         # W3C Verifiable Credential fields
         "vc_compatible": True,
@@ -1001,9 +1097,11 @@ def get_certificate_by_id(certificate_id: str, key_record: dict = Depends(verify
     cert = _certificates.get(certificate_id) or redis_get(f"certificate:{certificate_id}")
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    _req_key_id = (key_record.get("key_hash") or "")[:16]
+    _req_key_id = _safe_key_hash(key_record)[:16]
     _cert_key_id = cert.get("api_key_id", "")
-    if _cert_key_id and _req_key_id != _cert_key_id:
+    if not _req_key_id or not _cert_key_id:
+        raise HTTPException(status_code=403, detail="Certificate not accessible with this API key")
+    if _cert_key_id != _req_key_id:
         raise HTTPException(status_code=403, detail="Certificate not accessible with this API key")
     return cert
 
@@ -1013,7 +1111,7 @@ def get_certificate_by_id(certificate_id: str, key_record: dict = Depends(verify
 @app.get("/v1/governance-score")
 def get_governance_score(key_record: dict = Depends(verify_api_key)):
     """Compute per-API-key governance score from audit history."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     # Try to get recent decisions from Redis ring buffer
     _hist = redis_get(f"te_history:{_kh}:general", [])
     if not isinstance(_hist, list):
@@ -1103,7 +1201,7 @@ def register_memory(req: RegistryRegisterRequest, key_record: dict = Depends(ver
         "governance_score": None,
         "governance_score_note": "Insufficient history for governance score",
         "registered_at": now, "valid_until": now + 86400, "status": "VERIFIED",
-        "api_key_id": key_record.get("key_hash", "")[:16],
+        "api_key_id": _safe_key_hash(key_record)[:16],
     }
     _registry[req.agent_id] = entry
     redis_set(f"registry:{req.agent_id}", entry, ttl=86400)
@@ -1124,7 +1222,7 @@ def get_registry_entry(agent_id: str):
 @app.get("/v1/registry")
 def list_registry(key_record: dict = Depends(verify_api_key)):
     """List all registered agents for this API key."""
-    _kh = key_record.get("key_hash", "")[:16]
+    _kh = _safe_key_hash(key_record)[:16]
     entries = [v for v in _registry.values() if v.get("api_key_id") == _kh and v.get("valid_until", 0) > _time.time()]
     return {"agents": entries, "count": len(entries)}
 
@@ -1208,7 +1306,7 @@ def subscribe_feed(req: FeedSubscribeRequest, key_record: dict = Depends(verify_
     """Subscribe to a trusted memory feed."""
     if req.feed_id not in _feeds:
         raise HTTPException(status_code=404, detail=f"Feed '{req.feed_id}' not found")
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _feed_subscribers[f"{_kh}:{req.feed_id}"] = {"feed_id": req.feed_id, "domain": req.domain,
                                                     "webhook_url": req.webhook_url, "subscribed_at": _time.time()}
     return {"subscribed": True, "feed_id": req.feed_id}
@@ -1244,7 +1342,8 @@ class WebhookConfigRequest(BaseModel):
 @app.post("/v1/webhook/configure")
 def configure_webhook(req: WebhookConfigRequest, key_record: dict = Depends(verify_api_key)):
     """Configure webhook for real-time event notifications."""
-    _kh = key_record.get("key_hash", "default")
+    _validate_webhook_url(req.webhook_url)
+    _kh = _safe_key_hash(key_record)
     config = {"webhook_url": req.webhook_url, "events": req.events, "configured_at": _time.time()}
     _webhook_configs[_kh] = config
     redis_set(f"webhook_config:{_kh}", config, ttl=86400 * 90)
@@ -1254,7 +1353,7 @@ def configure_webhook(req: WebhookConfigRequest, key_record: dict = Depends(veri
 @app.get("/v1/webhook/status")
 def get_webhook_status(key_record: dict = Depends(verify_api_key)):
     """Return configured webhook for this API key."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     config = _webhook_configs.get(_kh) or redis_get(f"webhook_config:{_kh}")
     if not config:
         return {"configured": False}
@@ -1377,7 +1476,7 @@ def replay_preflight(req: ReplayRequest, key_record: dict = Depends(verify_api_k
         "replayed_at": _time.time(),
     }
     # Store in replay history
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     if _kh not in _replay_history:
         _replay_history[_kh] = []
     _replay_history[_kh].append(result)
@@ -1388,7 +1487,7 @@ def replay_preflight(req: ReplayRequest, key_record: dict = Depends(verify_api_k
 @app.get("/v1/replay/history")
 def get_replay_history(key_record: dict = Depends(verify_api_key)):
     """Last 20 replay results for this API key."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     history = _replay_history.get(_kh, [])
     return {"replays": history, "count": len(history)}
 
@@ -1720,7 +1819,7 @@ def passport_with_fidelity(req: PassportWithFidelityRequest, key_record: dict = 
 @app.post("/v1/sleeper/detect")
 def detect_sleeper(req: dict = {}, key_record: dict = Depends(verify_api_key)):
     """Detect sleeper patterns and raise write firewall if found."""
-    namespace = req.get("namespace", key_record.get("key_hash", "default"))
+    namespace = req.get("namespace", _safe_key_hash(key_record))
     entries = req.get("memory_state", [])
     sleeper_detected = False
     for e in entries:
@@ -1997,7 +2096,7 @@ _scheduler_state = {
 @app.get("/v1/sleeper/alerts")
 def get_sleeper_alerts(key_record: dict = Depends(verify_api_key)):
     """List detected sleeper alerts for this API key."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     # Scan Redis for sleeper alerts
     alerts = []
     # In-memory fallback
@@ -2018,7 +2117,8 @@ class ZapierWebhookRequest(BaseModel):
 @app.post("/v1/zapier/webhook")
 def configure_zapier(req: ZapierWebhookRequest, key_record: dict = Depends(verify_api_key)):
     """Configure a Zapier webhook trigger."""
-    _kh = key_record.get("key_hash", "default")
+    _validate_webhook_url(req.webhook_url)
+    _kh = _safe_key_hash(key_record)
     config = {"webhook_url": req.webhook_url, "trigger": req.trigger, "provider": "zapier", "configured_at": _time.time()}
     _zapier_hooks[_kh] = config
     redis_set(f"zapier_hook:{_kh}", config, ttl=86400 * 90)
@@ -2028,7 +2128,8 @@ def configure_zapier(req: ZapierWebhookRequest, key_record: dict = Depends(verif
 @app.post("/v1/make/webhook")
 def configure_make(req: ZapierWebhookRequest, key_record: dict = Depends(verify_api_key)):
     """Configure a Make.com webhook trigger."""
-    _kh = key_record.get("key_hash", "default")
+    _validate_webhook_url(req.webhook_url)
+    _kh = _safe_key_hash(key_record)
     config = {"webhook_url": req.webhook_url, "trigger": req.trigger, "provider": "make", "configured_at": _time.time()}
     _make_hooks[_kh] = config
     redis_set(f"make_hook:{_kh}", config, ttl=86400 * 90)
@@ -2038,7 +2139,7 @@ def configure_make(req: ZapierWebhookRequest, key_record: dict = Depends(verify_
 @app.get("/v1/integrations/webhooks")
 def list_webhooks(key_record: dict = Depends(verify_api_key)):
     """List all configured webhooks for this API key."""
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     hooks = []
     for src, store, prefix in [("zapier", _zapier_hooks, "zapier_hook"), ("make", _make_hooks, "make_hook")]:
         h = store.get(_kh) or redis_get(f"{prefix}:{_kh}")
@@ -2321,7 +2422,7 @@ def run_calibration(req: CalibrationRunRequest, key_record: dict = Depends(verif
     """Trigger a calibration run against built-in corpus."""
     global _last_calibration_report, _human_review_cases
     # Feature 8: Calibration rate limit (3/day per key)
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     _cal_key = f"calibration_count:{_kh}:{_day}"
     _cal_count = _rget(_cal_key, 0) if not key_record.get("demo") else 0
@@ -2549,7 +2650,7 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
     _check_rate_limit(key_record)
     if req.content.startswith("Synthetic test entry"):
         raise HTTPException(status_code=400, detail="Synthetic memory cannot be stored directly.")
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     mem_id = str(uuid.uuid4())
     _firewall_checks = 0
 
@@ -2706,7 +2807,7 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
 
 @app.get("/v1/store/memories/search")
 def search_memories(query: str = "", agent_id: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     results = []
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
@@ -2921,7 +3022,7 @@ def get_async_batch(job_id: str, key_record: dict = Depends(verify_api_key)):
 @app.get("/v1/memory/graph")
 def memory_graph(agent_id: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
     nodes, edges, clusters = [], [], []
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             url = f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&select=id,content,memory_type,omega_score&limit=500"
@@ -2958,12 +3059,12 @@ def create_alert_rule(req: AlertRuleRequest, key_record: dict = Depends(verify_a
     if req.operator not in ("gt", "lt", "gte", "lte"):
         raise HTTPException(status_code=400, detail="operator must be gt, lt, gte, or lte")
     rule_id = str(uuid.uuid4())
-    _alert_rules[rule_id] = {"id": rule_id, **req.model_dump(), "key_hash": key_record.get("key_hash")}
+    _alert_rules[rule_id] = {"id": rule_id, **req.model_dump(), "key_hash": _safe_key_hash(key_record)}
     return {"id": rule_id, "name": req.name, "created": True}
 
 @app.get("/v1/alert-rules")
 def list_alert_rules(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash")
+    kh = _safe_key_hash(key_record)
     rules = [r for r in _alert_rules.values() if r.get("key_hash") == kh]
     return {"rules": rules}
 
@@ -2985,7 +3086,7 @@ class DecayConfigRequest(BaseModel):
 @app.get("/v1/decay-config")
 def get_decay_config(key_record: dict = Depends(verify_api_key)):
     configs = []
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             r = http_requests.get(f"{SUPABASE_URL}/rest/v1/decay_config?api_key_hash=eq.{kh}&select=*",
@@ -2999,7 +3100,7 @@ def get_decay_config(key_record: dict = Depends(verify_api_key)):
 @app.put("/v1/decay-config")
 def update_decay_config(req: DecayConfigRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if req.lambda_param <= 0 or req.k_param <= 0:
         raise HTTPException(status_code=400, detail="lambda_param and k_param must be > 0")
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
@@ -3083,7 +3184,7 @@ def bulk_import(entries: list[dict], key_record: dict = Depends(verify_api_key))
 @app.get("/v1/store/export")
 def bulk_export(agent_id: Optional[str] = None, format: str = "json", key_record: dict = Depends(verify_api_key)):
     entries = []
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             url = f"{SUPABASE_URL}/rest/v1/memory_store?api_key_hash=eq.{kh}&select=*&limit=1000"
@@ -3114,11 +3215,11 @@ class SLARuleRequest(BaseModel):
 def create_sla_rule(req: SLARuleRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     rid = str(uuid.uuid4())
-    _sla_rules[rid] = {"id": rid, **req.model_dump(), "key_hash": key_record.get("key_hash")}
+    _sla_rules[rid] = {"id": rid, **req.model_dump(), "key_hash": _safe_key_hash(key_record)}
     return {"id": rid, "name": req.name}
 @app.get("/v1/sla-rules")
 def list_sla_rules(key_record: dict = Depends(verify_api_key)):
-    return {"rules": [r for r in _sla_rules.values() if r.get("key_hash") == key_record.get("key_hash")]}
+    return {"rules": [r for r in _sla_rules.values() if r.get("key_hash") == _safe_key_hash(key_record)]}
 @app.delete("/v1/sla-rules/{rule_id}")
 def delete_sla_rule(rule_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
@@ -3256,12 +3357,12 @@ _templates = RedisBackedDict("preflight_templates")
 @app.post("/v1/templates")
 def create_template(req: TemplateRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _templates[f"{kh}:{req.name}"] = req.model_dump()
     return {"name": req.name, "created": True}
 @app.get("/v1/templates")
 def list_templates(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     return {"templates": [v for k, v in _templates.items() if k.startswith(f"{kh}:")]}
 @app.delete("/v1/templates/{name}")
 def delete_template(name: str, key_record: dict = Depends(verify_api_key)):
@@ -3271,7 +3372,7 @@ def delete_template(name: str, key_record: dict = Depends(verify_api_key)):
 @app.post("/v1/preflight/from-template/{name}")
 def preflight_from_template(name: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record, allow_demo=True)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     tpl = _templates.get(f"{kh}:{name}")
     if not tpl: raise HTTPException(status_code=404, detail=f"Template '{name}' not found")
     from scoring_engine import compute as _tpl_compute, MemoryEntry as _tpl_ME
@@ -3307,7 +3408,7 @@ def analytics_usage(group_by: str = "day", from_date: Optional[str] = None, to_d
 @app.get("/v1/analytics/summary")
 def analytics_summary(key_record: dict = Depends(verify_api_key)):
     # FIX 11: Include threshold recommendations when enough outcomes exist
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _threshold_recs = None
     for domain in ["general", "fintech", "medical", "coding"]:
         buckets = _outcome_buckets.get(f"{kh}:{domain}", [])
@@ -3333,7 +3434,7 @@ def analytics_summary(key_record: dict = Depends(verify_api_key)):
 
 @app.get("/v1/analytics/memory-types")
 def get_memory_type_distribution(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _types = ["semantic", "episodic", "preference", "tool_state", "shared_workflow", "policy", "identity"]
     distribution = {}
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
@@ -3374,7 +3475,7 @@ def get_quota(key_record: dict = Depends(verify_api_key)):
 @app.post("/v1/memory/cluster")
 def cluster_memories(agent_id: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
     import math as _cm
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     entries = []
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
@@ -3456,12 +3557,12 @@ def create_retention(req: RetentionPolicyRequest, key_record: dict = Depends(ver
     if not _parse_retention_condition(req.condition):
         raise HTTPException(status_code=400, detail="Invalid condition syntax. Allowed fields: omega, age_days, never_accessed_days")
     rid = str(uuid.uuid4())
-    _retention_policies[rid] = {"id": rid, **req.model_dump(), "key_hash": key_record.get("key_hash")}
+    _retention_policies[rid] = {"id": rid, **req.model_dump(), "key_hash": _safe_key_hash(key_record)}
     return {"id": rid, "name": req.name}
 
 @app.get("/v1/retention-policies")
 def list_retention(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash")
+    kh = _safe_key_hash(key_record)
     return {"policies": [r for r in _retention_policies.values() if r.get("key_hash") == kh]}
 
 @app.delete("/v1/retention-policies/{policy_id}")
@@ -3517,12 +3618,12 @@ class HookRequest(BaseModel):
 def create_hook(req: HookRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     hid = str(uuid.uuid4())
-    _hooks[hid] = {"id": hid, **req.model_dump(), "key_hash": key_record.get("key_hash")}
+    _hooks[hid] = {"id": hid, **req.model_dump(), "key_hash": _safe_key_hash(key_record)}
     return {"id": hid, "event": req.event}
 
 @app.get("/v1/hooks")
 def list_hooks(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash")
+    kh = _safe_key_hash(key_record)
     return {"hooks": [h for h in _hooks.values() if h.get("key_hash") == kh]}
 
 @app.delete("/v1/hooks/{hook_id}")
@@ -3615,7 +3716,7 @@ def create_mem_token(req: MemTokenRequest, key_record: dict = Depends(verify_api
     _check_rate_limit(key_record)
     token = secrets.token_urlsafe(32)
     _mem_tokens[token] = {"memory_id": req.memory_id, "scope": req.scope,
-        "expires_at": (_time.time() + req.ttl_seconds), "key_hash": key_record.get("key_hash")}
+        "expires_at": (_time.time() + req.ttl_seconds), "key_hash": _safe_key_hash(key_record)}
     return {"token": token, "memory_id": req.memory_id, "ttl_seconds": req.ttl_seconds}
 
 @app.post("/v1/memory/tokens/{token}/revoke")
@@ -3646,7 +3747,7 @@ def _identity_set(key: str, value: dict):
 @app.post("/v1/agents/{agent_id}/identity")
 def register_identity(agent_id: str, req: AgentIdentityRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     ik = f"{kh}:{agent_id}"
     existing = _identity_get(ik)
     changed = existing is not None and existing.get("fingerprint") != req.fingerprint
@@ -3655,7 +3756,7 @@ def register_identity(agent_id: str, req: AgentIdentityRequest, key_record: dict
 
 @app.get("/v1/agents/{agent_id}/memory-consistency")
 def memory_consistency(agent_id: str, key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     identity = _identity_get(f"{kh}:{agent_id}")
     return {"agent_id": agent_id, "identity_registered": identity is not None,
             "consistency_score": 1.0 if identity else 0.0, "cross_session_drift": False}
@@ -3682,7 +3783,7 @@ def promote_pattern(name: str, key_record: dict = Depends(verify_api_key)):
 # ---- #142 Weight Export/Import ----
 @app.get("/v1/weights/export")
 def export_weights(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     return {"version": "1.0", "l_v4_weights": redis_get(f"lv4_weights:{kh}:general", {}),
             "learning_rate": redis_get(f"learning_rate:{kh}:general", {"eta": 0.01}),
             "ewc_strength": 0.1, "thresholds": {"warn": 40, "ask_user": 60, "block": 80},
@@ -3709,7 +3810,7 @@ def import_weights(req: WeightImportRequest, key_record: dict = Depends(verify_a
         raise HTTPException(status_code=400, detail="l_v4_weights exceeds maximum 100 keys")
     if req.learning_rate and len(req.learning_rate) > 100:
         raise HTTPException(status_code=400, detail="learning_rate exceeds maximum 100 keys")
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     version_mismatch = req.version != "1.0"
     if req.l_v4_weights:
         redis_set(f"lv4_weights:{kh}:{req.domain}", req.l_v4_weights, ttl=86400)
@@ -3727,15 +3828,16 @@ class LearningWebhookRequest(BaseModel):
 @app.post("/v1/webhooks/learning-events")
 def register_learning_webhook(req: LearningWebhookRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    _validate_webhook_url(req.url)
     wid = str(uuid.uuid4())
-    _learning_webhooks[wid] = {"id": wid, "url": req.url, "events": req.events, "key_hash": key_record.get("key_hash")}
+    _learning_webhooks[wid] = {"id": wid, "url": req.url, "events": req.events, "key_hash": _safe_key_hash(key_record)}
     return {"id": wid, "events": req.events, "registered": True}
 
 # ---- #148 Agent Registry ----
 @app.get("/v1/agents")
 def list_agents(key_record: dict = Depends(verify_api_key)):
     agents = []
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             r = http_requests.get(f"{SUPABASE_URL}/rest/v1/agent_registry?api_key_hash=eq.{kh}&select=*",
@@ -3930,7 +4032,7 @@ import asyncio as _asyncio
 
 @app.get("/v1/events/stream")
 def sse_stream(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     def _generate():
         yield f"data: {_json.dumps({'type': 'connected', 'transport': 'sse'})}\n\n"
         buf = _event_buffers.get(kh, [])
@@ -3943,7 +4045,7 @@ _compression_locks: dict[str, float] = {}
 
 @app.get("/v1/store/stats")
 def store_stats(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     total = 0
     agents_count = 0
     avg_omega = 0.0
@@ -4000,7 +4102,7 @@ def _check_compression(kh: str, agent_id: str, entry_count: int):
 @app.post("/v1/store/compress")
 def trigger_compression(agent_id: str = "default", entry_count: int = 0, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     result = _check_compression(kh, agent_id, entry_count)
     if result is None:
         return {"compressed": False, "reason": "below_threshold", "compression_threshold": 1000}
@@ -4017,7 +4119,7 @@ def async_preflight(req: PreflightRequest, key_record: dict = Depends(verify_api
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
     job_id = str(uuid.uuid4())
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     # Process synchronously but return async-style response
     entries = [MemoryEntry(
         id=e.id, content=e.content, type=e.type,
@@ -4041,7 +4143,7 @@ def async_preflight(req: PreflightRequest, key_record: dict = Depends(verify_api
 
 @app.get("/v1/preflight/async/{job_id}")
 def get_async_preflight(job_id: str, key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     job = _async_preflight_jobs.get(job_id) or redis_get(f"async_preflight_job:{job_id}")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found or expired")
@@ -4059,8 +4161,7 @@ class ConsensusSubscribeRequest(BaseModel):
 @app.post("/v1/consensus/subscribe")
 def consensus_subscribe(req: ConsensusSubscribeRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    if not req.notify_url.startswith("https://"):
-        raise HTTPException(status_code=400, detail="notify_url must start with https://")
+    _validate_webhook_url(req.notify_url)
     # Ping test
     try:
         _ping_r = http_requests.post(req.notify_url, json={"ping": True, "agent_id": req.agent_id}, timeout=5)
@@ -4070,12 +4171,12 @@ def consensus_subscribe(req: ConsensusSubscribeRequest, key_record: dict = Depen
         raise HTTPException(status_code=400, detail="notify_url unreachable")
     sub_id = str(uuid.uuid4())
     _consensus_subs[sub_id] = {"agent_id": req.agent_id, "notify_url": req.notify_url,
-                                "key_hash": key_record.get("key_hash", "default"), "subscribed_at": _time.time()}
+                                "key_hash": _safe_key_hash(key_record), "subscribed_at": _time.time()}
     return {"subscription_id": sub_id, "agent_id": req.agent_id, "subscribed": True}
 
 @app.get("/v1/consensus/status")
 def consensus_status(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     subs = [s for s in _consensus_subs.values() if s.get("key_hash") == kh]
     agent_subs = [s for s in subs if s.get("agent_id") == agent_id] if agent_id else subs
     _pc = redis_get(f"consensus_pending:{kh}", {"pending": 0, "resolved": 0})
@@ -4097,7 +4198,7 @@ def _check_consensus_overlap(kh: str, agent_id: str, memory_count: int):
 # ---- #144b Jaeger + Zipkin trace export ----
 @app.get("/v1/traces/export/zipkin")
 def export_traces_zipkin(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     traces = _traces.get(kh, [])[-100:]
     spans = []
     for t in traces:
@@ -4114,7 +4215,7 @@ def export_traces_zipkin(key_record: dict = Depends(verify_api_key)):
 
 @app.get("/v1/traces/export/jaeger")
 def export_traces_jaeger(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     traces = _traces.get(kh, [])[-100:]
     spans = []
     for t in traces:
@@ -4166,7 +4267,7 @@ class SleepScanRequest(BaseModel):
 @app.post("/v1/memory/scan")
 def scan_memories(req: SleepScanRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     scan_id = str(uuid.uuid4())
     _scan_start = _time.monotonic()
 
@@ -4240,7 +4341,7 @@ def scan_memories(req: SleepScanRequest, key_record: dict = Depends(verify_api_k
 
 @app.get("/v1/memory/scan/latest")
 def get_latest_scan(agent_id: str = "anonymous", key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     scan_id = _sleeper_latest.get(f"{kh}:{agent_id}")
     if scan_id and scan_id in _sleeper_scans:
         return _sleeper_scans[scan_id]
@@ -4301,7 +4402,7 @@ def apply_thresholds(req: dict, key_record: dict = Depends(verify_api_key)):
         raise HTTPException(status_code=400, detail=f"ask_user must be {warn+5}-60, got {ask}")
     if block < ask + 5 or block > 90:
         raise HTTPException(status_code=400, detail=f"block must be {ask+5}-90, got {block}")
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     profile = {"warn": warn, "ask_user": ask, "block": block, "domain": domain}
     redis_set(f"custom_thresholds:{kh}:{domain}", profile, ttl=86400)
     return {"applied": True, "thresholds": profile}
@@ -4318,7 +4419,7 @@ class SyntheticRequest(BaseModel):
 @app.post("/v1/memory/synthetic")
 def generate_synthetic(req: SyntheticRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     # Rate limit: 10/hour
     now = _time.time()
     calls = _synthetic_calls.get(kh, [])
@@ -4367,7 +4468,7 @@ def playground_load(share_id: str):
 @app.post("/v1/agents/{agent_id}/reset-goal-baseline")
 def reset_goal_baseline(agent_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     redis_set(f"agent_goal:{kh}:{agent_id}", None, ttl=1)  # Expire immediately
     return {"agent_id": agent_id, "baseline_reset": True}
 
@@ -4452,7 +4553,7 @@ class RestoreRequest(BaseModel):
 @app.post("/v1/memory/snapshot")
 def create_snapshot(req: SnapshotRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     sid = str(uuid.uuid4())
     # Fetch current entries
     entries_raw = []
@@ -4494,7 +4595,7 @@ def create_snapshot(req: SnapshotRequest, key_record: dict = Depends(verify_api_
 
 @app.get("/v1/memory/snapshots")
 def list_snapshots(agent_id: str = "anonymous", key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _idx_key = f"{kh}:{agent_id}"
     sids = _snapshot_index.get(_idx_key, [])
     result = []
@@ -4518,7 +4619,7 @@ def restore_snapshot(snapshot_id: str, req: RestoreRequest, key_record: dict = D
                  "timestamp": datetime.now(timezone.utc).isoformat(),
                  "entry_count": 0, "omega_avg": 0, "compressed": False, "size_bytes": 0, "note": f"Before restore of {snapshot_id}"}
     _snapshots[_pre_sid] = _pre_snap
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _idx_key = f"{kh}:{snap['agent_id']}"
     if _idx_key not in _snapshot_index: _snapshot_index[_idx_key] = []
     _snapshot_index[_idx_key].append(_pre_sid)
@@ -4629,7 +4730,7 @@ class TwinRequest(BaseModel):
 def simulate_twin(req: TwinRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     job_id = str(uuid.uuid4())
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     # Run counterfactual inline, store as async result
     try:
         cf_req = CounterfactualRequest(memory_state=req.memory_state, action_type=req.action_type,
@@ -4664,7 +4765,7 @@ class CloneRequest(BaseModel):
 @app.post("/v1/memory/clone")
 def clone_memory(req: CloneRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     # Load source entries
     source_entries = []
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
@@ -4792,7 +4893,7 @@ class PassportExportRequest(BaseModel):
 @app.post("/v1/memory/passport/export")
 def export_passport(req: PassportExportRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     pid = str(uuid.uuid4())
     issued = datetime.now(timezone.utc)
     _ttl_map = {"ephemeral": timedelta(minutes=5), "standard": timedelta(hours=1), "archival": timedelta(days=req.valid_days)}
@@ -4811,7 +4912,7 @@ def export_passport(req: PassportExportRequest, key_record: dict = Depends(verif
     omega_avg = round(sum(omegas) / max(len(omegas), 1), 1)
     # Signature with key versioning
     _key_version = "v1"
-    _signing_key = os.getenv("PASSPORT_SIGNING_KEY_V1", "sgraal_default_signing_key_v1")
+    _signing_key = os.getenv("PASSPORT_SIGNING_KEY_V1", "")
     _sig_data = f"{pid}:{kh}:{req.agent_id}:{valid_until}:{omega_avg}"
     _signature = hashlib.sha256((_sig_data + _signing_key).encode()).hexdigest()
     passport = {
@@ -4843,7 +4944,7 @@ def import_passport(req: PassportImportRequest, key_record: dict = Depends(verif
         raise HTTPException(status_code=404, detail="Passport not found or expired")
     # Validate signature with version-matched key
     _kv = req.signature_key_version
-    _sk = os.getenv(f"PASSPORT_SIGNING_KEY_{_kv.upper()}", "sgraal_default_signing_key_v1")
+    _sk = os.getenv(f"PASSPORT_SIGNING_KEY_{_kv.upper()}", "")
     _sig_data = f"{passport['passport_id']}:{key_record.get('key_hash','default')}:{passport['agent_id']}:{passport['valid_until']}:{passport['omega_avg']}"
     # Passport signature was created with source key_hash, so verify with stored signature
     if passport.get("signature") != req.signature:
@@ -4886,7 +4987,7 @@ def resolve_uri(uri: str = "", key_record: dict = Depends(verify_api_key)):
     if len(parts) < 2:
         raise HTTPException(status_code=400, detail="Invalid URI format")
     org_id = parts[0]
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     # Simple org access check: org_id must match first 8 chars of key_hash or be "default"
     if org_id != "default" and kh and not str(kh).startswith(org_id[:8]):
         raise HTTPException(status_code=403, detail="No access to this organization")
@@ -4932,19 +5033,19 @@ class FirewallRuleRequest(BaseModel):
 @app.post("/v1/firewall/rules")
 def create_firewall_rule(req: FirewallRuleRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     rule_key = f"{kh}:{req.namespace}"
     rule = {"namespace": req.namespace, "allowed_writers": req.allowed_writers,
             "allowed_readers": req.allowed_readers,
             "require_preflight_score": req.require_preflight_score,
             "created_at": datetime.now(timezone.utc).isoformat()}
     _firewall_rules[rule_key] = rule
-    redis_set(f"firewall_rules:{rule_key}", rule)
+    redis_set(f"firewall_rules:{rule_key}", rule, ttl=604800)  # 7 days TTL
     return {"created": True, "namespace": req.namespace, "rule": rule}
 
 @app.get("/v1/firewall/rules")
 def list_firewall_rules(namespace: str = "", key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if namespace:
         rule = _firewall_rules.get(f"{kh}:{namespace}")
         return {"rules": [rule] if rule else []}
@@ -4954,13 +5055,13 @@ def list_firewall_rules(namespace: str = "", key_record: dict = Depends(verify_a
 @app.delete("/v1/firewall/rules/{namespace}")
 def delete_firewall_rule(namespace: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _firewall_rules.pop(f"{kh}:{namespace}", None)
     return {"deleted": namespace}
 
 @app.get("/v1/firewall/violations")
 def get_firewall_violations(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     return {"violations": _firewall_violations.get(kh, [])[-100:]}
 
 def _check_namespace_firewall(kh: str, agent_id: str, namespace: str, omega: float) -> Optional[str]:
@@ -4999,7 +5100,7 @@ class ATCRegisterRequest(BaseModel):
 @app.post("/v1/atc/register")
 def atc_register(req: ATCRegisterRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     ak = f"{kh}:{req.agent_id}"
     reg = {"agent_id": req.agent_id, "task": req.task, "namespaces": req.namespaces,
            "registered_at": _time.time(), "estimated_duration": req.estimated_duration_seconds}
@@ -5027,7 +5128,7 @@ def atc_register(req: ATCRegisterRequest, key_record: dict = Depends(verify_api_
 
 @app.get("/v1/atc/conflicts")
 def atc_conflicts(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     ak = f"{kh}:{agent_id}"
     reg = _atc_agents.get(ak, {})
     ns = set(reg.get("namespaces", []))
@@ -5066,7 +5167,7 @@ def _cleanup_expired_holds():
 def atc_status(key_record: dict = Depends(verify_api_key)):
     # Clean up expired holds on every status check
     _cleanup_expired_holds()
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     agents = [v for k, v in _atc_agents.items() if k.startswith(f"{kh}:")]
     holds = [{"agent_id": k.split(":")[-1], **v} for k, v in _atc_holds.items() if k.startswith(f"{kh}:")]
     return {"active_agents": agents, "holds": holds}
@@ -5074,7 +5175,7 @@ def atc_status(key_record: dict = Depends(verify_api_key)):
 @app.post("/v1/atc/hold/{agent_id}")
 def atc_hold(agent_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _hold_key = f"{kh}:{agent_id}"
     expires_at = (datetime.now(timezone.utc) + timedelta(seconds=300)).isoformat()
     _atc_holds[_hold_key] = {"held_at": _time.time(), "reason": "manual",
@@ -5085,7 +5186,7 @@ def atc_hold(agent_id: str, key_record: dict = Depends(verify_api_key)):
 @app.post("/v1/atc/clear/{agent_id}")
 def atc_clear(agent_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _atc_holds.pop(f"{kh}:{agent_id}", None)
     return {"cleared": True, "agent_id": agent_id}
 
@@ -5195,7 +5296,7 @@ def create_commons(req: CommonsCreateRequest, key_record: dict = Depends(verify_
     if tier not in ("enterprise", "growth", "test"):
         raise HTTPException(status_code=403, detail="Memory Commons requires enterprise tier")
     cid = str(uuid.uuid4())
-    kh_c = key_record.get("key_hash", "default")
+    kh_c = _safe_key_hash(key_record)
     _commons[cid] = {"commons_id": cid, "name": req.name, "description": req.description,
                       "created_at": datetime.now(timezone.utc).isoformat(),
                       "key_hash": kh_c}
@@ -5217,7 +5318,7 @@ def commons_activity(commons_id: str, key_record: dict = Depends(verify_api_key)
 
 @app.get("/v1/commons")
 def list_commons(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     mine = [c for c in _commons.values() if c.get("key_hash") == kh]
     return {"commons": mine}
 
@@ -5275,7 +5376,7 @@ _predictive_alerts: dict[str, dict] = {}  # key_hash:agent_id → alert
 
 @app.get("/v1/alerts/predictive")
 def get_predictive_alerts(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if agent_id:
         alert = _predictive_alerts.get(f"{kh}:{agent_id}")
         return {"alerts": [alert] if alert else []}
@@ -5322,7 +5423,7 @@ def truth_subscribe(req: TruthSubscribeRequest, key_record: dict = Depends(verif
         raise HTTPException(status_code=400, detail="source_url must start with https://")
     if req.check_interval_hours < 1: req.check_interval_hours = 1
     if req.check_interval_hours > 168: req.check_interval_hours = 168
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     # Max 100 subscriptions per key
     my_subs = sum(1 for s in _truth_subs.values() if s.get("key_hash") == kh)
     if my_subs >= 100:
@@ -5337,7 +5438,7 @@ def truth_subscribe(req: TruthSubscribeRequest, key_record: dict = Depends(verif
 
 @app.get("/v1/truth/subscriptions")
 def list_truth_subs(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     return {"subscriptions": [s for s in _truth_subs.values() if s.get("key_hash") == kh]}
 
 @app.delete("/v1/truth/subscriptions/{sub_id}")
@@ -5348,7 +5449,7 @@ def delete_truth_sub(sub_id: str, key_record: dict = Depends(verify_api_key)):
 
 @app.get("/v1/truth/updates")
 def list_truth_updates(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     return {"updates": [u for u in _truth_updates if u.get("key_hash") == kh][-50:]}
 
 def _check_truth_source(sub: dict) -> Optional[dict]:
@@ -5396,7 +5497,7 @@ class AutonomousHealRequest(BaseModel):
 @app.post("/v1/heal/autonomous")
 def autonomous_heal(req: AutonomousHealRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     # Auto-snapshot before healing
     snap_id = None
     try:
@@ -5481,8 +5582,12 @@ class RollbackRegisterRequest(BaseModel):
 @app.post("/v1/rollback/register")
 def register_rollback(req: RollbackRegisterRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    if req.rollback_webhook:
+        _validate_webhook_url(req.rollback_webhook)
+    if req.compensation_webhook:
+        _validate_webhook_url(req.compensation_webhook)
     if req.expires_hours > 168: req.expires_hours = 168
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _rollback_actions[req.action_id] = {
         "action_id": req.action_id, "action_type": req.action_type,
         "action_summary": req.action_summary, "rollback_webhook": req.rollback_webhook,
@@ -5550,7 +5655,7 @@ def trigger_compensation(action_id: str, key_record: dict = Depends(verify_api_k
 
 @app.get("/v1/rollback/actions")
 def list_rollback_actions(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     return {"actions": [a for a in _rollback_actions.values() if a.get("key_hash") == kh]}
 
 
@@ -5564,7 +5669,7 @@ class PruneRequest(BaseModel):
 @app.post("/v1/memory/prune")
 def prune_memories(req: PruneRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     entries_raw = []
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
@@ -5616,7 +5721,7 @@ class ForensicsRequest(BaseModel):
 def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     fid = str(uuid.uuid4())
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     # Build timeline from audit log
     timeline = []
     if supabase_client:
@@ -5818,7 +5923,7 @@ _fidelity_certs: dict[str, dict] = {}
 @app.post("/v1/fidelity/certify")
 def certify_fidelity(req: dict, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     entries = req.get("entries", req.get("memory_state", []))
     certs = []
     for e in entries:
@@ -5837,7 +5942,7 @@ def certify_fidelity(req: dict, key_record: dict = Depends(verify_api_key)):
 
 @app.get("/v1/fidelity/{entry_id}")
 def get_fidelity(entry_id: str, key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     cert = _fidelity_certs.get(f"{kh}:{entry_id}") or redis_get(f"fidelity_cert:{kh}:{entry_id}")
     if not cert: raise HTTPException(status_code=404, detail="No fidelity certificate")
     return cert
@@ -5894,15 +5999,15 @@ class PersonaRequest(BaseModel):
 @app.post("/v1/agents/{agent_id}/persona")
 def set_persona(agent_id: str, req: PersonaRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     persona = req.model_dump()
     _personas[f"{kh}:{agent_id}"] = persona
-    redis_set(f"agent_persona:{kh}:{agent_id}", persona)
+    redis_set(f"agent_persona:{kh}:{agent_id}", persona, ttl=2592000)  # 30 days TTL
     return {"stored": True, "agent_id": agent_id, "persona": persona}
 
 @app.get("/v1/agents/{agent_id}/persona")
 def get_persona(agent_id: str, key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     p = _personas.get(f"{kh}:{agent_id}") or redis_get(f"agent_persona:{kh}:{agent_id}")
     if not p: raise HTTPException(status_code=404, detail="No persona defined")
     return p
@@ -5910,7 +6015,7 @@ def get_persona(agent_id: str, key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/agents/{agent_id}/persona")
 def delete_persona(agent_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     _personas.pop(f"{kh}:{agent_id}", None)
     return {"deleted": True, "agent_id": agent_id}
 
@@ -6004,7 +6109,7 @@ def _run_daily_snapshots():
 # ---- FIX 4: Q-table status ----
 @app.get("/v1/learning/qtable-status")
 def qtable_status(domain: str = "general", key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     qt_data = _load_store(f"rl_qtable_v2:{kh}:{domain}", {})
     episodes = 0
     try:
@@ -6060,7 +6165,7 @@ def generate_immunity(req: ImmunityCertRequest, key_record: dict = Depends(verif
             raise HTTPException(status_code=409, detail=_json.dumps(
                 {"error": "certificate_in_progress", "job_id": existing}))
     # Thorough: max 1 per 7 days per key+agent
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if req.level == "thorough":
         _thorough_key = f"{kh}:{req.agent_id}"
         last = _immunity_thorough_last.get(_thorough_key, 0)
@@ -6123,7 +6228,7 @@ class RedTeamRequest(BaseModel):
 def redteam_run(req: RedTeamRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     job_id = str(uuid.uuid4())
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     results = []
     for at in req.attack_types[:6]:
         if at == "goal_hijack":
@@ -6144,7 +6249,8 @@ def redteam_run(req: RedTeamRequest, key_record: dict = Depends(verify_api_key))
               "memory_readiness_grade": grade}
     _redteam_jobs[job_id] = report
     # Webhook
-    if req.report_webhook and req.report_webhook.startswith("https://"):
+    if req.report_webhook:
+        _validate_webhook_url(req.report_webhook)
         try: http_requests.post(req.report_webhook, json=report, timeout=5)
         except Exception: pass
     return {"job_id": job_id, "status": "processing"}
@@ -6277,7 +6383,7 @@ def resolve_conflicts(req: ResolveRequest, key_record: dict = Depends(verify_api
 # ---- #137 Shadow Preflight ----
 @app.get("/v1/shadow/results")
 def shadow_results(profile: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     data = redis_get(f"shadow_results:{kh}:{profile or 'default'}", {"comparisons": [], "decision_match_rate": 0})
     return data
 
@@ -6289,7 +6395,7 @@ def shadow_promote(profile: str, key_record: dict = Depends(verify_api_key)):
 # ---- #138 Circuit Breaker ----
 @app.get("/v1/circuit-breaker/status")
 def circuit_breaker_status(key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     state = redis_get(f"circuit_breaker:{kh}:general", {"state": "CLOSED", "last_check": None})
     return state
 
@@ -6400,7 +6506,7 @@ def memory_lineage(memory_id: str, key_record: dict = Depends(verify_api_key)):
     return {"memory_id": memory_id, "lineage": [], "depth": 0}
 @app.get("/v1/store/lineage/export")
 def lineage_export(agent_id: Optional[str] = None, format: str = "json", key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     entries = []
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
@@ -6493,7 +6599,7 @@ _feedback_counts = RedisBackedDict("feedback_counts")
 @app.post("/v1/feedback")
 def submit_feedback(req: FeedbackRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if kh not in _feedback_counts: _feedback_counts[kh] = {}
     _feedback_counts[kh][req.feedback_type] = _feedback_counts[kh].get(req.feedback_type, 0) + 1
     total = sum(_feedback_counts[kh].values())
@@ -6642,7 +6748,7 @@ _traces: dict[str, list] = {}  # key_hash → [trace entries]
 
 @app.get("/v1/traces/export")
 def export_traces(format: str = "otlp", key_record: dict = Depends(verify_api_key)):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     traces = _traces.get(kh, [])[-100:]
     if format == "langsmith":
         return {"format": "langsmith", "runs": [{"run_id": t.get("trace_id"), "name": "sgraal.preflight", "inputs": {}, "outputs": {"omega": t.get("omega"), "decision": t.get("decision")}} for t in traces]}
@@ -6716,7 +6822,7 @@ def auto_heal(req: AutoHealRequest, key_record: dict = Depends(verify_api_key)):
 
 @app.get("/v1/compliance/eu-ai-act/report")
 def eu_ai_act_report(key_record: dict = Depends(verify_api_key), force_refresh: bool = False):
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     now = datetime.now(timezone.utc)
 
     # Check cache
@@ -6913,7 +7019,7 @@ def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, o
     _sb = supabase_service_client or supabase_client
     if _sb:
         try:
-            kh = key_record.get("key_hash", "")
+            kh = _safe_key_hash(key_record)
             q = _sb.table("audit_log").select("*", count="exact").eq("api_key_id", kh).order("created_at", desc=True)
             if decision:
                 q = q.eq("decision", decision)
@@ -6943,7 +7049,7 @@ def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_a
     _sb = supabase_service_client or supabase_client
     if _sb:
         try:
-            kh = key_record.get("key_hash", "")
+            kh = _safe_key_hash(key_record)
             q = _sb.table("audit_log").select("*").eq("api_key_id", kh).order("created_at", desc=True).limit(limit)
             if firewall_bypassed is True:
                 q = q.eq("event_type", "firewall_bypass")
@@ -6999,7 +7105,7 @@ class AgingRuleRequest(BaseModel):
 def create_aging_rule(req: AgingRuleRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     rule_id = str(uuid.uuid4())
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             http_requests.post(f"{SUPABASE_URL}/rest/v1/aging_rules",
@@ -7015,7 +7121,7 @@ def create_aging_rule(req: AgingRuleRequest, key_record: dict = Depends(verify_a
 @app.get("/v1/aging-rules")
 def list_aging_rules(key_record: dict = Depends(verify_api_key)):
     rules = []
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             r = http_requests.get(f"{SUPABASE_URL}/rest/v1/aging_rules?api_key_hash=eq.{kh}&select=*",
@@ -7090,7 +7196,7 @@ class ProfileRequest(BaseModel):
 def create_profile(req: ProfileRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     pid = str(uuid.uuid4())
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             http_requests.post(f"{SUPABASE_URL}/rest/v1/profiles",
@@ -7107,7 +7213,7 @@ def create_profile(req: ProfileRequest, key_record: dict = Depends(verify_api_ke
 @app.get("/v1/profiles")
 def list_profiles(key_record: dict = Depends(verify_api_key)):
     profiles = []
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             r = http_requests.get(f"{SUPABASE_URL}/rest/v1/profiles?api_key_hash=eq.{kh}&select=*",
@@ -7121,7 +7227,7 @@ def list_profiles(key_record: dict = Depends(verify_api_key)):
 @app.put("/v1/profiles/{name}")
 def update_profile(name: str, req: ProfileRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             http_requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?api_key_hash=eq.{kh}&name=eq.{name}",
@@ -7136,7 +7242,7 @@ def update_profile(name: str, req: ProfileRequest, key_record: dict = Depends(ve
 @app.delete("/v1/profiles/{name}")
 def delete_profile(name: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             http_requests.delete(f"{SUPABASE_URL}/rest/v1/profiles?api_key_hash=eq.{kh}&name=eq.{name}",
@@ -7150,7 +7256,7 @@ def shadow_test(name: str, req: PreflightRequest, key_record: dict = Depends(ver
     """Run preflight with default and custom profile, compare results."""
     _check_rate_limit(key_record)
     # Fetch profile
-    kh = key_record.get("key_hash", "default")
+    kh = _safe_key_hash(key_record)
     profile = None
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
@@ -7622,7 +7728,7 @@ def _rate_limit_register(email: str, client_ip: str) -> None:
 
 
 RESEND_AUDIENCE_ID = os.getenv("RESEND_AUDIENCE_ID")
-_UNSUB_SECRET = os.getenv("UNSUB_HMAC_SECRET", "sgraal-unsub-default-secret")
+_UNSUB_SECRET = os.getenv("UNSUB_HMAC_SECRET", "")
 
 
 def _generate_unsubscribe_token(email: str) -> str:
@@ -7971,7 +8077,7 @@ def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str
         record = {
             "event_type": event_type,
             "request_id": request_id,
-            "api_key_id": key_record.get("key_hash", "in_memory"),
+            "api_key_id": _safe_key_hash(key_record),
             "decision": decision,
             "omega_mem_final": omega,
         }
@@ -8016,6 +8122,7 @@ _thread_manager = ThreadManager()
 
 # In-memory outcome registry (outcome_id -> outcome record)
 _outcomes: dict[str, dict] = {}
+_outcomes_lock = threading.Lock()
 
 # Projected improvement estimates per action type
 _HEAL_IMPROVEMENTS = {
@@ -8698,6 +8805,7 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
 @app.post("/v1/webhooks")
 def register_webhook(req: WebhookRegisterRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    _validate_webhook_url(req.url)
     webhook = {
         "id": str(uuid.uuid4()),
         "url": req.url,
@@ -8797,17 +8905,18 @@ def preflight_batch(req: BatchRequest, key_record: dict = Depends(verify_api_key
 @app.post("/v1/outcome")
 def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    if req.outcome_id not in _outcomes:
-        raise HTTPException(status_code=404, detail=f"Outcome {req.outcome_id} not found")
+    with _outcomes_lock:
+        if req.outcome_id not in _outcomes:
+            raise HTTPException(status_code=404, detail=f"Outcome {req.outcome_id} not found")
 
-    outcome = _outcomes[req.outcome_id]
-    if outcome["status"] != "open":
-        raise HTTPException(status_code=409, detail=f"Outcome {req.outcome_id} already closed")
+        outcome = _outcomes[req.outcome_id]
+        if outcome["status"] != "open":
+            raise HTTPException(status_code=409, detail=f"Outcome {req.outcome_id} already closed")
 
-    now = datetime.now(timezone.utc)
-    outcome["status"] = req.status
-    outcome["closed_at"] = now.isoformat()
-    outcome["component_attribution"] = req.failure_components
+        now = datetime.now(timezone.utc)
+        outcome["status"] = req.status
+        outcome["closed_at"] = now.isoformat()
+        outcome["component_attribution"] = req.failure_components
 
     # Log to Supabase outcome_log
     if supabase_client:
@@ -8821,8 +8930,8 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
                 "component_attribution": req.failure_components,
                 "closed_at": now.isoformat(),
             }).execute()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("outcome_log write failed: %s", e)
 
     # RL Q-table update
     _compliance_forced = not outcome.get("compliance_result", {}).get("compliant", True)
@@ -8907,7 +9016,7 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
 
     # --- 6 additional outcome learning updates ---
     _outcome_domain = outcome.get("domain", "general")
-    _outcome_key_hash = key_record.get("key_hash", "default")
+    _outcome_key_hash = _safe_key_hash(key_record)
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         _auth_h = {"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}
         try:
@@ -9004,7 +9113,7 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
     try:
         from scoring_engine.omega_mem import WEIGHTS as _BASE_WEIGHTS
         _cal_lr = 0.001  # small learning rate
-        _kh_cal = key_record.get("key_hash", "default")
+        _kh_cal = _safe_key_hash(key_record)
         _domain_cal = outcome.get("domain", "general")
         _cal_key = f"calibrated_weights:{_kh_cal}:{_domain_cal}"
         _cb = outcome.get("component_breakdown", {})
@@ -9124,7 +9233,7 @@ def get_repair_effectiveness(key_record: dict = Depends(verify_api_key), limit: 
 def get_current_weights(key_record: dict = Depends(verify_api_key), domain: str = "general"):
     """Return current calibrated weights vs baseline, with drift."""
     from scoring_engine.omega_mem import WEIGHTS as _BASE_WEIGHTS
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _cal_key = f"calibrated_weights:{_kh}:{domain}"
     _cal_stored = _load_store(_cal_key, None)
     _cal_weights = dict(_BASE_WEIGHTS)
@@ -9218,16 +9327,54 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
-    # Rate limit check (skip for dry_run — encourage testing)
+    # Rate limit check — atomic via Redis INCR (skip for dry_run/test/demo)
     tier = key_record.get("tier", "free")
-    calls = key_record.get("calls_this_month", 0)
     limit = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
-    if calls >= limit and not req.dry_run:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Monthly limit of {limit:,} calls exceeded for {tier} tier. "
-                   f"Upgrade your plan or wait until the next billing cycle.",
-        )
+    _skip_quota = req.dry_run or key_record.get("demo", False) or tier == "test"
+    if not _skip_quota and UPSTASH_REDIS_URL:
+        _quota_kh = _safe_key_hash(key_record)
+        _quota_month = datetime.now(timezone.utc).strftime("%Y-%m")
+        _quota_key = f"quota:{_quota_kh}:{_quota_month}"
+        try:
+            _incr_r = http_requests.post(
+                f"{UPSTASH_REDIS_URL}/INCR/{_quota_key}",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+            _new_count = int(_incr_r.json().get("result", 0)) if _incr_r.ok else 0
+            if _new_count == 1:
+                # First call this month — set TTL of 35 days
+                http_requests.post(
+                    f"{UPSTASH_REDIS_URL}/EXPIRE/{_quota_key}/3024000",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+            if _new_count > limit:
+                # Over limit — decrement back and reject
+                http_requests.post(
+                    f"{UPSTASH_REDIS_URL}/DECR/{_quota_key}",
+                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Monthly limit of {limit:,} calls exceeded for {tier} tier. "
+                           f"Upgrade your plan or wait until the next billing cycle.",
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            # Redis unavailable — fall back to Supabase count (stale but safe)
+            calls = key_record.get("calls_this_month", 0)
+            if calls >= limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Monthly limit of {limit:,} calls exceeded for {tier} tier. "
+                           f"Upgrade your plan or wait until the next billing cycle.",
+                )
+    elif not _skip_quota:
+        # No Redis — use Supabase count (stale fallback)
+        calls = key_record.get("calls_this_month", 0)
+        if calls >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Monthly limit of {limit:,} calls exceeded for {tier} tier. "
+                       f"Upgrade your plan or wait until the next billing cycle.",
+            )
 
     # Track first preflight timestamp for activation funnel
     _is_dry_run = req.dry_run or key_record.get("demo", False)
@@ -9339,7 +9486,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _deterministic_seed_str = str(_deterministic_seed)
 
     # Copy-on-read Redis snapshot — freeze state at request start
-    _kh = key_record.get("key_hash", "default")
+    _kh = _safe_key_hash(key_record)
     _agent = req.agent_id or "anonymous"
     _snapshot_keys = [
         f"te_history:{_kh}:{req.domain}",
@@ -9426,7 +9573,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if _sb_hist:
             try:
                 _agent_id_filter = req.agent_id or ""
-                _hist_q = _sb_hist.table("audit_log").select("omega_mem_final").eq("api_key_id", key_record.get("key_hash", "")).order("created_at", desc=True).limit(20)
+                _hist_q = _sb_hist.table("audit_log").select("omega_mem_final").eq("api_key_id", _safe_key_hash(key_record)).order("created_at", desc=True).limit(20)
                 if _agent_id_filter:
                     _hist_q = _hist_q.eq("agent_id", _agent_id_filter)
                 _hist_r = _hist_q.execute()
@@ -9456,26 +9603,27 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         for k in expired_jobs[:100]:
             _async_preflight_jobs.pop(k, None)
 
-    _evict_if_full(_outcomes, "_outcomes")
-    _outcomes[outcome_id] = {
-        "request_id": request_id,
-        "status": "open",
-        "agent_id": req.agent_id,
-        "task_id": req.task_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "closed_at": None,
-        "_ts": _time.time(),
-        "component_attribution": [],
-        "omega_mem_final": result.omega_mem_final,
-        "component_breakdown": dict(result.component_breakdown),
-        "recommended_action": result.recommended_action,
-        "domain": req.domain,
-        "action_type": req.action_type,
-        "memory_state": [{"id": e.id, "content": e.content, "type": e.type,
-                          "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust,
-                          "source_conflict": e.source_conflict, "downstream_count": e.downstream_count}
-                         for e in entries[:20]],
-    }
+    with _outcomes_lock:
+        _evict_if_full(_outcomes, "_outcomes")
+        _outcomes[outcome_id] = {
+            "request_id": request_id,
+            "status": "open",
+            "agent_id": req.agent_id,
+            "task_id": req.task_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "closed_at": None,
+            "_ts": _time.time(),
+            "component_attribution": [],
+            "omega_mem_final": result.omega_mem_final,
+            "component_breakdown": dict(result.component_breakdown),
+            "recommended_action": result.recommended_action,
+            "domain": req.domain,
+            "action_type": req.action_type,
+            "memory_state": [{"id": e.id, "content": e.content, "type": e.type,
+                              "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust,
+                              "source_conflict": e.source_conflict, "downstream_count": e.downstream_count}
+                             for e in entries[:20]],
+        }
 
     # Increment Global State Vector
     gsv = _increment_gsv()
@@ -9489,15 +9637,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         )
 
     # Increment calls_this_month and update last_used_at
-    key_hash = key_record.get("key_hash")
+    key_hash = key_record.get("key_hash")  # raw hash for Supabase query
     if supabase_service_client and key_hash:
         try:
             supabase_service_client.table("api_keys").update({
                 "calls_this_month": calls + 1,
                 "last_used_at": datetime.now(timezone.utc).isoformat(),
             }).eq("key_hash", key_hash).execute()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("api_keys call count update failed: %s", e)
 
     if stripe.api_key:
         try:
@@ -9508,8 +9656,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "stripe_customer_id": key_record["customer_id"],
                 },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Stripe billing meter event failed: %s", e)
 
     if supabase_client:
         try:
@@ -9527,7 +9675,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "gsv": gsv,
             }).execute()
         except Exception as e:
-            pass
+            logger.error("memory_ledger write failed: %s", e)
 
     # Importance detection with VoI — find at-risk entries sorted by ROI
     importance_results = compute_importance_with_voi(entries, req.action_type, req.domain)
@@ -9709,7 +9857,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "reason": "Injection pattern detected in memory content",
             "priority": "high", "projected_improvement": 0, "success_probability": 1.0,
         })
-        _dispatch_security_event("poisoning_detected", {"agent_id": req.agent_id, "omega": omega_out}, key_record.get("key_hash", ""))
+        _dispatch_security_event("poisoning_detected", {"agent_id": req.agent_id, "omega": omega_out}, _safe_key_hash(key_record))
 
     response = {
         "omega_mem_final": omega_out,
@@ -10030,17 +10178,18 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             pass
 
     # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
-    if outcome_id in _outcomes:
-        _outcomes[outcome_id]["compliance_result"] = response.get("compliance_result", {})
-        _outcomes[outcome_id]["repair_plan"] = repair_plan_out
-        # Store detection states for certificate generation
-        _outcomes[outcome_id]["timestamp_integrity"] = response.get("timestamp_integrity", "VALID")
-        _outcomes[outcome_id]["identity_drift"] = response.get("identity_drift", "CLEAN")
-        _outcomes[outcome_id]["consensus_collapse"] = response.get("consensus_collapse", "CLEAN")
-        _outcomes[outcome_id]["provenance_chain_integrity"] = response.get("provenance_chain_integrity", "CLEAN")
-        _outcomes[outcome_id]["naturalness_level"] = response.get("naturalness_level", "ORGANIC")
-        _outcomes[outcome_id]["attack_surface_level"] = response.get("attack_surface_level", "NONE")
-        _outcomes[outcome_id]["input_hash"] = response.get("input_hash", "")
+    with _outcomes_lock:
+        if outcome_id in _outcomes:
+            _outcomes[outcome_id]["compliance_result"] = response.get("compliance_result", {})
+            _outcomes[outcome_id]["repair_plan"] = repair_plan_out
+            # Store detection states for certificate generation
+            _outcomes[outcome_id]["timestamp_integrity"] = response.get("timestamp_integrity", "VALID")
+            _outcomes[outcome_id]["identity_drift"] = response.get("identity_drift", "CLEAN")
+            _outcomes[outcome_id]["consensus_collapse"] = response.get("consensus_collapse", "CLEAN")
+            _outcomes[outcome_id]["provenance_chain_integrity"] = response.get("provenance_chain_integrity", "CLEAN")
+            _outcomes[outcome_id]["naturalness_level"] = response.get("naturalness_level", "ORGANIC")
+            _outcomes[outcome_id]["attack_surface_level"] = response.get("attack_surface_level", "NONE")
+            _outcomes[outcome_id]["input_hash"] = response.get("input_hash", "")
 
     # #127 Decision Cost Engine
     if req.cost_config:
@@ -10074,7 +10223,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["policy_applied"] = {"policy_id": req.policy_id, "rule_triggered": None, "override": None}
 
     # #136 Push event to WS/SSE buffer
-    _ev_kh = key_record.get("key_hash", "default")
+    _ev_kh = _safe_key_hash(key_record)
     _ev_type = "block" if result.recommended_action == "BLOCK" else "preflight"
     _push_event(_ev_kh, {"type": _ev_type, "omega": omega_out, "decision": result.recommended_action,
                          "request_id": request_id})
@@ -11694,7 +11843,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Memory Poisoning Detection
     try:
-        poison = _detect_poisoning(entries, result.component_breakdown, key_record.get("key_hash", "default"))
+        poison = _detect_poisoning(entries, result.component_breakdown, _safe_key_hash(key_record))
         if poison:
             response["poisoning_analysis"] = poison
             # Emit webhook
@@ -11704,7 +11853,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Aging rules (graceful — never crashes preflight)
     try:
-        aging = _apply_aging_rules(entries, key_record.get("key_hash", "default"))
+        aging = _apply_aging_rules(entries, _safe_key_hash(key_record))
         if aging:
             response["aging_rule"] = aging
             if aging.get("force_action") == "BLOCK":
@@ -11978,7 +12127,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _override_chain.append({"source": "circuit_breaker", "action": "BLOCK", "applied": True})
         response["recommended_action"] = "BLOCK"
         for _oc in _override_chain[:-1]: _oc["applied"] = False
-        _dispatch_security_event("circuit_breaker_open", {"agent_id": req.agent_id, "omega": omega_out}, key_record.get("key_hash", ""))
+        _dispatch_security_event("circuit_breaker_open", {"agent_id": req.agent_id, "omega": omega_out}, _safe_key_hash(key_record))
     # Check if policy compiler overrode
     if _policy_result and _policy_result.get("override"):
         _override_chain.append({"source": "policy_compiler", "action": _policy_result["override"], "applied": True})
@@ -12367,7 +12516,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # #67 Trace propagation
     if req.trace_id:
         response["trace_id"] = req.trace_id
-        kh = key_record.get("key_hash", "default")
+        kh = _safe_key_hash(key_record)
         if kh not in _traces: _traces[kh] = []
         _traces[kh].append({"trace_id": req.trace_id, "omega": omega_out, "decision": response.get("recommended_action")})
         if len(_traces[kh]) > 100: _traces[kh] = _traces[kh][-100:]
@@ -12394,7 +12543,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _duration_ms = round(_duration * 1000, 2)
     response["_trace"] = {
         "span": "preflight",
-        "api_key_id": key_record.get("key_hash", "in_memory"),
+        "api_key_id": _safe_key_hash(key_record),
         "decision": result.recommended_action,
         "omega_score": omega_out,
         "request_id": request_id,
@@ -12654,7 +12803,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # #16 Persona conflict check
     try:
-        _pc = _check_persona_conflict(key_record.get("key_hash", "default"), req.agent_id or "anonymous", entries)
+        _pc = _check_persona_conflict(_safe_key_hash(key_record), req.agent_id or "anonymous", entries)
         if _pc:
             response["persona_conflict"] = True
             response["persona_violation"] = _pc.get("persona_violation", "")
@@ -12680,7 +12829,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # #22 Check predictive alerts
     try:
-        _check_predictive_alert(key_record.get("key_hash", "default"), req.agent_id or "anonymous", None)
+        _check_predictive_alert(_safe_key_hash(key_record), req.agent_id or "anonymous", None)
     except Exception:
         pass
 

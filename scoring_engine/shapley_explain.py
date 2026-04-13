@@ -24,14 +24,20 @@ def compute_shapley_values(
     weights = custom_weights if custom_weights else WEIGHTS
     c = C_ACTION.get(action_type, 1.0) * C_DOMAIN.get(domain, 1.0)
 
-    # Raw weighted contributions
+    # Raw weighted contributions (with weight normalization matching omega_mem.py)
+    _applied_weights = {k: weights.get(k, WEIGHTS.get(k, 0)) for k in component_breakdown}
+    _weight_sum = sum(abs(w) for w in _applied_weights.values())
+
     raw: dict[str, float] = {}
     for k, v in component_breakdown.items():
-        w = weights.get(k, WEIGHTS.get(k, 0))
-        raw[k] = w * v
+        raw[k] = _applied_weights[k] * v
 
-    # The raw omega before clamping and multiplier
+    # Normalize by weight sum (same as omega_mem.py)
     raw_omega = sum(raw.values())
+    if _weight_sum > 0 and abs(_weight_sum - 1.0) > 0.001:
+        raw_omega = raw_omega / _weight_sum
+        for k in raw:
+            raw[k] = raw[k] / _weight_sum
     raw_omega_clamped = max(0, min(100, raw_omega))
 
     # Apply multiplier to get final contributions

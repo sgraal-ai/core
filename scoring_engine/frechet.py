@@ -146,7 +146,14 @@ def compute_frechet(
         return None
 
     if reference_vectors is None or len(reference_vectors) < 3:
-        return None
+        # No reference available — return neutral result (A2 axiom: deterministic)
+        return FrechetResult(
+            fd_score=0.0,
+            mean_shift=0.0,
+            covariance_shift=0.0,
+            encoding_degraded=False,
+            reference_age_steps=0,
+        )
 
     try:
         d = len(current_vectors[0])

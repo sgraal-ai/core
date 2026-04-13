@@ -238,7 +238,12 @@ def compute(
         components["r_importance"] = r_importance
 
     weights = custom_weights if custom_weights else WEIGHTS
-    omega = sum(weights.get(k, WEIGHTS.get(k, 0)) * v for k, v in components.items())
+    _applied_weights = {k: weights.get(k, WEIGHTS.get(k, 0)) for k in components}
+    _weight_sum = sum(abs(w) for w in _applied_weights.values())
+    omega = sum(_applied_weights[k] * v for k, v in components.items())
+    # Normalize by sum of absolute applied weights to ensure omega stays in [0, 100]
+    if _weight_sum > 0 and abs(_weight_sum - 1.0) > 0.001:
+        omega = omega / _weight_sum
     omega = max(0, min(100, omega))
 
     c = C_ACTION.get(action_type, 1.0) * C_DOMAIN.get(domain, 1.0)
