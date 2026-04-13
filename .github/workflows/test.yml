@@ -12,6 +12,13 @@ jobs:
       matrix:
         python-version: ["3.9", "3.11"]
     steps:
+      - name: Show runner info
+        run: |
+          echo "=== Runner workspace ==="
+          ls /home/runner/work/core/ 2>/dev/null || echo "workspace empty"
+          echo "=== Find test_omega_adjusted ==="
+          find /home/runner/work/ -name "test_omega_adjusted*" 2>/dev/null || echo "not found"
+          find /home/runner/work/ -name "*.py" -path "*/tests/*" 2>/dev/null | head -20
       - uses: actions/checkout@v4
         with:
           submodules: false
