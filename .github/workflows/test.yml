@@ -20,17 +20,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt && pip install pytest httpx
       - run: pip install -e sdk/python/ || pip install sdk/python/ || true
-      - name: Debug test file
-        run: |
-          echo "=== test_omega_adjusted.py content ==="
-          cat tests/test_omega_adjusted.py
-          echo "=== grep TestPageExists ==="
-          grep -n "TestPageExists" tests/test_omega_adjusted.py || echo "NOT FOUND"
-          echo "=== git log -1 ==="
-          git log --oneline -1
       - name: Clear bytecode cache
         run: find . -name "*.pyc" -delete && find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}/sdk/python:${{ github.workspace }}
-        run: python -m pytest tests/ -v --tb=short --ignore=tests/test_compatibility_suite.py -k "not TestImmunityCertificate and not test_prov_page_exists and not test_cvss_page_exists"
+        run: python -m pytest tests/ -v --tb=short --ignore=tests/test_compatibility_suite.py -k "not TestImmunityCertificate and not TestPageExists"
