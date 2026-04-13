@@ -71,7 +71,7 @@ python3 tests/corpus/run_all.py
 ```
 
 ### Baseline — do not drop below:
-- pytest: 2,024+ passing
+- pytest: 2,178+ passing
 - Corpus total: 614 baseline (Rounds 1-8) + 216 adversarial = 830 total validated cases
   - Rounds 1-4: 329/329 (Joint: 60, Sponsored: 60, Subtle: 59, Hallucination: 60, Propagation: 90)
   - Round 5 — Consensus Poisoning: 45/45
@@ -81,15 +81,17 @@ python3 tests/corpus/run_all.py
 
 ### Scoring weight note:
 - `s_recovery` has **negative weight** (-0.10) — recovery capability *reduces* risk. This is intentional.
-- Component weights sum to 0.99 (not 1.0) due to the negative recovery weight.
+- Component weights sum to 0.95 (without PageRank) or 0.99 (with PageRank). The scoring engine normalizes by `sum(abs(applied_weights))` so `omega_mem_final` is always in [0.0, 100.0].
 
 ### When to run tests:
 - **pytest**: only when `api/` or `tests/` files change
 - **corpus**: only when scoring logic changes
 - **NEVER run for**: frontend, docs, SDK, README changes
 
-### Test files (25 files, 2,024+ tests):
+### Test files (28 files, 2,178+ tests):
 - `test_scoring.py` — Core scoring engine (1840+ tests)
+- `test_security_audit.py` — Cross-tenant isolation, SSRF, secrets, quota enforcement (27 tests)
+- `test_batch3_audit.py` — Weight bounds, determinism, untested modules + endpoints (35 tests)
 - `test_api_key_cache.py` — Redis-cached API key validation
 - `test_alias_fields.py` — heal_decision and stability_gauge alias fields
 - `test_audit_log.py` — Audit log write correctness
@@ -113,6 +115,7 @@ python3 tests/corpus/run_all.py
 - `test_new_features.py` — Preflight headers, auto profile, adapt, .sgraal policy, SLA (12 tests)
 - `test_compatibility_suite.py` — SDK bridge import verification (10 tests, skips if not installed)
 - `test_migrate_policies.py` — Migrate endpoint + policy registry CRUD (5 tests)
+- `conftest.py` — Shared test config (sets `SGRAAL_SKIP_DNS_CHECK=1` for webhook URL tests)
 
 ### Benchmark corpora:
 
@@ -161,6 +164,30 @@ cd web-static && vercel --prod
 - `STRIPE_SECRET_KEY` — Stripe secret key (optional, enables billing and signup)
 - `UPSTASH_REDIS_URL` — Upstash Redis REST URL (optional, enables Global State Vector)
 - `UPSTASH_REDIS_TOKEN` — Upstash Redis auth token (optional, enables GSV)
+- `ATTESTATION_SECRET` — **Required in production.** Stable secret for HMAC proof hashes. Must not change across restarts (breaks attestation reproducibility). No fallback default.
+- `PASSPORT_SIGNING_KEY_V1` — **Required in production.** Signing key for Memory Passports. No fallback default.
+- `UNSUB_HMAC_SECRET` — **Required in production.** HMAC secret for email unsubscribe tokens. No fallback default.
+- `SGRAAL_SKIP_DNS_CHECK` — Set to `1` in test environments to skip DNS resolution in webhook URL validation (avoids flaky tests).
+
+## Security Architecture
+
+### Tenant isolation
+All per-tenant data is keyed by `_safe_key_hash(key_record)` — a helper that never returns `"default"` or empty string. Test keys get a deterministic SHA-256 derived from the API key. This prevents cross-tenant data leakage across policies, webhooks, SLA configs, alert rules, and all 110+ namespaced storage locations.
+
+### Rate limiting
+Quota enforcement uses atomic Redis `INCR` on `quota:{key_hash}:{year_month}` with 35-day TTL. If the incremented count exceeds the tier limit, the counter is decremented back and the request is rejected with 429. Falls back to Supabase `calls_this_month` if Redis is unavailable.
+
+### SSRF protection
+All webhook URLs are validated by `_validate_webhook_url()` before storage or dispatch. Blocks: `http://` scheme, private IP ranges (RFC 1918), loopback (127.x, ::1), link-local (169.254.x), cloud metadata (169.254.169.254), `.local`/`.internal`/`.localhost` hostnames. DNS resolution check skippable in tests via `SGRAAL_SKIP_DNS_CHECK=1`.
+
+### Supabase error handling
+Critical writes (audit_log, outcome_log, memory_ledger) log errors via `logger.error()` instead of silently swallowing exceptions. The audit_log writer retries up to 3 times with structured error logging on final failure.
+
+### _outcomes thread safety
+The in-memory `_outcomes` dict is protected by `_outcomes_lock` (threading.Lock). All reads and writes in `/v1/preflight` and `/v1/outcome` are wrapped. Eviction capped at 10,000 entries.
+
+### Redis TTL policy
+All `redis_set` calls must include an explicit TTL. Firewall rules: 7 days. Agent personas: 30 days. Webhook configs: 90 days. API key cache: 5 minutes. No indefinite keys allowed.
 
 ## Database Setup
 
@@ -184,7 +211,7 @@ The `/v1/preflight` endpoint requires a Bearer token in the `Authorization` head
 
 ## Rate Limiting
 
-Monthly call limits enforced per API key via `calls_this_month` in the `api_keys` table: free (10,000), starter (100,000), growth (1,000,000). Returns 429 when exceeded. Counter increments and `last_used_at` updates on every successful preflight call. In-memory test keys skip rate limiting.
+Monthly call limits enforced per API key via atomic Redis `INCR` on `quota:{key_hash}:{YYYY-MM}` (TTL 35 days). Tier limits: free (10,000), starter (100,000), growth (1,000,000). Returns 429 when exceeded. Falls back to Supabase `calls_this_month` if Redis unavailable. Test/demo keys and `dry_run=True` skip quota enforcement. Supabase `calls_this_month` and `last_used_at` still updated as secondary record.
 
 ## Billing
 
