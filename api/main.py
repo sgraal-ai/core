@@ -13251,4 +13251,54 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "adjusted_threshold_block": _adj_block,
     }
 
+    # -----------------------------------------------------------------------
+    # NEW: single_point_of_failure — entry with highest compound criticality
+    # -----------------------------------------------------------------------
+    _spof_id = None
+    _spof_score_val = None
+    _ir_by_id = {ir.entry_id: ir for ir in importance_results}
+    _auth_scores = response.get("authority_scores", {})
+    _best_spof = 0.0
+    for e in entries:
+        ir = _ir_by_id.get(e.id)
+        if not ir:
+            continue
+        sb = ir.signal_breakdown
+        _pr_auth = (_auth_scores.get(e.id, 5.0) / 10.0) if isinstance(_auth_scores, dict) else 0.5
+        _blast = sb.get("blast_radius", 0)
+        _dc = min(e.downstream_count / 50.0, 1.0)
+        _uniq = sb.get("uniqueness", 0)
+        _score = _pr_auth * _blast * _dc * (1 - _uniq)
+        if _score > _best_spof:
+            _best_spof = _score
+            _spof_id = e.id
+    if _best_spof > 0.5:
+        _spof_score_val = round(min(1.0, _best_spof), 3)
+    else:
+        _spof_id = None
+        _spof_score_val = None
+    response["single_point_of_failure_entry_id"] = _spof_id
+    response["single_point_of_failure_score"] = _spof_score_val
+
+    # -----------------------------------------------------------------------
+    # NEW: monoculture_risk_score — ecosystem diversity measurement
+    # -----------------------------------------------------------------------
+    _pe_data = response.get("provenance_entropy")
+    _dp_data = response.get("dirichlet_process")
+    _h1 = response.get("consistency_analysis", {}).get("h1_rank", 0) if isinstance(response.get("consistency_analysis"), dict) else 0
+
+    _pe_mean = _pe_data.get("mean_entropy", 0.5) if isinstance(_pe_data, dict) else 0.5
+    _entropy_risk = max(0.0, 1.0 - _pe_mean)
+
+    _n_clusters = _dp_data.get("n_clusters", 2) if isinstance(_dp_data, dict) else 2
+    _cluster_risk = 1.0 if _n_clusters <= 1 else max(0.0, 1.0 - _n_clusters / 5.0)
+
+    _consistency_bonus = 0.2 if _h1 == 0 and _entropy_risk > 0.5 else 0.0
+
+    _mono_score = round(min(1.0, _entropy_risk * 0.5 + _cluster_risk * 0.3 + _consistency_bonus * 0.2), 3)
+    _mono_level = "HIGH" if _mono_score > 0.6 else "MEDIUM" if _mono_score > 0.3 else "LOW"
+
+    response["monoculture_risk_score"] = _mono_score
+    response["monoculture_risk_level"] = _mono_level
+
     return response
