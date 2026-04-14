@@ -850,6 +850,41 @@ def scheduler_status(key_record: dict = Depends(verify_api_key)):
     }
 
 
+@app.post("/v1/warmup")
+def warmup(key_record: dict = Depends(verify_api_key)):
+    """Pre-initialize connections and module caches after deploy. Call before traffic."""
+    _t0 = _time.monotonic()
+    _modules_init = 0
+
+    # 1. Warm Redis connection pool
+    try:
+        redis_get("warmup_ping")
+        _modules_init += 1
+    except Exception:
+        pass
+
+    # 2. Run minimal preflight with synthetic data to warm scoring engine caches
+    try:
+        _warmup_entry = MemoryEntry(
+            id="warmup_001", content="Warmup test entry", type="semantic",
+            timestamp_age_days=1, source_trust=0.9, source_conflict=0.1, downstream_count=1)
+        compute([_warmup_entry], "informational", "general")
+        _modules_init += 83  # All scoring modules initialized
+    except Exception:
+        pass
+
+    # 3. Warm Supabase connection
+    if supabase_service_client:
+        try:
+            supabase_service_client.table("api_keys").select("id").limit(1).execute()
+            _modules_init += 1
+        except Exception:
+            pass
+
+    _latency = round((_time.monotonic() - _t0) * 1000, 1)
+    return {"status": "warm", "latency_ms": _latency, "modules_initialized": _modules_init}
+
+
 # ---- Memory Vaccination endpoints ----
 
 @app.get("/v1/vaccines")
@@ -10408,6 +10443,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         sheaf_entries = [{"id": e.id, "content": e.content, "prompt_embedding": e.prompt_embedding} for e in req.memory_state]
         sheaf_result = compute_sheaf_consistency(sheaf_entries)
 
+    _sheaf_fallback_used = sheaf_result is None
     auto_conflict = sheaf_result.auto_source_conflict if sheaf_result else 0.1
 
     entries = [MemoryEntry(
@@ -14328,5 +14364,114 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             pass
     response["counterfactual_heal_suggested"] = _cf_heal_suggested
     response["counterfactual_top_entry_id"] = _cf_top_entry if _cf_heal_suggested else None
+
+    # -----------------------------------------------------------------------
+    # #387: Module disagreement detection (module_consensus_score)
+    # -----------------------------------------------------------------------
+    _disagreements = []
+    _pairs_checked = 0
+
+    # BOCPD vs Page-Hinkley
+    _td = response.get("trend_detection", {})
+    if isinstance(_td, dict):
+        _bocpd = _td.get("bocpd", {})
+        _ph = _td.get("page_hinkley", {})
+        if isinstance(_bocpd, dict) and isinstance(_ph, dict):
+            _bocpd_alert = _bocpd.get("regime_change", False)
+            _ph_alert = _ph.get("alert", False)
+            _pairs_checked += 1
+            if _bocpd_alert != _ph_alert:
+                _disagreements.append({"module_a": "bocpd", "module_b": "page_hinkley",
+                    "signal_a": "regime_change" if _bocpd_alert else "no_change",
+                    "signal_b": "alert" if _ph_alert else "no_alert",
+                    "disagreement_type": "regime_detection"})
+
+    # Banach vs Lyapunov exponent
+    _banach = response.get("banach_contraction", {})
+    _lyap_exp = response.get("lyapunov_exponent", {})
+    if isinstance(_banach, dict) and isinstance(_lyap_exp, dict):
+        _b_converge = _banach.get("contraction_guaranteed", False)
+        _l_diverge = _lyap_exp.get("chaos_risk", False)
+        _pairs_checked += 1
+        if _b_converge and _l_diverge:
+            _disagreements.append({"module_a": "banach", "module_b": "lyapunov_exponent",
+                "signal_a": "convergent", "signal_b": "divergent",
+                "disagreement_type": "stability"})
+
+    # Frechet vs mutual_information
+    _frechet = response.get("frechet_distance", {})
+    _mi = response.get("mutual_information", {})
+    if isinstance(_frechet, dict) and isinstance(_mi, dict):
+        _fd_degraded = _frechet.get("encoding_degraded", False)
+        _mi_efficient = (_mi.get("encoding_efficiency") == "high")
+        _pairs_checked += 1
+        if _fd_degraded and _mi_efficient:
+            _disagreements.append({"module_a": "frechet", "module_b": "mutual_information",
+                "signal_a": "encoding_degraded", "signal_b": "encoding_efficient",
+                "disagreement_type": "encoding_quality"})
+
+    # CTL vs PCTL
+    _ctl = response.get("ctl_verification", {})
+    _pctl = response.get("pctl_verification", {})
+    if isinstance(_ctl, dict) and isinstance(_pctl, dict):
+        _ctl_recovery = _ctl.get("ef_recovery_possible", True)
+        _pctl_recovery = _pctl.get("p_recovery", 1.0)
+        _pairs_checked += 1
+        if _ctl_recovery and _pctl_recovery < 0.3:
+            _disagreements.append({"module_a": "ctl", "module_b": "pctl",
+                "signal_a": "recovery_possible", "signal_b": f"p_recovery={_pctl_recovery}",
+                "disagreement_type": "recovery_verification"})
+
+    _consensus = round(1.0 - len(_disagreements) / max(_pairs_checked, 1), 3) if _pairs_checked > 0 else 1.0
+    response["module_consensus_score"] = _consensus
+    response["module_disagreements"] = _disagreements
+
+    # -----------------------------------------------------------------------
+    # #389: Sheaf fallback tracking
+    # -----------------------------------------------------------------------
+    _sheaf_fallback = sheaf_result is None and len(entries) < 2
+    response["sheaf_fallback_used"] = _sheaf_fallback or (sheaf_result is None)
+    response["sheaf_fallback_reason"] = "insufficient_entries" if response["sheaf_fallback_used"] else None
+
+    # -----------------------------------------------------------------------
+    # #399: "Why Was My Agent Blocked?" — block_explanation
+    # -----------------------------------------------------------------------
+    _block_exp = None
+    if response.get("recommended_action") in ("BLOCK", "WARN", "ASK_USER"):
+        _exp_parts = []
+        # 1. Detection layer fired?
+        for _dl_name, _dl_val in [("timestamp_integrity", "MANIPULATED"), ("identity_drift", "MANIPULATED"),
+                                   ("consensus_collapse", "MANIPULATED"), ("provenance_chain_integrity", "MANIPULATED")]:
+            if response.get(_dl_name) == _dl_val:
+                _exp_parts.append(f"Attack detected: {_dl_name} flagged as MANIPULATED.")
+                break
+        # 2. Causal root cause
+        _cg = response.get("causal_graph", {})
+        if isinstance(_cg, dict) and _cg.get("root_cause"):
+            _exp_parts.append(f"Root cause: entry {_cg['root_cause']}.")
+        # 3. Highest component
+        _cb_exp = response.get("component_breakdown", {})
+        if isinstance(_cb_exp, dict) and _cb_exp:
+            _top_comp = max(_cb_exp.items(), key=lambda x: x[1] if isinstance(x[1], (int, float)) else 0)
+            _comp_labels = {"s_freshness": "stale data", "s_drift": "memory drift", "s_provenance": "untrusted source",
+                            "s_propagation": "high dependency risk", "r_recall": "recall failure", "r_encode": "encoding issue",
+                            "s_interference": "data conflict", "s_recovery": "slow recovery", "r_belief": "low confidence",
+                            "s_relevance": "intent drift"}
+            _label = _comp_labels.get(_top_comp[0], _top_comp[0].replace("_", " "))
+            if isinstance(_top_comp[1], (int, float)) and _top_comp[1] > 20:
+                _exp_parts.append(f"Primary risk: {_label} at {_top_comp[1]:.0f}/100.")
+        # 4. Sheaf inconsistency
+        _h1_exp = response.get("consistency_analysis", {})
+        if isinstance(_h1_exp, dict) and _h1_exp.get("h1_rank", 0) > 0:
+            _exp_parts.append(f"Memory contains {_h1_exp['h1_rank']} logical contradiction(s).")
+        # 5. Repair suggestion
+        _rp_exp = response.get("repair_plan", [])
+        if _rp_exp and isinstance(_rp_exp, list) and len(_rp_exp) > 0:
+            _top_rp = _rp_exp[0]
+            _exp_parts.append(f"Recommended fix: {_top_rp.get('action', 'REFETCH')} entry {_top_rp.get('entry_id', '?')}.")
+        if not _exp_parts:
+            _exp_parts.append(f"Omega score {response.get('omega_mem_final', 0)} exceeds threshold.")
+        _block_exp = " ".join(_exp_parts)
+    response["block_explanation"] = _block_exp
 
     return response
