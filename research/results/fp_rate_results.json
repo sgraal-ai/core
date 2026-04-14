@@ -1,0 +1,38 @@
+[
+  {
+    "layer": "timestamp_integrity",
+    "category": "Legitimate timestamps",
+    "fp_rate": 0.0,
+    "fp_count": 0,
+    "total": 50,
+    "target_met": true,
+    "false_positives": []
+  },
+  {
+    "layer": "consensus_collapse",
+    "category": "Legitimate consensus",
+    "fp_rate": 0.0,
+    "fp_count": 0,
+    "total": 50,
+    "target_met": true,
+    "false_positives": []
+  },
+  {
+    "layer": "identity_drift",
+    "category": "Legitimate identity",
+    "fp_rate": 0.0,
+    "fp_count": 0,
+    "total": 50,
+    "target_met": true,
+    "false_positives": []
+  },
+  {
+    "layer": "provenance_chain_integrity",
+    "category": "Legitimate provenance",
+    "fp_rate": 0.0,
+    "fp_count": 0,
+    "total": 50,
+    "target_met": true,
+    "false_positives": []
+  }
+]

@@ -1,0 +1,21 @@
+{
+  "spearman_rho": -0.5381,
+  "p_value": 0.0,
+  "n_samples": 120,
+  "interpretation": "Strong negative correlation \u2014 higher omega reliably predicts failure. Scoring is well-calibrated.",
+  "success_omega_mean": 16.7,
+  "success_omega_median": 2.5,
+  "failure_omega_mean": 90.7,
+  "failure_omega_median": 100,
+  "n_success": 60,
+  "n_failure": 60,
+  "action_accuracy": 0.758,
+  "confusion_matrix": {
+    "true_positive_block_failure": 51,
+    "true_negative_use_success": 40,
+    "false_positive_block_success": 4,
+    "false_negative_use_failure": 0,
+    "warn_on_success": 16,
+    "warn_on_failure": 9
+  }
+}
