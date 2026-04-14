@@ -107,6 +107,42 @@ export default function WebhooksPage() {
         <button onClick={() => setShowModal(true)} style={BTN_GOLD}>+ Add Webhook</button>
       </div>
 
+      {/* Featured Integrations */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "24px" }}>
+        <div style={{ ...CARD, border: "1px solid #e5e7eb" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+            <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "#FF4A001a", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "#FF4A00", fontSize: "16px" }}>Z</div>
+            <div>
+              <p style={{ fontWeight: 600, fontSize: "14px", color: "#0B0F14" }}>Zapier</p>
+              <p style={{ fontSize: "12px", color: "#6b7280" }}>Connect to 5,000+ apps</p>
+            </div>
+          </div>
+          <div style={{ background: "#f9fafb", borderRadius: "6px", padding: "10px 12px", fontFamily: "monospace", fontSize: "12px", color: "#6b7280", marginBottom: "12px" }}>
+            POST /v1/zapier/webhook
+          </div>
+          <button onClick={() => { navigator.clipboard.writeText("POST /v1/zapier/webhook"); setToast({ message: "Copied endpoint", type: "success" }); }}
+            style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: "4px", padding: "4px 12px", fontSize: "12px", color: "#6b7280", cursor: "pointer" }}>
+            Copy endpoint
+          </button>
+        </div>
+        <div style={{ ...CARD, border: "1px solid #e5e7eb" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+            <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "#6C2EB91a", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "#6C2EB9", fontSize: "16px" }}>M</div>
+            <div>
+              <p style={{ fontWeight: 600, fontSize: "14px", color: "#0B0F14" }}>Make.com</p>
+              <p style={{ fontSize: "12px", color: "#6b7280" }}>Visual workflow automation</p>
+            </div>
+          </div>
+          <div style={{ background: "#f9fafb", borderRadius: "6px", padding: "10px 12px", fontFamily: "monospace", fontSize: "12px", color: "#6b7280", marginBottom: "12px" }}>
+            POST /v1/make/webhook
+          </div>
+          <button onClick={() => { navigator.clipboard.writeText("POST /v1/make/webhook"); setToast({ message: "Copied endpoint", type: "success" }); }}
+            style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: "4px", padding: "4px 12px", fontSize: "12px", color: "#6b7280", cursor: "pointer" }}>
+            Copy endpoint
+          </button>
+        </div>
+      </div>
+
       {/* Active Webhooks */}
       <div style={{ ...CARD, marginBottom: "32px", padding: 0, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>

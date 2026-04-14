@@ -341,7 +341,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                   <p className="text-sm">{String(forensicsData.recommendation)}</p>
                 </div>
               )}
-              <div className="flex gap-6 text-xs text-muted">
+              <div className="flex gap-6 text-xs text-muted mb-4">
                 {Array.isArray(forensicsData.timeline) && (
                   <span>Timeline: <strong className="text-foreground">{String((forensicsData.timeline as unknown[]).length)} events</strong></span>
                 )}
@@ -349,6 +349,43 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
                   <span>Contamination chain: <strong className="text-foreground">{String((forensicsData.contamination_chain as unknown[]).length)} entries</strong></span>
                 )}
               </div>
+              {/* Agent Timeline Visualization */}
+              {Array.isArray(forensicsData.timeline) && (forensicsData.timeline as Record<string, unknown>[]).length > 0 ? (
+                <div className="mt-4">
+                  <h3 className="text-sm font-semibold mb-3">Event Timeline</h3>
+                  <div className="space-y-0">
+                    {(forensicsData.timeline as Record<string, unknown>[]).slice(0, 20).reverse().map((evt, i) => {
+                      const action = String(evt.recommended_action ?? evt.action ?? evt.type ?? "");
+                      const evtType = String(evt.event_type ?? evt.type ?? action);
+                      const colorMap: Record<string, string> = { BLOCK: "#dc2626", WARN: "#ca8a04", ASK_USER: "#ca8a04", USE_MEMORY: "#16a34a", HEAL: "#3b82f6" };
+                      const bgMap: Record<string, string> = { BLOCK: "#fef2f2", WARN: "#fefce8", ASK_USER: "#fefce8", USE_MEMORY: "#f0fdf4", HEAL: "#eff6ff" };
+                      const dotColor = colorMap[action] ?? colorMap[evtType] ?? "#6b7280";
+                      const bgColor = bgMap[action] ?? bgMap[evtType] ?? "#f9fafb";
+                      const omega = evt.omega ?? evt.omega_mem_final;
+                      const ts = evt.timestamp ?? evt.created_at ?? evt.ts ?? "";
+                      return (
+                        <div key={i} className="flex items-start gap-3 relative" style={{ paddingBottom: "12px" }}>
+                          <div className="flex flex-col items-center" style={{ minWidth: "20px" }}>
+                            <div style={{ width: "10px", height: "10px", borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+                            {i < Math.min((forensicsData.timeline as unknown[]).length, 20) - 1 && (
+                              <div style={{ width: "2px", flex: 1, background: "#e5e7eb", minHeight: "20px" }} />
+                            )}
+                          </div>
+                          <div style={{ background: bgColor, borderRadius: "6px", padding: "8px 12px", flex: 1, fontSize: "12px" }}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span style={{ fontWeight: 600, color: dotColor, fontFamily: "monospace", fontSize: "11px" }}>{action || evtType}</span>
+                              {omega != null && <span className="font-mono" style={{ fontSize: "11px", color: Number(omega) > 60 ? "#dc2626" : "#6b7280" }}>Ω {String(omega)}</span>}
+                            </div>
+                            {ts && <p style={{ fontSize: "10px", color: "#6b7280", marginTop: "2px" }}>{String(ts)}</p>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted mt-2">No timeline events yet.</p>
+              )}
             </div>
           )}
         </div>

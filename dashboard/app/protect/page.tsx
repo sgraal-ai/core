@@ -7,7 +7,7 @@ import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton"
 interface CircuitBreaker { state: string; last_check?: string; failures?: number; }
 interface Violation { id?: string; entry_id?: string; reason?: string; timestamp?: string; omega?: number; }
 interface RedTeamResult { attack_type: string; blocked: number; total: number; resilience: number; }
-interface Alert { id?: string; message?: string; severity?: string; created_at?: string; }
+interface Alert { id?: string; message?: string; severity?: string; created_at?: string; days_until_block?: number | null; days_until_block_confidence?: number | null; }
 
 const CARD = "bg-surface border border-surface-light rounded-xl p-5";
 const ATTACK_TYPES = ["injection", "poisoning", "replay", "drift", "tamper", "sleeper"];
@@ -314,6 +314,34 @@ export default function ProtectPage() {
           </div>
         )}
       </div>
+      {/* Time Until BLOCK */}
+      {(() => {
+        // Extract days_until_block from most recent alert or first preflight that has it
+        const dubAlert = alerts.find(a => a.days_until_block !== undefined);
+        const dub = dubAlert?.days_until_block;
+        const dubConf = dubAlert?.days_until_block_confidence;
+        const dubColor = dub === null || dub === undefined ? "#6b7280"
+          : dub === 0 ? "#dc2626"
+          : dub < 7 ? "#dc2626"
+          : dub < 30 ? "#ca8a04"
+          : "#16a34a";
+        const dubLabel = dub === null || dub === undefined ? "Insufficient history"
+          : dub === 0 ? "BLOCK threshold reached"
+          : `${dub} days`;
+        return (
+          <div className={`${CARD} mt-6`}>
+            <h2 className="text-lg font-semibold mb-3">Time Until BLOCK</h2>
+            <div className="flex items-center gap-6">
+              <div>
+                <p style={{ fontSize: "32px", fontWeight: 800, fontFamily: "monospace", color: dubColor }}>{dubLabel}</p>
+                {dubConf != null && <p className="text-xs text-muted mt-1">{Math.round(dubConf * 100)}% confidence</p>}
+              </div>
+            </div>
+            <p className="text-xs text-muted mt-3">Estimated using Ornstein-Uhlenbeck, Cox hazard, Kalman trend, and BOCPD changepoint detection.</p>
+          </div>
+        );
+      })()}
+
       {/* Firewall Violations — Last 7 Days */}
       <div className={`${CARD} mt-6`}>
         <h2 className="text-lg font-semibold mb-2">Firewall Violations — Last 7 Days</h2>
