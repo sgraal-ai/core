@@ -8651,6 +8651,62 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
             _risk = max(_risk, 0.5)
             break  # One detection suffices
 
+    # PATTERN 5 — Federation Provenance Asymmetry
+    # Detects: multi-hop federated entries introducing new uncorroborated topics
+    # with disproportionately high downstream influence vs local entries.
+    # Triple conjunction required: longer_chain AND higher_downstream AND topically_distinct
+    if n >= 3:
+        _federated = []  # entries with provenance_chain length >= 2
+        _local = []      # entries with provenance_chain length <= 1
+        for _ei, _e in enumerate(_entries):
+            _pc = _e.get("provenance_chain") or []
+            if len(_pc) >= 2:
+                _federated.append((_ei, _e))
+            else:
+                _local.append((_ei, _e))
+
+        if _federated and _local:
+            _fed_avg_ds = sum(e.get("downstream_count", 0) for _, e in _federated) / len(_federated)
+            _loc_avg_ds = sum(e.get("downstream_count", 0) for _, e in _local) / len(_local) if _local else 1
+            _ds_ratio = _fed_avg_ds / max(_loc_avg_ds, 0.5)
+
+            # Topical distinctness: max Jaccard between any federated and any local entry
+            _max_fed_local_jaccard = 0.0
+            for _fi, _fe in _federated:
+                for _li, _le in _local:
+                    _jfl = _sim(_fi, _li) if _detection_method == "embedding" else (
+                        len(all_tokens[_fi] & all_tokens[_li]) / max(len(all_tokens[_fi] | all_tokens[_li]), 1)
+                    )
+                    _max_fed_local_jaccard = max(_max_fed_local_jaccard, _jfl)
+
+            _topically_distinct = _max_fed_local_jaccard < 0.1
+            _ds_amplified = _ds_ratio > 1.8
+
+            if _topically_distinct and _ds_amplified:
+                _flags.append("federation_provenance_asymmetry:suspicious")
+                _risk = max(_risk, 0.5)
+                # Escalate if strong asymmetry
+                if _ds_ratio > 3.0 or len(_federated) >= len(_local):
+                    _flags.append("federation_provenance_asymmetry:manipulated")
+                    _risk = max(_risk, 1.0)
+            elif _topically_distinct and len(_local) >= 2:
+                # Weaker signal: federated entries introduce uncorroborated topics
+                # even without downstream amplification. Requires 2+ local entries
+                # that form their own consensus (local entries similar to each other).
+                _local_self_sim = 0.0
+                if len(_local) >= 2:
+                    for _la in range(len(_local)):
+                        for _lb in range(_la + 1, len(_local)):
+                            _lsim = _sim(_local[_la][0], _local[_lb][0]) if _detection_method == "embedding" else (
+                                len(all_tokens[_local[_la][0]] & all_tokens[_local[_lb][0]]) / max(len(all_tokens[_local[_la][0]] | all_tokens[_local[_lb][0]]), 1)
+                            )
+                            _local_self_sim = max(_local_self_sim, _lsim)
+                # If local entries have SOME similarity to each other but federated entries
+                # are completely disconnected from them → suspicious injection
+                if _local_self_sim > 0.05 or len(_federated) >= 2:
+                    _flags.append("federation_topic_injection:suspicious")
+                    _risk = max(_risk, 0.5)
+
     # Capture initial result before genuine corroboration may clear it
     _initial_collapse = "MANIPULATED" if any("manipulated" in f for f in _flags) else ("SUSPICIOUS" if _flags else "CLEAN")
 
@@ -8677,7 +8733,10 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
         _has_any_chain = len(_nonempty_chains) >= 1
         # Feature 5: Content independence — use pre-computed _max_jaccard
         _content_independent = (1.0 - _max_jaccard) >= 0.3
-        if (_diverse_chains or (_conflict_var > 0.0001 and _has_any_chain)) and _content_independent:
+        # Federation asymmetry flags are NOT cleared by genuine corroboration —
+        # diverse chains + topical independence is exactly the attack pattern.
+        _has_fed_asymmetry = any("federation_" in f for f in _flags)
+        if (_diverse_chains or (_conflict_var > 0.0001 and _has_any_chain)) and _content_independent and not _has_fed_asymmetry:
             _genuine = True
             _flags = []
             _risk = 0.0
