@@ -10398,12 +10398,24 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         {"consensus_collapse": _early_levels[2]},
     )
     _early_level = _early_as.get("attack_surface_level", "NONE")
-    if (_manip_count >= 1 and _early_level in ("HIGH", "CRITICAL")
-            and req.action_type in ("irreversible", "destructive")):
+    _early_exit = False
+    _early_exit_reason = None
+    if _manip_count >= 1 and _early_level in ("HIGH", "CRITICAL"):
         _scoring_skipped = True
+        _early_exit = True
+        _early_exit_reason = f"MANIPULATED detection at {_early_level} level ({_manip_count} MANIPULATED + {_susp_count} SUSPICIOUS)"
         from scoring_engine.omega_mem import PreflightResult
         result = PreflightResult(omega_mem_final=100.0, recommended_action="BLOCK", assurance_score=0.0,
-                             explainability_note=f"Detection short circuit: {_manip_count} MANIPULATED + {_susp_count} SUSPICIOUS on {req.action_type} action",
+                             explainability_note=f"Detection short circuit: {_early_exit_reason}",
+                             component_breakdown={}, repair_plan=[], healing_counter=0)
+        _module_times = {"scoring_engine": 0.0}
+    elif _manip_count >= 1 and req.action_type in ("irreversible", "destructive"):
+        _scoring_skipped = True
+        _early_exit = True
+        _early_exit_reason = f"MANIPULATED detection on {req.action_type} action"
+        from scoring_engine.omega_mem import PreflightResult
+        result = PreflightResult(omega_mem_final=100.0, recommended_action="BLOCK", assurance_score=0.0,
+                             explainability_note=f"Detection short circuit: {_early_exit_reason}",
                              component_breakdown={}, repair_plan=[], healing_counter=0)
         _module_times = {"scoring_engine": 0.0}
     else:
@@ -10793,6 +10805,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "memcube_version": "2.0.0",
         "input_hash": _input_hash_full,
         "scoring_skipped": _scoring_skipped,
+        "early_exit": _early_exit,
+        "early_exit_reason": _early_exit_reason,
         "deterministic": True,
         "reproducible": True,
         "proof_version": "v1",
@@ -14148,7 +14162,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _cf_heal_suggested = False
     _cf_top_entry = None
     _cf_top_improvement = 0.0
-    if len(entries) >= 2 and not _is_dry_run:
+    _is_compact = response.get("response_profile_used") == "compact"
+    if len(entries) >= 2 and not _is_dry_run and not _is_compact:
         try:
             _cf_base = result.omega_mem_final
             for _cf_i, _cf_e in enumerate(entries):
