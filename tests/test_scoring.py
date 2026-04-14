@@ -3637,11 +3637,20 @@ class TestRMT:
         result = compute_rmt([])
         assert result is None
 
-    def test_two_identical_entries(self):
-        """Identical entries → high similarity, signal detected."""
+    def test_two_entries_returns_none(self):
+        """n_entries < 5 should return None (degenerate eigenvalues)."""
         entries = [
             {"id": "m1", "content": "Budapest office open weekdays 9 to 18"},
             {"id": "m2", "content": "Budapest office open weekdays 9 to 18"},
+        ]
+        result = compute_rmt(entries)
+        assert result is None
+
+    def test_five_identical_entries(self):
+        """5+ identical entries → signal detected."""
+        entries = [
+            {"id": f"m{i}", "content": "Budapest office open weekdays 9 to 18"}
+            for i in range(5)
         ]
         result = compute_rmt(entries)
         assert result is not None
@@ -3654,6 +3663,8 @@ class TestRMT:
             {"id": "m1", "content": "Budapest office open weekdays"},
             {"id": "m2", "content": "Python programming language tutorial"},
             {"id": "m3", "content": "Mediterranean diet recipe ideas"},
+            {"id": "m4", "content": "Quantum computing fundamentals overview"},
+            {"id": "m5", "content": "Jazz music history and theory"},
         ]
         result = compute_rmt(entries)
         assert result is not None
@@ -3670,10 +3681,13 @@ class TestRMT:
         assert 0 <= result.signal_ratio <= 1
 
     def test_jaccard_fallback(self):
-        """Without embeddings, should use Jaccard and still compute."""
+        """Without embeddings, should use Jaccard and still compute (needs 5+ entries)."""
         entries = [
-            {"id": "j1", "content": "the quick brown fox jumps"},
-            {"id": "j2", "content": "the slow brown dog sleeps"},
+            {"id": "j1", "content": "the quick brown fox jumps over lazy dog"},
+            {"id": "j2", "content": "the slow brown dog sleeps under warm sun"},
+            {"id": "j3", "content": "a fast red cat runs through green fields"},
+            {"id": "j4", "content": "the old grey wolf howls at bright moon"},
+            {"id": "j5", "content": "the young white rabbit hides in deep hole"},
         ]
         result = compute_rmt(entries)
         assert result is not None
@@ -3689,11 +3703,11 @@ class TestRMT:
         assert result is not None
 
     def test_rmt_in_api_response(self):
-        """Preflight with 2+ entries should include rmt_analysis."""
+        """Preflight with 5+ entries should include rmt_analysis."""
         resp = client.post("/v1/preflight", json={
             "memory_state": [
-                _fresh_entry(id="rmt_a"),
-                _fresh_entry(id="rmt_b"),
+                _fresh_entry(id=f"rmt_{i}", content=f"Unique content for entry {i}")
+                for i in range(6)
             ],
         }, headers=AUTH)
 

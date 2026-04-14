@@ -61,6 +61,8 @@ def _estimate_alpha(changes: list[float]) -> float:
         # ν_α=2.44 → α=2.0 (Gaussian), ν_α=6.31 → α=1.0 (Cauchy)
         # Linear interpolation: α = 2.0 - (ν - 2.44) / (6.31 - 2.44)
         alpha = 2.0 - (nu - 2.44) / (6.31 - 2.44)
+        # Alpha must be in (0, 2] for Levy stable distributions
+        alpha = max(0.1, min(2.0, alpha))
     else:
         # Degenerate IQR: fall back to Hill estimator
         sorted_desc = sorted(abs_changes, reverse=True)

@@ -106,15 +106,16 @@ def _baum_welch(
         # Log emission probabilities: log_B[t][k]
         log_B = [[_log_gaussian_pdf(history[t], means[k], sigmas[k]) for k in range(K)] for t in range(T)]
 
-        # Forward: log_alpha[t][k]
+        # Forward: log_alpha[t][k] — clamp pi minimum to prevent log(0)
+        _pi_safe = [max(p, 1e-10) for p in pi]  # floor at 1e-10, not 1e-300
         log_alpha = [[0.0] * K for _ in range(T)]
         for k in range(K):
-            log_alpha[0][k] = math.log(max(pi[k], 1e-300)) + log_B[0][k]
+            log_alpha[0][k] = max(-500.0, math.log(_pi_safe[k]) + log_B[0][k])
 
         for t in range(1, T):
             for j in range(K):
-                vals = [log_alpha[t - 1][i] + math.log(max(A[i][j], 1e-300)) for i in range(K)]
-                log_alpha[t][j] = _logsumexp(vals) + log_B[t][j]
+                vals = [log_alpha[t - 1][i] + math.log(max(A[i][j], 1e-10)) for i in range(K)]
+                log_alpha[t][j] = max(-500.0, _logsumexp(vals) + log_B[t][j])
 
         # Backward: log_beta[t][k]
         log_beta = [[0.0] * K for _ in range(T)]
@@ -122,8 +123,8 @@ def _baum_welch(
 
         for t in range(T - 2, -1, -1):
             for i in range(K):
-                vals = [math.log(max(A[i][j], 1e-300)) + log_B[t + 1][j] + log_beta[t + 1][j] for j in range(K)]
-                log_beta[t][i] = _logsumexp(vals)
+                vals = [math.log(max(A[i][j], 1e-10)) + log_B[t + 1][j] + log_beta[t + 1][j] for j in range(K)]
+                log_beta[t][i] = max(-500.0, _logsumexp(vals))
 
         # Log-likelihood
         log_ll = _logsumexp(log_alpha[T - 1])

@@ -76,11 +76,18 @@ def sinkhorn_distance(
             # All costs are zero — distributions at same points
             return SinkhornResult(distance=0.0, iterations=0, converged=True)
 
-        # Gibbs kernel K = exp(-C/ε)
+        # Gibbs kernel K = exp(-C/ε), clamped to prevent underflow
         K = [[0.0] * m for _ in range(n)]
+        _all_zero = True
         for i in range(n):
             for j in range(m):
-                K[i][j] = math.exp(-C[i][j] / epsilon)
+                _log_k = max(-500.0, -C[i][j] / epsilon)  # clamp exponent floor
+                K[i][j] = math.exp(_log_k)
+                if K[i][j] > 0:
+                    _all_zero = False
+        if _all_zero:
+            # Epsilon too small for this cost matrix — return fallback
+            return SinkhornResult(distance=0.0, iterations=0, converged=False)
 
         # Ensure p, q are proper distributions
         eps = 1e-10

@@ -117,7 +117,8 @@ def compute_rmt(
         RMTResult or None if n_entries < 2
     """
     n = len(entries)
-    if n < 2:
+    if n < 5:
+        # Need n >= 5 for meaningful Marchenko-Pastur analysis (n=2 gives degenerate eigenvalues)
         return None
 
     # Limit to max_entries for performance
