@@ -235,7 +235,8 @@ async def _lifespan(app_instance):
     tasks.append(asyncio.create_task(_scheduler_truth_subscription()))
     tasks.append(asyncio.create_task(_scheduler_sleeper_scan()))
     tasks.append(asyncio.create_task(_scheduler_daily_snapshot()))
-    logger.info("Background schedulers started: truth_subscription (30m), sleeper_scan (60m), daily_snapshot (24h)")
+    tasks.append(asyncio.create_task(_scheduler_stripe_retry()))
+    logger.info("Background schedulers started: truth_subscription (30m), sleeper_scan (60m), daily_snapshot (24h), stripe_retry (5m)")
     yield
     for t in tasks:
         t.cancel()
@@ -290,6 +291,121 @@ def _evict_if_full(d: dict, name: str = "cache"):
         for k in keys_to_remove:
             d.pop(k, None)
         logger.info("Cache eviction: removed %d oldest entries from %s (was %d)", _DICT_EVICT_BATCH, name, _DICT_MAX_SIZE + 1)
+
+
+# ---------------------------------------------------------------------------
+# TTL-based dict eviction system (#374, #376, #390)
+# ---------------------------------------------------------------------------
+
+# Timestamps for TTL-based eviction (dict_name → {key → write_time})
+_dict_write_times: dict[str, dict[str, float]] = {}
+
+# TTL per dict (seconds). Dicts not listed use size-only eviction.
+_DICT_TTL = {
+    "_certificates": 86400,        # 24h
+    "_registry": 604800,           # 7d
+    "_predictive_alerts": 3600,    # 1h
+    "_court_verdicts": 86400,      # 24h
+    "_commons": 604800,            # 7d
+    "_federation_registry": 86400, # 24h
+    "_truth_subs": 86400,          # 24h
+    "_async_preflight_jobs": 3600, # 1h
+    "_webhook_configs": 604800,    # 7d
+}
+
+def _tracked_write(d: dict, key: str, value, dict_name: str):
+    """Write to dict with size eviction + TTL timestamp tracking."""
+    _evict_if_full(d, dict_name)
+    d[key] = value
+    if dict_name not in _dict_write_times:
+        _dict_write_times[dict_name] = {}
+    _dict_write_times[dict_name][key] = _time.time()
+
+
+# Time-based cleanup (#376) — replaces probabilistic random() < 0.01
+_last_cleanup_time = 0.0
+_CLEANUP_INTERVAL = 300  # 5 minutes
+
+def _run_periodic_cleanup():
+    """TTL-based cleanup for all tracked dicts. Called every 5 minutes."""
+    global _last_cleanup_time
+    now = _time.time()
+    if now - _last_cleanup_time < _CLEANUP_INTERVAL:
+        return
+    _last_cleanup_time = now
+
+    # Registry of all managed dicts (populated lazily)
+    _managed: dict[str, dict] = {}
+    try:
+        _managed = {
+            "_certificates": _certificates,
+            "_registry": _registry,
+            "_predictive_alerts": _predictive_alerts,
+            "_court_verdicts": _court_verdicts,
+            "_commons": _commons,
+            "_truth_subs": _truth_subs,
+            "_async_preflight_jobs": _async_preflight_jobs,
+            "_webhook_configs": _webhook_configs,
+        }
+    except NameError:
+        return  # Dicts not yet defined during module init
+
+    total_evicted = 0
+    for dict_name, d in _managed.items():
+        ttl = _DICT_TTL.get(dict_name, 86400)
+        cutoff = now - ttl
+        wt = _dict_write_times.get(dict_name, {})
+        expired = [k for k, t in wt.items() if t < cutoff]
+        for k in expired:
+            d.pop(k, None)
+            wt.pop(k, None)
+            total_evicted += 1
+        # Also apply size eviction
+        _evict_if_full(d, dict_name)
+
+    if total_evicted > 0:
+        logger.info("Periodic cleanup: evicted %d expired entries across %d dicts", total_evicted, len(_managed))
+
+
+# Stripe billing retry queue (#375)
+_stripe_retry_queue: list[dict] = []
+_stripe_retry_lock = threading.Lock()
+
+
+async def _scheduler_stripe_retry():
+    """Retry failed Stripe billing events every 5 minutes, up to 3 attempts."""
+    while True:
+        try:
+            await asyncio.sleep(300)  # 5 minutes
+            if not _stripe_retry_queue:
+                continue
+            with _stripe_retry_lock:
+                _to_retry = list(_stripe_retry_queue)
+                _stripe_retry_queue.clear()
+
+            _permanent_failures = 0
+            _retried = 0
+            for item in _to_retry:
+                if item.get("retry_count", 0) >= 3:
+                    _permanent_failures += 1
+                    logger.error("Stripe billing permanent failure after 3 retries: customer=%s", item.get("customer_id"))
+                    continue
+                try:
+                    stripe.billing.MeterEvent.create(
+                        event_name="omega_mem_preflight",
+                        payload={"value": "1", "stripe_customer_id": item["customer_id"]},
+                    )
+                    _retried += 1
+                except Exception:
+                    item["retry_count"] = item.get("retry_count", 0) + 1
+                    with _stripe_retry_lock:
+                        _stripe_retry_queue.append(item)
+
+            if _retried or _permanent_failures:
+                logger.info("Stripe retry: %d retried, %d permanent failures, %d remaining",
+                            _retried, _permanent_failures, len(_stripe_retry_queue))
+        except Exception as e:
+            logger.error("Scheduler stripe_retry error: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -722,6 +838,12 @@ def scheduler_status(key_record: dict = Depends(verify_api_key)):
             "daily_snapshot": {
                 "interval": "24h (02:00 UTC)",
                 "last_run": _scheduler_status.get("daily_snapshot", "not_run_yet"),
+                "status": "running",
+            },
+            "stripe_retry": {
+                "interval": "5m",
+                "queue_length": len(_stripe_retry_queue),
+                "oldest_failed": min((e.get("failed_at", 0) for e in _stripe_retry_queue), default=None),
                 "status": "running",
             },
         },
@@ -1387,6 +1509,7 @@ def register_memory(req: RegistryRegisterRequest, key_record: dict = Depends(ver
         "registered_at": now, "valid_until": now + 86400, "status": "VERIFIED",
         "api_key_id": _safe_key_hash(key_record)[:16],
     }
+    _evict_if_full(_registry, "_registry")
     _registry[req.agent_id] = entry
     redis_set(f"registry:{req.agent_id}", entry, ttl=86400)
     return entry
@@ -1529,6 +1652,7 @@ def configure_webhook(req: WebhookConfigRequest, key_record: dict = Depends(veri
     _validate_webhook_url(req.webhook_url)
     _kh = _safe_key_hash(key_record)
     config = {"webhook_url": req.webhook_url, "events": req.events, "configured_at": _time.time()}
+    _evict_if_full(_webhook_configs, "_webhook_configs")
     _webhook_configs[_kh] = config
     redis_set(f"webhook_config:{_kh}", config, ttl=86400 * 90)
     return {"configured": True, "webhook_url": req.webhook_url, "events": req.events}
@@ -5559,6 +5683,7 @@ def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api
                "z3_proof": _z3_proof, "explanation": f"Winner has omega={scored[0]['omega']:.1f}, most reliable by {len(scored)} entry analysis",
                "overridable": False, "authority": "formal_verification",
                "created_at": datetime.now(timezone.utc).isoformat()}
+    _evict_if_full(_court_verdicts, "_court_verdicts")
     _court_verdicts[vid] = verdict
     _persist_store(f"court_verdict:{vid}", verdict, ttl=90*86400)
     return verdict
@@ -5618,6 +5743,7 @@ def create_commons(req: CommonsCreateRequest, key_record: dict = Depends(verify_
         raise HTTPException(status_code=403, detail="Memory Commons requires enterprise tier")
     cid = str(uuid.uuid4())
     kh_c = _safe_key_hash(key_record)
+    _evict_if_full(_commons, "_commons")
     _commons[cid] = {"commons_id": cid, "name": req.name, "description": req.description,
                       "created_at": datetime.now(timezone.utc).isoformat(),
                       "key_hash": kh_c}
@@ -5708,6 +5834,7 @@ def _check_predictive_alert(kh: str, agent_id: str, first_block_day):
     """Create or resolve predictive alerts based on forecast."""
     ak = f"{kh}:{agent_id}"
     if first_block_day is not None and first_block_day <= 3:
+        _evict_if_full(_predictive_alerts, "_predictive_alerts")
         _predictive_alerts[ak] = {"agent_id": agent_id, "first_block_day": first_block_day,
             "status": "active", "created_at": datetime.now(timezone.utc).isoformat()}
         # Webhook
@@ -5750,6 +5877,7 @@ def truth_subscribe(req: TruthSubscribeRequest, key_record: dict = Depends(verif
     if my_subs >= 100:
         raise HTTPException(status_code=400, detail="Maximum 100 active subscriptions per API key")
     sid = str(uuid.uuid4())
+    _evict_if_full(_truth_subs, "_truth_subs")
     _truth_subs[sid] = {"id": sid, "source_url": req.source_url, "key_hash": kh,
         "check_interval_hours": req.check_interval_hours,
         "invalidation_action": req.invalidation_action,
@@ -10473,16 +10601,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     request_id = str(uuid.uuid4())
     outcome_id = str(uuid.uuid4())
 
-    # Probabilistic cleanup of in-memory dicts (1% chance per call)
-    import random as _cleanup_rnd
-    if _cleanup_rnd.random() < 0.01:
-        _cutoff = _time.time() - 3600  # 1 hour
-        expired = [k for k, v in _outcomes.items() if v.get("_ts", 0) < _cutoff]
-        for k in expired[:100]:
-            _outcomes.pop(k, None)
-        expired_jobs = [k for k, v in _async_preflight_jobs.items() if v.get("created_at", 0) < _cutoff]
-        for k in expired_jobs[:100]:
-            _async_preflight_jobs.pop(k, None)
+    # Time-based cleanup (#376) — runs every 5 minutes, replaces probabilistic 1% per call
+    _run_periodic_cleanup()
+    # Also clean _outcomes (TTL 1h) and _async_preflight_jobs (TTL 1h)
+    _cutoff = _time.time() - 3600
+    expired = [k for k, v in _outcomes.items() if v.get("_ts", 0) < _cutoff]
+    for k in expired[:200]:
+        _outcomes.pop(k, None)
+    expired_jobs = [k for k, v in _async_preflight_jobs.items() if v.get("created_at", 0) < _cutoff]
+    for k in expired_jobs[:200]:
+        _async_preflight_jobs.pop(k, None)
 
     with _outcomes_lock:
         _evict_if_full(_outcomes, "_outcomes")
@@ -10539,6 +10667,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             )
         except Exception as e:
             logger.error("Stripe billing meter event failed: %s", e)
+            # Enqueue for retry (#375)
+            with _stripe_retry_lock:
+                if len(_stripe_retry_queue) < 1000:  # cap queue
+                    _stripe_retry_queue.append({
+                        "customer_id": key_record["customer_id"],
+                        "retry_count": 0,
+                        "failed_at": _time.time(),
+                    })
 
     # Use service_client (bypasses RLS) with anon fallback; non-critical write
     _ledger_sb = supabase_service_client or supabase_client
