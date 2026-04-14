@@ -71,13 +71,14 @@ python3 tests/corpus/run_all.py
 ```
 
 ### Baseline — do not drop below:
-- pytest: 2,178+ passing
-- Corpus total: 614 baseline (Rounds 1-8) + 216 adversarial = 830 total validated cases
+- pytest: 2,228+ passing
+- Corpus total: 614 baseline (Rounds 1-8) + 216 adversarial + 120 Round 9 = 950 total validated cases
   - Rounds 1-4: 329/329 (Joint: 60, Sponsored: 60, Subtle: 59, Hallucination: 60, Propagation: 90)
   - Round 5 — Consensus Poisoning: 45/45
   - Round 6 — Memory Time Attack: 60/60
   - Round 7 — Identity Drift: 90/90
   - Round 8 — Consensus Collapse: 90/90
+  - Round 9 — Federated Memory Poisoning: 120/120
 
 ### Scoring weight note:
 - `s_recovery` has **negative weight** (-0.10) — recovery capability *reduces* risk. This is intentional.
@@ -88,10 +89,15 @@ python3 tests/corpus/run_all.py
 - **corpus**: only when scoring logic changes
 - **NEVER run for**: frontend, docs, SDK, README changes
 
-### Test files (28 files, 2,178+ tests):
+### Test files (33 files, 2,228+ tests):
 - `test_scoring.py` — Core scoring engine (1840+ tests)
 - `test_security_audit.py` — Cross-tenant isolation, SSRF, secrets, quota enforcement (27 tests)
 - `test_batch3_audit.py` — Weight bounds, determinism, untested modules + endpoints (35 tests)
+- `test_new_preflight_fields.py` — days_until_block, confidence_calibration, signal_vector_logged (12 tests)
+- `test_heal_roi_knowledge_fleet.py` — heal_roi, knowledge_age_days, fleet_health_distance (11 tests)
+- `test_complexity_cost_asymmetry.py` — memory_complexity_trend, decision_cost_asymmetry (10 tests)
+- `test_spof_monoculture.py` — single_point_of_failure, monoculture_risk_score (9 tests)
+- `test_insights_endpoint.py` — GET /v1/insights endpoint (8 tests)
 - `test_api_key_cache.py` — Redis-cached API key validation
 - `test_alias_fields.py` — heal_decision and stability_gauge alias fields
 - `test_audit_log.py` — Audit log write correctness
@@ -133,6 +139,16 @@ python3 tests/corpus/run_all.py
 
 **Round 5** (45 cases, `tests/corpus/`):
 - `round5_consensus_poisoning.py` — 45 cases: fabricated historical, cross-stack identity, timestamp-invariant compound
+
+**Round 9 — Federated Memory Poisoning** (120 cases, `tests/corpus/`):
+- `round9_federated_poisoning.json` — 120 cases across 4 vectors:
+  - Provenance erosion (30): trust eroded across 2-4 federation hops
+  - Identity hijack (30): identity attributes morphed across federation sync
+  - Consensus bleed (30): minority poisoned subset bleeds into consensus under partial sync
+  - Tier-3 rewrites (30): retroactive fact modifications surviving federation without divergence flags
+- `scripts/generate_round9_corpus.py` — corpus generator
+- `scripts/run_round9_corpus.py` — runner + F1 scoring (F1=1.000, FP=0.0%)
+- Detection hardening: PATTERN 5 (federation provenance asymmetry) + PATTERN 5b (federation topic injection) in `_check_consensus_collapse`
 
 **Adversarial compound corpus** (216 cases, `tests/corpus/`):
 - `generate_adversarial.py` — generates 3×6×4×3 = 216 compound attack cases combining R6+R7+R8 patterns
