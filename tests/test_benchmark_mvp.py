@@ -27,8 +27,12 @@ class TestBenchmarkRun:
         })
         j = r.json()
         assert j["total_cases"] == 120
-        # Scoring engine alone catches ~85%+; full preflight with detection layers catches 100%
-        assert j["overall_f1"] >= 0.8
+        assert j["overall_f1"] == 1.0  # Full preflight with detection layers
+
+    def test_run_all_rounds_f1(self):
+        r = client.post("/v1/benchmark/run", headers=AUTH, json={"store_results": False})
+        j = r.json()
+        assert j["overall_f1"] >= 0.99  # Allow 1-2 threshold edge cases
 
     def test_run_has_rounds_breakdown(self):
         r = client.post("/v1/benchmark/run", headers=AUTH, json={

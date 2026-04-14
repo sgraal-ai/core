@@ -7255,7 +7255,7 @@ def _load_benchmark_corpus(rounds: list = None) -> list:
                                   "action_type": inp.get("action_type", "reversible"),
                                   "id": c.get("test_id", "")})
 
-    # Rounds 2-4 (sponsored, subtle, hallucination, propagation): expected in .sgraal_output.recommended_action
+    # Rounds 2-4 (sponsored, subtle, hallucination): prefer ground_truth, fallback to sgraal_output
     _round_files = [
         (2, "sgraal_grok_sponsored_drift_corpus.jsonl"),
         (3, "sgraal_grok_subtle_drift_corpus.jsonl"),
@@ -7273,15 +7273,17 @@ def _load_benchmark_corpus(rounds: list = None) -> list:
                     continue
                 c = _json.loads(line)
                 ms = c.get("memory_state", [])
+                gt = c.get("ground_truth", {})
                 out = c.get("sgraal_output", {})
-                if ms:
+                _exp = gt.get("recommended_action") or gt.get("expected_action") or out.get("recommended_action")
+                if ms and _exp:
                     cases.append({"round": rnd, "memory_state": ms,
-                                  "expected_decision": out.get("recommended_action", "BLOCK"),
+                                  "expected_decision": _exp,
                                   "domain": c.get("domain", "general"),
                                   "action_type": c.get("action_type", "reversible"),
                                   "id": c.get("test_id", "")})
 
-    # Round 4b (propagation)
+    # Round 4b (propagation) — expected in ground_truth.expected_action
     if not rounds or 4 in rounds:
         fp = os.path.join(_base, "tests", "sgraal_grok_propagation_corpus.jsonl")
         if os.path.exists(fp):
@@ -7291,10 +7293,12 @@ def _load_benchmark_corpus(rounds: list = None) -> list:
                         continue
                     c = _json.loads(line)
                     ms = c.get("memory_state", [])
+                    gt = c.get("ground_truth", {})
                     out = c.get("sgraal_output", {})
-                    if ms:
+                    _exp = gt.get("expected_action") or out.get("recommended_action")
+                    if ms and _exp:
                         cases.append({"round": 4, "memory_state": ms,
-                                      "expected_decision": out.get("recommended_action", "BLOCK"),
+                                      "expected_decision": _exp,
                                       "domain": c.get("domain", "general"),
                                       "action_type": c.get("action_type", "reversible"),
                                       "id": c.get("test_id", "")})
@@ -7335,7 +7339,18 @@ def benchmark_run(req: BenchmarkRunRequest, key_record: dict = Depends(verify_ap
     if not cases:
         return {"error": "No corpus cases found", "total_cases": 0}
 
-    # Run each case through the scoring engine
+    # Run each case through the FULL preflight path (includes detection layers)
+    from fastapi.testclient import TestClient as _BenchClient
+    _bc = _BenchClient(app)
+    # Find a usable API key for internal calls
+    _bench_key = None
+    for _ak in API_KEYS:
+        _bench_key = _ak
+        break
+    if not _bench_key:
+        _bench_key = "sg_test_key_001"
+    _bench_auth = {"Authorization": f"Bearer {_bench_key}"}
+
     round_results: dict = {}
     for case in cases:
         rnd = case["round"]
@@ -7345,21 +7360,16 @@ def benchmark_run(req: BenchmarkRunRequest, key_record: dict = Depends(verify_ap
         rr["total"] += 1
 
         try:
-            ms = case["memory_state"]
-            es = [MemoryEntry(
-                id=e.get("id", f"bench_{rr['total']}"),
-                content=e.get("content", ""),
-                type=e.get("type", "semantic"),
-                timestamp_age_days=e.get("timestamp_age_days") or e.get("age_days") or 0,
-                source_trust=e.get("source_trust", 0.9),
-                source_conflict=e.get("source_conflict", 0.1),
-                downstream_count=e.get("downstream_count", 1),
-                r_belief=e.get("r_belief", 0.5),
-            ) for e in ms]
-            if not es:
-                continue
-            result = compute(es, case.get("action_type", "reversible"), case.get("domain", "general"))
-            actual = result.recommended_action
+            _pf_resp = _bc.post("/v1/preflight", headers=_bench_auth, json={
+                "memory_state": case["memory_state"],
+                "action_type": case.get("action_type", "reversible"),
+                "domain": case.get("domain", "general"),
+                "dry_run": True,
+            })
+            if _pf_resp.status_code == 200:
+                actual = _pf_resp.json().get("recommended_action", "USE_MEMORY")
+            else:
+                actual = "ERROR"
         except Exception:
             actual = "ERROR"
 
