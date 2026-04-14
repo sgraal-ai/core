@@ -251,11 +251,12 @@ export default function DashboardHome() {
     );
   }
 
-  const total = agents.length;
-  const blocked = agents.filter((a) => a.recommended_action === "BLOCK").length;
-  const warned = agents.filter((a) => ["WARN", "ASK_USER"].includes(a.recommended_action)).length;
-  const healthy = agents.filter((a) => a.recommended_action === "USE_MEMORY").length;
-  const avgOmega = total > 0 ? Math.round(agents.reduce((s, a) => s + a.omega_mem_final, 0) / total * 10) / 10 : 0;
+  const realAgents = agents.filter((a) => _isRealAgentId(a.id));
+  const total = realAgents.length;
+  const blocked = realAgents.filter((a) => a.recommended_action === "BLOCK").length;
+  const warned = realAgents.filter((a) => ["WARN", "ASK_USER"].includes(a.recommended_action)).length;
+  const healthy = realAgents.filter((a) => a.recommended_action === "USE_MEMORY").length;
+  const avgOmega = total > 0 ? Math.round(realAgents.reduce((s, a) => s + a.omega_mem_final, 0) / total * 10) / 10 : 0;
 
   return (
     <div>
@@ -310,8 +311,8 @@ export default function DashboardHome() {
       </div>
 
       {(() => {
-        const avgStability = total > 0 ? agents.reduce((s, a) => s + (a.stability_score?.score ?? 0), 0) / total : 0;
-        const avgRTotal = total > 0 ? agents.reduce((s, a) => s + (a.r_total_normalized ?? 0), 0) / total : 0;
+        const avgStability = total > 0 ? realAgents.reduce((s, a) => s + (a.stability_score?.score ?? 0), 0) / total : 0;
+        const avgRTotal = total > 0 ? realAgents.reduce((s, a) => s + (a.r_total_normalized ?? 0), 0) / total : 0;
         const stabColor = avgStability > 0.7 ? "text-green-400" : avgStability >= 0.4 ? "text-yellow-400" : "text-red-400";
         const rColor = avgRTotal > 3 ? "bg-green-400" : avgRTotal > 1.5 ? "bg-yellow-400" : "bg-red-400";
         const rTextColor = avgRTotal > 3 ? "text-green-400" : avgRTotal > 1.5 ? "text-yellow-400" : "text-red-400";
