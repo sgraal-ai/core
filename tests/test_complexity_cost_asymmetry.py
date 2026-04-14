@@ -124,9 +124,12 @@ class TestDecisionCostAsymmetry:
         assert isinstance(dca["cost_adjusted_decision"], bool)
         if dca["cost_adjusted_decision"]:
             assert dca["adjusted_threshold_warn"] == 20
-            assert dca["adjusted_threshold_block"] == 60
+            assert dca["adjusted_threshold_block"] in (60, 65)  # Tier 1: 60 (CVaR), Tier 2: 65 (domain-risk)
             assert dca["original_recommended_action"] is not None
-            assert dca["cost_adjustment_reason"] == "high CVaR on irreversible action"
+            assert dca["cost_adjustment_reason"] in (
+                "high CVaR on irreversible action",
+                "high-risk domain + irreversible action (no CVaR history available)",
+            )
 
     def test_adjusted_action_overrides_response(self):
         """When cost-adjusted, response recommended_action should use adjusted thresholds."""

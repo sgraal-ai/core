@@ -14246,19 +14246,29 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # -----------------------------------------------------------------------
     _cvar_data = response.get("cvar_risk")
     _cvar_val = _cvar_data.get("cvar_5", 0) if isinstance(_cvar_data, dict) else 0
+    _cvar_available = isinstance(_cvar_data, dict) and _cvar_data.get("cvar_5") is not None
     _high_cost_action = req.action_type in ("irreversible", "destructive")
+    _high_risk_domain = req.domain in ("medical", "fintech", "legal")
     _cost_adjusted = False
     _cost_reason = None
     _orig_action = None
     _adj_warn = None
     _adj_block = None
-    if _high_cost_action and _cvar_val > 0.6:
+    # Tier 1: CVaR-based (requires 10+ history)
+    if _high_cost_action and _cvar_available and _cvar_val > 0.6:
         _cost_adjusted = True
         _cost_reason = "high CVaR on irreversible action"
         _adj_warn = 20
         _adj_block = 60
+    # Tier 2: Domain-risk-based (no CVaR history available)
+    elif _high_cost_action and _high_risk_domain and not _cvar_available and omega_out > 40:
+        _cost_adjusted = True
+        _cost_reason = "high-risk domain + irreversible action (no CVaR history available)"
+        _adj_warn = 20
+        _adj_block = 65
+    # Recompute decision with adjusted thresholds (both tiers)
+    if _cost_adjusted:
         _orig_action = response["recommended_action"]
-        # Recompute decision with adjusted thresholds
         if omega_out >= _adj_block:
             _new_action = "BLOCK"
         elif omega_out >= 45:
