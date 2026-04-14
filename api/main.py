@@ -6816,6 +6816,213 @@ def analytics_cost(group_by: str = "team", key_record: dict = Depends(verify_api
 def cost_forecast(key_record: dict = Depends(verify_api_key)):
     return {"forecast_30_days": 0, "trend": "stable", "current_monthly": 0}
 
+# ---- Analytics: Decision Entropy, Module Health, Temporal Patterns ----
+
+@app.get("/v1/analytics/decision-entropy")
+def analytics_decision_entropy(agent_id: str = Query(""), days: int = Query(30), key_record: dict = Depends(verify_api_key)):
+    """Compute Shannon entropy and transition matrix of an agent's decision sequence."""
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id is required")
+
+    # Collect decisions from outcomes
+    decisions = []
+    cutoff = _time.time() - days * 86400
+    for _oid, _od in list(_outcomes.items()):
+        if _od.get("agent_id") == agent_id and _od.get("_ts", 0) > cutoff:
+            act = _od.get("recommended_action", "USE_MEMORY")
+            decisions.append(act)
+
+    # Also check audit_log via Supabase
+    if supabase_service_client and len(decisions) < 5:
+        try:
+            _kh = _safe_key_hash(key_record)
+            r = supabase_service_client.table("audit_log").select("decision").eq("agent_id", agent_id).order("created_at", desc=True).limit(200).execute()
+            if r.data:
+                for row in reversed(r.data):
+                    d = row.get("decision")
+                    if d and d in ("USE_MEMORY", "WARN", "ASK_USER", "BLOCK"):
+                        decisions.append(d)
+        except Exception:
+            pass
+
+    n = len(decisions)
+    if n < 2:
+        return {"agent_id": agent_id, "decision_entropy": None, "entropy_level": None,
+                "sample_size": n, "message": "Insufficient data (need 2+ decisions)"}
+
+    # Shannon entropy
+    _d_set = ["USE_MEMORY", "WARN", "ASK_USER", "BLOCK"]
+    counts = {d: decisions.count(d) for d in _d_set}
+    entropy = 0.0
+    for d in _d_set:
+        p = counts[d] / n
+        if p > 0:
+            entropy -= p * math.log2(p)
+    entropy = round(entropy, 3)
+    entropy_level = "LOW" if entropy < 0.5 else "HIGH" if entropy > 1.5 else "MEDIUM"
+
+    # Transition matrix
+    trans = {d: {d2: 0 for d2 in _d_set} for d in _d_set}
+    for i in range(len(decisions) - 1):
+        fr, to = decisions[i], decisions[i + 1]
+        if fr in trans and to in trans[fr]:
+            trans[fr][to] += 1
+    # Normalize
+    for fr in _d_set:
+        row_sum = sum(trans[fr].values())
+        if row_sum > 0:
+            trans[fr] = {to: round(v / row_sum, 3) for to, v in trans[fr].items()}
+
+    # Longest run
+    max_run = 1
+    max_run_decision = decisions[0]
+    cur_run = 1
+    for i in range(1, n):
+        if decisions[i] == decisions[i - 1]:
+            cur_run += 1
+            if cur_run > max_run:
+                max_run = cur_run
+                max_run_decision = decisions[i]
+        else:
+            cur_run = 1
+
+    # Decision velocity (slope of numeric encoding over time)
+    _score_map = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
+    scores = [_score_map.get(d, 0) for d in decisions]
+    if n >= 3:
+        _mean_x = (n - 1) / 2
+        _mean_y = sum(scores) / n
+        _num = sum((i - _mean_x) * (scores[i] - _mean_y) for i in range(n))
+        _den = sum((i - _mean_x) ** 2 for i in range(n))
+        velocity = round(_num / _den, 4) if _den > 0 else 0.0
+    else:
+        velocity = 0.0
+
+    most_common = max(_d_set, key=lambda d: counts[d])
+
+    return {
+        "agent_id": agent_id,
+        "decision_entropy": entropy,
+        "entropy_level": entropy_level,
+        "transition_matrix": trans,
+        "decision_runs": {"max_run": max_run, "decision": max_run_decision},
+        "decision_velocity": velocity,
+        "most_common_decision": most_common,
+        "sample_size": n,
+    }
+
+
+@app.get("/v1/analytics/module-health")
+def analytics_module_health(key_record: dict = Depends(verify_api_key)):
+    """Aggregate module activation data across recent preflight calls."""
+    _modules = ["s_freshness", "s_drift", "s_provenance", "s_propagation", "r_recall",
+                "r_encode", "s_interference", "s_recovery", "r_belief", "s_relevance"]
+
+    # Collect component breakdowns from recent outcomes
+    breakdowns = []
+    cutoff = _time.time() - 86400  # 24h
+    for _oid, _od in list(_outcomes.items()):
+        if _od.get("_ts", 0) > cutoff:
+            cb = _od.get("component_breakdown")
+            if isinstance(cb, dict):
+                breakdowns.append(cb)
+
+    total_calls = len(breakdowns)
+    modules_out = []
+    inactive = []
+
+    for mod in _modules:
+        vals = [cb.get(mod, 0) for cb in breakdowns]
+        active_vals = [v for v in vals if v is not None and v != 0]
+        act_rate = len(active_vals) / max(total_calls, 1)
+        null_rate = 1.0 - act_rate
+        mean_val = sum(active_vals) / max(len(active_vals), 1) if active_vals else 0
+        std_val = 0.0
+        if len(active_vals) > 1:
+            std_val = math.sqrt(sum((v - mean_val) ** 2 for v in active_vals) / (len(active_vals) - 1))
+
+        modules_out.append({
+            "module": mod,
+            "activation_rate": round(act_rate, 3),
+            "null_rate": round(null_rate, 3),
+            "mean_value": round(mean_val, 1),
+            "std_value": round(std_val, 1),
+            "last_active": datetime.now(timezone.utc).isoformat() if active_vals else None,
+        })
+        if act_rate < 0.05:
+            inactive.append(mod)
+
+    return {
+        "period_hours": 24,
+        "total_calls": total_calls,
+        "modules": modules_out,
+        "inactive_modules": inactive,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/v1/analytics/temporal-patterns")
+def analytics_temporal_patterns(days: int = Query(7), key_record: dict = Depends(verify_api_key)):
+    """Analyze omega and decision distributions by time-of-day and day-of-week."""
+    _day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    # Collect from outcomes
+    hourly_omegas: dict[int, list[float]] = {h: [] for h in range(24)}
+    daily_omegas: dict[int, list[float]] = {d: [] for d in range(7)}
+    hourly_blocks: dict[int, list[bool]] = {h: [] for h in range(24)}
+    cutoff = _time.time() - days * 86400
+
+    for _oid, _od in list(_outcomes.items()):
+        ts = _od.get("_ts", 0)
+        if ts < cutoff:
+            continue
+        omega = _od.get("omega_mem_final")
+        action = _od.get("recommended_action")
+        if omega is None:
+            continue
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        h = dt.hour
+        d = dt.weekday()
+        hourly_omegas[h].append(omega)
+        daily_omegas[d].append(omega)
+        hourly_blocks[h].append(action == "BLOCK")
+
+    total_calls = sum(len(v) for v in hourly_omegas.values())
+
+    if total_calls < 3:
+        return {"period_days": days, "total_calls": total_calls, "pattern_detected": False,
+                "message": "Insufficient data (need 3+ calls)"}
+
+    ho = {str(h): round(sum(v) / max(len(v), 1), 1) for h, v in hourly_omegas.items()}
+    do_vals = {str(d): round(sum(v) / max(len(v), 1), 1) for d, v in daily_omegas.items()}
+    br = {str(h): round(sum(v) / max(len(v), 1), 3) for h, v in hourly_blocks.items()}
+
+    ho_vals = [v for v in hourly_omegas.values() if v]
+    ho_means = [sum(v) / len(v) for v in ho_vals]
+    peak_hour = max(range(24), key=lambda h: sum(hourly_omegas[h]) / max(len(hourly_omegas[h]), 1))
+    low_hour = min(range(24), key=lambda h: sum(hourly_omegas[h]) / max(len(hourly_omegas[h]), 1) if hourly_omegas[h] else 999)
+
+    do_with_data = {d: v for d, v in daily_omegas.items() if v}
+    peak_day_idx = max(do_with_data, key=lambda d: sum(do_with_data[d]) / len(do_with_data[d])) if do_with_data else 0
+    peak_day = _day_names[peak_day_idx]
+
+    amplitude = (max(ho_means) - min(ho_means)) if ho_means else 0.0
+
+    return {
+        "period_days": days,
+        "total_calls": total_calls,
+        "hourly_omega": ho,
+        "peak_risk_hour": peak_hour,
+        "low_risk_hour": low_hour,
+        "daily_omega": do_vals,
+        "peak_risk_day": peak_day,
+        "block_rate_by_hour": br,
+        "circadian_amplitude": round(amplitude, 1),
+        "pattern_detected": amplitude > 10.0,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # ---- #86 Audit Chain ----
 @app.get("/v1/audit-log/chain-verify")
 def audit_chain_verify(key_record: dict = Depends(verify_api_key)):
