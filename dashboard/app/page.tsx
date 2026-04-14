@@ -19,6 +19,21 @@ export default function DashboardHome() {
   const [errors, setErrors] = useState<string[]>([]);
   const [auditError, setAuditError] = useState("");
 
+  // Fleet Intelligence
+  interface Insight {
+    agent_id: string;
+    available: boolean;
+    reason?: string;
+    insight_summary?: string;
+    days_until_block?: number | null;
+    monoculture_risk_level?: string;
+    confidence_calibration?: { state: string; score: number };
+    omega_mem_final?: number;
+    recommended_action?: string;
+  }
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+
   useEffect(() => {
     setMounted(true);
     const apiKey = getApiKey();
@@ -107,6 +122,36 @@ export default function DashboardHome() {
       setLoading(false);
     })();
   }, []);
+
+  // Fetch insights for all agents once they're loaded
+  async function fetchInsights(agentList: Agent[]) {
+    const apiKey = getApiKey();
+    const apiUrl = getApiUrl();
+    if (!apiKey || agentList.length === 0) return;
+    setInsightsLoading(true);
+    const results: Insight[] = [];
+    await Promise.all(
+      agentList.slice(0, 10).map(async (a) => {
+        try {
+          const res = await fetch(`${apiUrl}/v1/insights?agent_id=${encodeURIComponent(a.id)}&domain=${a.domain}`, {
+            headers: { Authorization: `Bearer ${apiKey}` },
+          });
+          if (res.ok) results.push(await res.json());
+          else results.push({ agent_id: a.id, available: false, reason: "fetch_error" });
+        } catch {
+          results.push({ agent_id: a.id, available: false, reason: "network_error" });
+        }
+      })
+    );
+    setInsights(results);
+    setInsightsLoading(false);
+  }
+
+  useEffect(() => {
+    if (agents.length > 0 && insights.length === 0 && !insightsLoading) {
+      fetchInsights(agents);
+    }
+  }, [agents]);
 
   if (!mounted) return null;
 
@@ -268,6 +313,95 @@ export default function DashboardHome() {
         <h2 className="text-lg font-semibold">{isRealFleet ? "Your Fleet" : "Agent Fleet"}</h2>
         <span className="text-xs text-muted font-mono">Avg Ω_MEM: {avgOmega}</span>
       </div>
+
+      {/* Fleet Intelligence */}
+      {agents.length > 0 && (
+        <div className="mb-10">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold">Fleet Intelligence</h2>
+              <p className="text-xs text-muted">AI-generated insights from your agent memory signals</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => fetchInsights(agents)}
+                disabled={insightsLoading}
+                className="text-xs font-semibold px-3 py-1.5 rounded bg-surface border border-surface-light hover:bg-surface-light transition disabled:opacity-50"
+              >
+                {insightsLoading ? "Loading..." : "Refresh"}
+              </button>
+              <Link href="/analytics" className="text-xs text-gold hover:underline">View all &rarr;</Link>
+            </div>
+          </div>
+          {insightsLoading && insights.length === 0 ? (
+            <div className="grid gap-3">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="bg-surface border border-surface-light rounded-xl p-5 animate-pulse">
+                  <div className="h-4 bg-surface-light rounded w-1/3 mb-3" />
+                  <div className="h-3 bg-surface-light rounded w-2/3" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {insights.slice(0, 10).map((ins) => {
+                const dubColor = ins.days_until_block === null || ins.days_until_block === undefined ? "#6b7280"
+                  : ins.days_until_block === 0 ? "#dc2626"
+                  : (ins.days_until_block ?? 999) < 7 ? "#dc2626"
+                  : (ins.days_until_block ?? 999) < 30 ? "#ca8a04"
+                  : "#16a34a";
+                const dubText = ins.days_until_block === null || ins.days_until_block === undefined ? "—"
+                  : ins.days_until_block === 0 ? "NOW"
+                  : `${ins.days_until_block}d`;
+                const monoColor = ins.monoculture_risk_level === "HIGH" ? "#dc2626"
+                  : ins.monoculture_risk_level === "MEDIUM" ? "#ca8a04" : "#16a34a";
+                const calState = ins.confidence_calibration?.state ?? "CALIBRATED";
+                const calColor = calState === "OVERCONFIDENT" ? "#dc2626"
+                  : calState === "UNDERCONFIDENT" ? "#ca8a04" : "#16a34a";
+                const actColor = ins.recommended_action === "BLOCK" ? "#dc2626"
+                  : ins.recommended_action === "WARN" || ins.recommended_action === "ASK_USER" ? "#ca8a04"
+                  : "#16a34a";
+                return (
+                  <div key={ins.agent_id} className="bg-surface border border-surface-light rounded-xl p-5 hover:border-gold/20 transition">
+                    {!ins.available ? (
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-xs text-muted">{ins.agent_id}</span>
+                        <span className="text-xs text-muted">No recent data</span>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-mono text-xs font-semibold">{ins.agent_id}</span>
+                          <div className="flex items-center gap-2">
+                            {ins.omega_mem_final !== undefined && (
+                              <span className="text-xs font-mono text-muted">Ω {ins.omega_mem_final}</span>
+                            )}
+                            <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded" style={{ background: `${actColor}15`, color: actColor }}>
+                              {ins.recommended_action}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-sm text-foreground mb-3">{ins.insight_summary}</p>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded" style={{ background: `${dubColor}15`, color: dubColor }}>
+                            BLOCK: {dubText}
+                          </span>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded" style={{ background: `${monoColor}15`, color: monoColor }}>
+                            Mono: {ins.monoculture_risk_level ?? "—"}
+                          </span>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded" style={{ background: `${calColor}15`, color: calColor }}>
+                            {calState}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {agents.length === 0 ? (
         <p className="text-muted text-sm">No agents found. Send your first preflight call to see agents here.</p>
