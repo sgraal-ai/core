@@ -106,11 +106,147 @@ def _increment_gsv() -> int:
     return 0
 
 
+import time as _time
+from contextlib import asynccontextmanager
+
+# ---------------------------------------------------------------------------
+# Background Schedulers (TD-1 through TD-3)
+# ---------------------------------------------------------------------------
+
+_scheduler_status: dict[str, str] = {
+    "truth_subscription": "not_started",
+    "sleeper_scan": "not_started",
+    "daily_snapshot": "not_started",
+}
+
+
+async def _scheduler_truth_subscription():
+    """TD-1: Check truth subscriptions every 30 minutes."""
+    while True:
+        try:
+            await asyncio.sleep(1800)  # 30 minutes
+            n_checked = 0
+            n_updated = 0
+            # Fetch subscriptions from in-memory store
+            for sid, sub in list(_feed_subscribers.items()):
+                n_checked += 1
+                feed_id = sub.get("feed_id", "")
+                feed = _feeds.get(feed_id)
+                if feed and feed.get("updated_at", 0) > sub.get("last_checked", 0):
+                    n_updated += 1
+                    sub["last_checked"] = _time.time()
+            _persist_store_bg("scheduler:truth_sub:last_run", datetime.now(timezone.utc).isoformat(), ttl=604800)
+            _scheduler_status["truth_subscription"] = datetime.now(timezone.utc).isoformat()
+            logger.info("Truth subscription check: %d subscriptions checked, %d updates triggered", n_checked, n_updated)
+        except Exception as e:
+            logger.error("Scheduler truth_subscription error: %s", e)
+
+
+async def _scheduler_sleeper_scan():
+    """TD-2: Scan for sleeper agents every 60 minutes."""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # 60 minutes
+            n_checked = 0
+            n_sleeper = 0
+            now = _time.time()
+            # Check outcomes for agents with no recent activity
+            agent_last_seen: dict[str, float] = {}
+            agent_call_count: dict[str, int] = {}
+            for _oid, _od in list(_outcomes.items()):
+                aid = _od.get("agent_id")
+                if not aid:
+                    continue
+                ts = _od.get("_ts", 0)
+                agent_last_seen[aid] = max(agent_last_seen.get(aid, 0), ts)
+                agent_call_count[aid] = agent_call_count.get(aid, 0) + 1
+
+            for aid, last_ts in agent_last_seen.items():
+                n_checked += 1
+                days_since = (now - last_ts) / 86400
+                total_calls = agent_call_count.get(aid, 0)
+                # Sleeper: > 7 days idle AND had >= 5 calls before (was active)
+                if days_since > 7 and total_calls >= 5:
+                    n_sleeper += 1
+                    _predictive_alerts[f"sleeper_{aid}"] = {
+                        "agent_id": aid, "alert_type": "sleeper_detected",
+                        "days_idle": round(days_since, 1), "prior_calls": total_calls,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+
+            _persist_store_bg("scheduler:sleeper_scan:last_run", datetime.now(timezone.utc).isoformat(), ttl=604800)
+            _scheduler_status["sleeper_scan"] = datetime.now(timezone.utc).isoformat()
+            logger.info("Sleeper scan: %d agents checked, %d sleeper patterns found", n_checked, n_sleeper)
+        except Exception as e:
+            logger.error("Scheduler sleeper_scan error: %s", e)
+
+
+async def _scheduler_daily_snapshot():
+    """TD-3: Auto-snapshot all active agents daily at ~02:00 UTC."""
+    while True:
+        try:
+            # Sleep until roughly 02:00 UTC
+            now = datetime.now(timezone.utc)
+            next_run = now.replace(hour=2, minute=0, second=0, microsecond=0)
+            if next_run <= now:
+                next_run += timedelta(days=1)
+            wait_seconds = (next_run - now).total_seconds()
+            await asyncio.sleep(wait_seconds)
+
+            n_snapshotted = 0
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            # Snapshot each agent that has outcomes
+            agent_ids = set()
+            for _oid, _od in list(_outcomes.items()):
+                aid = _od.get("agent_id")
+                if aid:
+                    agent_ids.add(aid)
+
+            for aid in list(agent_ids)[:100]:  # Cap at 100 agents
+                snap_key = f"snapshot:{aid}:{today}"
+                # Find most recent outcome for this agent
+                latest = None
+                for _oid, _od in reversed(list(_outcomes.items())):
+                    if _od.get("agent_id") == aid:
+                        latest = _od
+                        break
+                if latest:
+                    _persist_store_bg(snap_key, {
+                        "agent_id": aid,
+                        "date": today,
+                        "omega_mem_final": latest.get("omega_mem_final"),
+                        "recommended_action": latest.get("recommended_action"),
+                        "domain": latest.get("domain"),
+                        "snapshotted_at": datetime.now(timezone.utc).isoformat(),
+                    }, ttl=604800 * 4)  # 28 days
+                    n_snapshotted += 1
+
+            _persist_store_bg("scheduler:daily_snapshot:last_run", datetime.now(timezone.utc).isoformat(), ttl=604800)
+            _scheduler_status["daily_snapshot"] = datetime.now(timezone.utc).isoformat()
+            logger.info("Daily snapshot: %d agents snapshotted", n_snapshotted)
+        except Exception as e:
+            logger.error("Scheduler daily_snapshot error: %s", e)
+
+
+@asynccontextmanager
+async def _lifespan(app_instance):
+    """Start background schedulers on app startup."""
+    tasks = []
+    tasks.append(asyncio.create_task(_scheduler_truth_subscription()))
+    tasks.append(asyncio.create_task(_scheduler_sleeper_scan()))
+    tasks.append(asyncio.create_task(_scheduler_daily_snapshot()))
+    logger.info("Background schedulers started: truth_subscription (30m), sleeper_scan (60m), daily_snapshot (24h)")
+    yield
+    for t in tasks:
+        t.cancel()
+
+
 app = FastAPI(
     title="Sgraal API",
     version="0.1.0",
     servers=[{"url": "https://api.sgraal.com"}],
     description="Memory governance protocol for AI agents. Quickstart: /docs/quickstart | Compliance: /v1/compliance/docs | Batch scoring: up to 100 entries per call, <10ms p95.",
+    lifespan=_lifespan,
 )
 _ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://sgraal.com,https://www.sgraal.com,https://app.sgraal.com,https://api.sgraal.com,http://localhost:3000").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
@@ -560,12 +696,36 @@ def health():
             redis_health = {"status": "down", "latency_ms": None, "keys_count": 0}
     return {"status": "ok", "port": os.environ.get("PORT", "not set"), "redis": redis_health,
             "ws_streaming_available": True,
-            "truth_subscription_scheduler": _scheduler_state["truth_subscription_scheduler"],
-            "last_truth_check": _scheduler_state["last_truth_check"],
-            "sleeper_scan_scheduler": _scheduler_state["sleeper_scan_scheduler"],
-            "last_sleeper_scan": _scheduler_state["last_sleeper_scan"],
-            "auto_snapshot_scheduler": _scheduler_state["auto_snapshot_scheduler"],
-            "last_auto_snapshot": _scheduler_state["last_auto_snapshot"]}
+            "truth_subscription_scheduler": "running",
+            "last_truth_check": _scheduler_status.get("truth_subscription", "not_run_yet"),
+            "sleeper_scan_scheduler": "running",
+            "last_sleeper_scan": _scheduler_status.get("sleeper_scan", "not_run_yet"),
+            "auto_snapshot_scheduler": "running",
+            "last_auto_snapshot": _scheduler_status.get("daily_snapshot", "not_run_yet")}
+
+
+@app.get("/v1/scheduler/status")
+def scheduler_status(key_record: dict = Depends(verify_api_key)):
+    """Return last-run timestamps for all background schedulers."""
+    return {
+        "jobs": {
+            "truth_subscription_check": {
+                "interval": "30m",
+                "last_run": _scheduler_status.get("truth_subscription", "not_run_yet"),
+                "status": "running",
+            },
+            "sleeper_scan_daily": {
+                "interval": "60m",
+                "last_run": _scheduler_status.get("sleeper_scan", "not_run_yet"),
+                "status": "running",
+            },
+            "daily_snapshot": {
+                "interval": "24h (02:00 UTC)",
+                "last_run": _scheduler_status.get("daily_snapshot", "not_run_yet"),
+                "status": "running",
+            },
+        },
+    }
 
 
 # ---- Memory Vaccination endpoints ----
@@ -594,9 +754,22 @@ def delete_vaccine(signature_id: str, key_record: dict = Depends(verify_api_key)
 @app.get("/v1/compromised-agents")
 def list_compromised_agents(key_record: dict = Depends(verify_api_key)):
     """List currently flagged compromised agent_ids."""
-    agents = redis_get("compromised_agents", [])
-    if not isinstance(agents, list):
-        agents = []
+    agents = []
+    if UPSTASH_REDIS_URL:
+        try:
+            r = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/LRANGE/compromised_agents/0/499",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+            if r.ok:
+                result = r.json().get("result", [])
+                if isinstance(result, list):
+                    agents = list(set(result))  # deduplicate
+        except Exception:
+            pass
+    if not agents:
+        # Fallback to old format (redis_get for backward compat)
+        agents = redis_get("compromised_agents", [])
+        if not isinstance(agents, list):
+            agents = []
     return {"count": len(agents), "agents": agents}
 
 
@@ -2233,11 +2406,11 @@ def heal_counterfactual(req: CounterfactualHealRequest, key_record: dict = Depen
 
 _scheduler_state = {
     "truth_subscription_scheduler": "running",
-    "last_truth_check": None,
+    "last_truth_check": _scheduler_status.get("truth_subscription"),
     "sleeper_scan_scheduler": "running",
-    "last_sleeper_scan": None,
+    "last_sleeper_scan": _scheduler_status.get("sleeper_scan"),
     "auto_snapshot_scheduler": "running",
-    "last_auto_snapshot": None,
+    "last_auto_snapshot": _scheduler_status.get("daily_snapshot"),
 }
 
 
@@ -10460,19 +10633,30 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 response.get("consensus_collapse") == "MANIPULATED" or
                 response.get("provenance_chain_integrity") == "MANIPULATED"
             )
+            # TD-4: Use RPUSH for append-only compromised agent list
             if _any_manip:
-                _comp_agents = _rget("compromised_agents", [])
-                if not isinstance(_comp_agents, list):
-                    _comp_agents = []
-                _added = False
+                _new_agents = []
                 for e in entries:
                     chain = getattr(e, "provenance_chain", None) or []
                     for aid in chain:
-                        if aid and aid not in _comp_agents:
-                            _comp_agents.append(aid)
-                            _added = True
-                if _added:
-                    redis_set("compromised_agents", _comp_agents[:500], ttl=604800)
+                        if aid:
+                            _new_agents.append(aid)
+                for _ca_id in _new_agents:
+                    try:
+                        _get_redis_session().post(
+                            f"{UPSTASH_REDIS_URL}/RPUSH/compromised_agents/{urllib.parse.quote(_ca_id, safe='')}",
+                            headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+                    except Exception:
+                        pass
+                if _new_agents:
+                    # Cap list at 500 and set TTL
+                    try:
+                        _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/compromised_agents/-500/-1",
+                            headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+                        _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/compromised_agents/604800",
+                            headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
