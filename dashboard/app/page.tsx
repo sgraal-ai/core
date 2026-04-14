@@ -10,6 +10,14 @@ import { AgentCard } from "./components/AgentCard";
 import { LoadingSkeleton, ConnectKeyState } from "./components/LoadingSkeleton";
 import { getApiKey, getApiUrl } from "./lib/storage";
 
+function _isRealAgentId(id: string): boolean {
+  if (!id) return false;
+  const lower = id.toLowerCase();
+  if (lower === "unknown" || lower === "anonymous") return false;
+  if (id.startsWith("[") || id.includes("%5B") || id.includes("%5b")) return false;
+  return true;
+}
+
 export default function DashboardHome() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLive, setIsLive] = useState(false);
@@ -410,7 +418,10 @@ export default function DashboardHome() {
             </div>
           ) : (
             <div className="grid gap-3">
-              {insights.slice(0, 10).map((ins) => {
+              {insights.filter(ins => _isRealAgentId(ins.agent_id)).length < 2 && (
+                <p className="text-sm text-muted py-4">Add agents to see Fleet Intelligence insights.</p>
+              )}
+              {insights.filter(ins => _isRealAgentId(ins.agent_id)).slice(0, 10).map((ins) => {
                 const dubColor = ins.days_until_block === null || ins.days_until_block === undefined ? "#6b7280"
                   : ins.days_until_block === 0 ? "#dc2626"
                   : (ins.days_until_block ?? 999) < 7 ? "#dc2626"
@@ -469,11 +480,11 @@ export default function DashboardHome() {
         </div>
       )}
 
-      {agents.length === 0 ? (
+      {agents.filter(a => _isRealAgentId(a.id)).length === 0 ? (
         <p className="text-muted text-sm">No agents found. Send your first preflight call to see agents here.</p>
       ) : (
         <div className="grid gap-4">
-          {agents.map((agent) => (
+          {agents.filter(a => _isRealAgentId(a.id)).map((agent) => (
             <AgentCard key={agent.id} agent={agent} />
           ))}
         </div>
