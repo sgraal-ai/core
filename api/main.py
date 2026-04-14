@@ -13890,4 +13890,42 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["monoculture_risk_score"] = _mono_score
     response["monoculture_risk_level"] = _mono_level
 
+    # -----------------------------------------------------------------------
+    # NEW: Counterfactual → Heal connection (#252)
+    # For each entry, compute omega without it. If removing one entry
+    # reduces omega by > 10 points, suggest it for healing.
+    # -----------------------------------------------------------------------
+    _cf_heal_suggested = False
+    _cf_top_entry = None
+    _cf_top_improvement = 0.0
+    if len(entries) >= 2 and not _is_dry_run:
+        try:
+            _cf_base = result.omega_mem_final
+            for _cf_i, _cf_e in enumerate(entries):
+                _cf_remaining = [e for j, e in enumerate(entries) if j != _cf_i]
+                _cf_result = compute(_cf_remaining, req.action_type, req.domain)
+                _cf_improvement = _cf_base - _cf_result.omega_mem_final
+                if _cf_improvement > _cf_top_improvement:
+                    _cf_top_improvement = _cf_improvement
+                    _cf_top_entry = _cf_e.id
+            if _cf_top_improvement > 10.0 and _cf_top_entry:
+                _cf_heal_suggested = True
+                # Add to repair_plan
+                _rp_list = response.get("repair_plan", [])
+                _rp_list.insert(0, {
+                    "action": "REFETCH",
+                    "entry_id": _cf_top_entry,
+                    "reason": f"counterfactual analysis: removing this entry reduces omega by {round(_cf_top_improvement, 1)} points",
+                    "projected_improvement": round(_cf_top_improvement, 1),
+                    "priority": 1,
+                    "success_probability": 0.85,
+                    "expected_omega_after": round(_cf_base - _cf_top_improvement, 1),
+                    "heal_roi": round(_cf_top_improvement, 2),
+                    "counterfactual_source": True,
+                })
+        except Exception:
+            pass
+    response["counterfactual_heal_suggested"] = _cf_heal_suggested
+    response["counterfactual_top_entry_id"] = _cf_top_entry if _cf_heal_suggested else None
+
     return response
