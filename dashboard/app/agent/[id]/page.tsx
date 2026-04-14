@@ -81,9 +81,10 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       return;
     }
 
+    const _displayId = id.startsWith("[") ? "unknown" : id;
     const demo = DEMO_FLEET.find((d) => d.id === id) ?? {
-      id,
-      name: id.replace(/^agent-/, "").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      id: _displayId,
+      name: _displayId.replace(/^agent-/, "").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
       domain: "general",
       action_type: "reversible",
       memory_state: [{
@@ -206,9 +207,11 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div>
-      <Link href="/" className="text-sm text-muted hover:text-foreground transition mb-6 inline-block">
-        &larr; Back to fleet
-      </Link>
+      <div className="flex items-center gap-2 text-sm text-muted mb-6">
+        <Link href="/" className="hover:text-foreground transition">&larr; Fleet</Link>
+        <span>/</span>
+        <span className="text-foreground font-mono">{agent.id}</span>
+      </div>
 
       {/* Executive Summary */}
       {(() => {
