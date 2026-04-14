@@ -13179,4 +13179,76 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["fleet_health_distance"] = _fhd
     response["fleet_health_distance_available"] = _fhd_available
 
+    # -----------------------------------------------------------------------
+    # NEW: memory_complexity_trend — topological trend over last 3+ calls
+    # -----------------------------------------------------------------------
+    _mct = "UNKNOWN"
+    if not _is_dry_run and _redis_enabled and req.agent_id:
+        try:
+            _topo_key = f"topo_history:{_safe_key_hash(key_record)}:{req.agent_id}"
+            _ph_data = response.get("persistent_homology", {})
+            _sp_data = response.get("spectral_analysis", {})
+            _b0_now = max((b.get("count", 0) for b in _ph_data.get("betti_0", [{"count": 1}])), default=1)
+            _b1_now = max((b.get("count", 0) for b in _ph_data.get("betti_1", [{"count": 0}])), default=0)
+            _fv_now = _sp_data.get("fiedler_value", 0) if isinstance(_sp_data, dict) else 0
+            _topo_now = {"b0": _b0_now, "b1": _b1_now, "fv": round(float(_fv_now), 3)}
+            # Load history
+            _topo_hist = redis_get(_topo_key, [])
+            if not isinstance(_topo_hist, list):
+                _topo_hist = []
+            _topo_hist.append(_topo_now)
+            _topo_hist = _topo_hist[-10:]  # Keep last 10
+            _persist_store_bg(_topo_key, _topo_hist, ttl=604800)
+            if len(_topo_hist) >= 3:
+                _recent = _topo_hist[-3:]
+                _b0_trend = _recent[-1]["b0"] - _recent[0]["b0"]
+                _b1_trend = _recent[-1]["b1"] - _recent[0]["b1"]
+                _fv_trend = _recent[-1]["fv"] - _recent[0]["fv"]
+                if _b1_trend > 0:
+                    _mct = "ECHO_CHAMBER"
+                elif _b0_trend > 0:
+                    _mct = "FRAGMENTING"
+                elif _b0_trend < 0 and _fv_trend > 0:
+                    _mct = "CONSOLIDATING"
+                else:
+                    _mct = "STABLE"
+        except Exception:
+            pass
+    response["memory_complexity_trend"] = _mct
+
+    # -----------------------------------------------------------------------
+    # NEW: decision_cost_asymmetry — stricter thresholds for high-CVaR irreversible actions
+    # -----------------------------------------------------------------------
+    _cvar_data = response.get("cvar_risk")
+    _cvar_val = _cvar_data.get("cvar_5", 0) if isinstance(_cvar_data, dict) else 0
+    _high_cost_action = req.action_type in ("irreversible", "destructive")
+    _cost_adjusted = False
+    _cost_reason = None
+    _orig_action = None
+    _adj_warn = None
+    _adj_block = None
+    if _high_cost_action and _cvar_val > 0.6:
+        _cost_adjusted = True
+        _cost_reason = "high CVaR on irreversible action"
+        _adj_warn = 20
+        _adj_block = 60
+        _orig_action = response["recommended_action"]
+        # Recompute decision with adjusted thresholds
+        if omega_out >= _adj_block:
+            _new_action = "BLOCK"
+        elif omega_out >= 45:
+            _new_action = "ASK_USER"
+        elif omega_out >= _adj_warn:
+            _new_action = "WARN"
+        else:
+            _new_action = "USE_MEMORY"
+        response["recommended_action"] = _new_action
+    response["decision_cost_asymmetry"] = {
+        "cost_adjusted_decision": _cost_adjusted,
+        "cost_adjustment_reason": _cost_reason,
+        "original_recommended_action": _orig_action,
+        "adjusted_threshold_warn": _adj_warn,
+        "adjusted_threshold_block": _adj_block,
+    }
+
     return response
