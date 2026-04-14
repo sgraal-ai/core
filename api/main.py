@@ -9903,6 +9903,63 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         })
         _dispatch_security_event("poisoning_detected", {"agent_id": req.agent_id, "omega": omega_out}, _safe_key_hash(key_record))
 
+    # -----------------------------------------------------------------------
+    # NEW: knowledge_age_days — trust-weighted mean age of memory entries
+    # -----------------------------------------------------------------------
+    if entries:
+        _trust_sum = sum(max(e.source_trust, 0.01) for e in entries)
+        _ka_mean = sum(e.timestamp_age_days * max(e.source_trust, 0.01) for e in entries) / _trust_sum
+        if len(entries) > 1:
+            _ka_var = sum(max(e.source_trust, 0.01) * (e.timestamp_age_days - _ka_mean) ** 2 for e in entries) / _trust_sum
+            _ka_std = round(math.sqrt(max(_ka_var, 0.0)), 1)
+        else:
+            _ka_std = 0.0
+        _ka_mean = round(_ka_mean, 1)
+    else:
+        _ka_mean = None
+        _ka_std = None
+
+    # -----------------------------------------------------------------------
+    # NEW: fleet_health_distance — Mahalanobis distance from healthy fleet mean
+    # -----------------------------------------------------------------------
+    _fhd = None
+    _fhd_available = False
+    if not _is_dry_run and _redis_enabled:
+        try:
+            _fh_raw = redis_get("fleet_health_vectors", None)
+            if isinstance(_fh_raw, list) and len(_fh_raw) >= 50:
+                # Build current vector from component_breakdown
+                _cb_keys = ["s_freshness", "s_drift", "s_provenance", "s_propagation", "r_recall",
+                            "r_encode", "s_interference", "s_recovery", "r_belief", "s_relevance"]
+                _current_vec = [result.component_breakdown.get(k, 0) for k in _cb_keys]
+                # Compute mean of fleet vectors
+                _n_fleet = len(_fh_raw)
+                _fleet_mean = [sum(v[i] for v in _fh_raw) / _n_fleet for i in range(len(_cb_keys))]
+                # Compute covariance matrix (diagonal approximation for speed)
+                _fleet_var = [max(0.01, sum((v[i] - _fleet_mean[i]) ** 2 for v in _fh_raw) / _n_fleet) for i in range(len(_cb_keys))]
+                # Mahalanobis distance (diagonal)
+                _mah_sq = sum((_current_vec[i] - _fleet_mean[i]) ** 2 / _fleet_var[i] for i in range(len(_cb_keys)))
+                _mah_dist = math.sqrt(_mah_sq)
+                # Normalize to 0-1 via sigmoid
+                _fhd = round(min(1.0, 2.0 / (1.0 + math.exp(-_mah_dist / 5.0)) - 1.0), 3)
+                _fhd_available = True
+        except Exception:
+            pass
+        # Store current vector for future fleet health computation (only USE_MEMORY)
+        if _final_action == "USE_MEMORY":
+            try:
+                _fh_vec = [result.component_breakdown.get(k, 0) for k in
+                           ["s_freshness", "s_drift", "s_provenance", "s_propagation", "r_recall",
+                            "r_encode", "s_interference", "s_recovery", "r_belief", "s_relevance"]]
+                _fh_existing = redis_get("fleet_health_vectors", [])
+                if not isinstance(_fh_existing, list):
+                    _fh_existing = []
+                _fh_existing.append(_fh_vec)
+                _fh_existing = _fh_existing[-500:]  # Keep last 500
+                _persist_store_bg("fleet_health_vectors", _fh_existing, ttl=604800)  # 7 days
+            except Exception:
+                pass
+
     response = {
         "omega_mem_final": omega_out,
         "memcube_version": "2.0.0",
@@ -13102,5 +13159,24 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         except Exception:
             pass
     response["signal_vector_logged"] = _sv_logged
+
+    # NEW: heal_roi — ROI per repair plan entry (voi_score / healing_cost)
+    _heal_cost_map = {"REFETCH": 1, "VERIFY_WITH_SOURCE": 2, "VERIFY": 2, "REBUILD_WORKING_SET": 5, "DELETE": 0.5, "WAIT": 0.1}
+    _voi_by_entry = {ir.entry_id: ir.voi_score for ir in importance_results}
+    for _rp_item in response.get("repair_plan", []):
+        _eid_raw = _rp_item.get("entry_id", "")
+        _voi = _voi_by_entry.get(_eid_raw, 0.0)
+        _cost = _heal_cost_map.get(_rp_item.get("action", ""), 1.0)
+        _rp_item["heal_roi"] = round(_voi / max(_cost, 0.01), 2)
+    _rp_list = response.get("repair_plan", [])
+    _rp_list.sort(key=lambda x: x.get("heal_roi", 0), reverse=True)
+    _top_roi_entry = _rp_list[0]["entry_id"] if _rp_list else None
+
+    # New response fields
+    response["top_roi_entry_id"] = _top_roi_entry
+    response["knowledge_age_days"] = _ka_mean
+    response["knowledge_age_std_days"] = _ka_std
+    response["fleet_health_distance"] = _fhd
+    response["fleet_health_distance_available"] = _fhd_available
 
     return response
