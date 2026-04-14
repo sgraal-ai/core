@@ -81,10 +81,9 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       return;
     }
 
-    const _displayId = id.startsWith("[") ? "unknown" : id;
     const demo = DEMO_FLEET.find((d) => d.id === id) ?? {
-      id: _displayId,
-      name: _displayId.replace(/^agent-/, "").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      id,
+      name: id.replace(/^agent-/, "").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
       domain: "general",
       action_type: "reversible",
       memory_state: [{
