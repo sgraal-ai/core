@@ -1696,6 +1696,11 @@ def get_insights(agent_id: str = Query(""), domain: str = Query("general"), key_
     if _mct in ("FRAGMENTING", "ECHO_CHAMBER"):
         _label = "fragmenting into disconnected islands" if _mct == "FRAGMENTING" else "forming echo chambers"
         _insights.append(f"Memory topology is {_label}.")
+    # Override: BLOCK or high omega must always be reflected
+    if _action == "BLOCK" and not any("BLOCK" in s for s in _insights):
+        _insights.insert(0, "Agent is currently BLOCKED. Immediate attention required.")
+    elif _omega > 70 and not any("BLOCK" in s or "critical" in s.lower() for s in _insights):
+        _insights.insert(0, f"Agent omega is critically high ({_omega}).")
     if not _insights:
         _insights.append("Agent memory is healthy. No critical signals detected.")
     _summary = " ".join(_insights)

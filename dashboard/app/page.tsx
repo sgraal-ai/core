@@ -123,8 +123,49 @@ export default function DashboardHome() {
     })();
   }, []);
 
-  // Fetch insights for all agents once they're loaded
-  async function fetchInsights(agentList: Agent[]) {
+  // Build insights from existing agent preflight data (same agent set as fleet cards)
+  function buildInsightsFromAgents(agentList: Agent[]) {
+    setInsightsLoading(true);
+    const results: Insight[] = agentList.slice(0, 10).map((a) => {
+      const omega = a.omega_mem_final ?? 0;
+      const action = a.recommended_action ?? "USE_MEMORY";
+      const isBlock = action === "BLOCK";
+      const isWarn = action === "WARN" || action === "ASK_USER";
+
+      // Build summary from available signals
+      const parts: string[] = [];
+      if (isBlock) {
+        parts.push("Agent is currently BLOCKED. Immediate attention required.");
+      } else if (omega > 70) {
+        parts.push(`Agent omega is critically high (${omega}).`);
+      } else if (isWarn) {
+        parts.push(`Agent requires attention (${action}, omega=${omega}).`);
+      }
+      if (!parts.length) {
+        parts.push("Agent memory is healthy. No critical signals detected.");
+      }
+
+      // Extract calibration from preflight data if available
+      const cal = (a as unknown as Record<string, unknown>).confidence_calibration as
+        { state: string; score: number } | undefined;
+
+      return {
+        agent_id: a.id,
+        available: true,
+        insight_summary: parts.join(" "),
+        days_until_block: (a as unknown as Record<string, unknown>).days_until_block as number | null | undefined,
+        monoculture_risk_level: String((a as unknown as Record<string, unknown>).monoculture_risk_level ?? "LOW"),
+        confidence_calibration: cal ?? { state: "CALIBRATED", score: 0.5 },
+        omega_mem_final: omega,
+        recommended_action: action,
+      };
+    });
+    setInsights(results);
+    setInsightsLoading(false);
+  }
+
+  // Also try fetching from /v1/insights API (enriches with synthesis fields)
+  async function fetchInsightsFromAPI(agentList: Agent[]) {
     const apiKey = getApiKey();
     const apiUrl = getApiUrl();
     if (!apiKey || agentList.length === 0) return;
@@ -136,11 +177,34 @@ export default function DashboardHome() {
           const res = await fetch(`${apiUrl}/v1/insights?agent_id=${encodeURIComponent(a.id)}&domain=${a.domain}`, {
             headers: { Authorization: `Bearer ${apiKey}` },
           });
-          if (res.ok) results.push(await res.json());
-          else results.push({ agent_id: a.id, available: false, reason: "fetch_error" });
-        } catch {
-          results.push({ agent_id: a.id, available: false, reason: "network_error" });
-        }
+          if (res.ok) {
+            const data = await res.json();
+            if (data.available) {
+              // Override summary if BLOCK but summary says healthy
+              if (data.recommended_action === "BLOCK" && data.insight_summary?.includes("healthy")) {
+                data.insight_summary = "Agent is currently BLOCKED. Immediate attention required.";
+              }
+              results.push(data);
+              return;
+            }
+          }
+        } catch {}
+        // Fallback: build from local agent data
+        const omega = a.omega_mem_final ?? 0;
+        const action = a.recommended_action ?? "USE_MEMORY";
+        const summary = action === "BLOCK"
+          ? "Agent is currently BLOCKED. Immediate attention required."
+          : omega > 70
+          ? `Agent omega is critically high (${omega}).`
+          : action !== "USE_MEMORY"
+          ? `Agent requires attention (${action}, omega=${omega}).`
+          : "Agent memory is healthy. No critical signals detected.";
+        results.push({
+          agent_id: a.id, available: true, insight_summary: summary,
+          days_until_block: null, monoculture_risk_level: "LOW",
+          confidence_calibration: { state: "CALIBRATED", score: 0.5 },
+          omega_mem_final: omega, recommended_action: action,
+        });
       })
     );
     setInsights(results);
@@ -149,7 +213,9 @@ export default function DashboardHome() {
 
   useEffect(() => {
     if (agents.length > 0 && insights.length === 0 && !insightsLoading) {
-      fetchInsights(agents);
+      // First: show instant local insights, then enrich from API
+      buildInsightsFromAgents(agents);
+      fetchInsightsFromAPI(agents);
     }
   }, [agents]);
 
@@ -324,7 +390,7 @@ export default function DashboardHome() {
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => fetchInsights(agents)}
+                onClick={() => fetchInsightsFromAPI(agents)}
                 disabled={insightsLoading}
                 className="text-xs font-semibold px-3 py-1.5 rounded bg-surface border border-surface-light hover:bg-surface-light transition disabled:opacity-50"
               >
