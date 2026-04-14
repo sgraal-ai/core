@@ -195,11 +195,12 @@ def compute(
     # r_belief 0.0–1.0 maps to risk 100–0 (inverted)
     r_belief_score = min(100, sum((1 - e.r_belief) * 100 for e in entries) / len(entries))
 
-    # S_relevance: intent-drift detection via cosine similarity
-    # When embeddings are provided, low similarity means the memory
-    # points to an old goal — adds 20 risk points per drifted entry
+    # S_relevance: intent-drift detection
+    # Tier 1: cosine similarity on embeddings (when provided)
+    # Tier 2 (fallback): TF-IDF token similarity between entries (always available)
     s_relevance = 0.0
     if current_goal_embedding is not None:
+        # Tier 1: embedding-based
         drift_penalties = []
         for e in entries:
             if e.prompt_embedding is not None:
@@ -208,6 +209,38 @@ def compute(
                 drift_penalties.append(penalty)
         if drift_penalties:
             s_relevance = min(100, sum(drift_penalties) / len(drift_penalties))
+    elif len(entries) >= 2:
+        # Tier 2: TF-IDF token similarity fallback — detects topical outliers
+        # Build token sets per entry (stopwords filtered, min length 4)
+        _stop = {"this", "that", "with", "have", "from", "they", "them", "then",
+                 "than", "when", "what", "your", "been", "were", "will", "also",
+                 "into", "more", "some", "such", "each", "both", "very", "just",
+                 "the", "and", "for", "are", "not", "but", "was", "has"}
+        _entry_tokens = []
+        for e in entries:
+            tokens = set(w.lower() for w in e.content.split() if len(w) >= 4 and w.lower() not in _stop)
+            _entry_tokens.append(tokens)
+        # Centroid: union of all tokens (document frequency)
+        _all_tokens = set()
+        for t in _entry_tokens:
+            _all_tokens |= t
+        if _all_tokens:
+            # For each entry: Jaccard similarity to centroid of other entries
+            drift_penalties = []
+            for i, tokens_i in enumerate(_entry_tokens):
+                # Reference: tokens from all OTHER entries
+                _others = set()
+                for j, tokens_j in enumerate(_entry_tokens):
+                    if j != i:
+                        _others |= tokens_j
+                if not _others or not tokens_i:
+                    continue
+                _jaccard = len(tokens_i & _others) / len(tokens_i | _others)
+                # Low Jaccard = this entry is topically distant from the rest
+                penalty = 20.0 if _jaccard < 0.15 else (10.0 if _jaccard < 0.3 else 0.0)
+                drift_penalties.append(penalty)
+            if drift_penalties:
+                s_relevance = min(100, sum(drift_penalties) / len(drift_penalties))
 
     # R_importance: PageRank authority (opt-in)
     r_importance = 0.0
