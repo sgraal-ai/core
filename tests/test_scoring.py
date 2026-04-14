@@ -9379,17 +9379,17 @@ class TestSelfHost:
 
 class TestBenchmark:
     def test_endpoint(self):
-        r = client.get("/v1/benchmark/results")
+        r = client.get("/v1/benchmark/results", headers=AUTH)
         assert r.status_code == 200
-    def test_latency(self):
-        r = client.get("/v1/benchmark/results")
-        assert "latency_p50_ms" in r.json() and "latency_p95_ms" in r.json()
-    def test_detection(self):
-        r = client.get("/v1/benchmark/results")
-        assert "detection_rates" in r.json()
-    def test_test_count(self):
-        r = client.get("/v1/benchmark/results")
-        assert r.json()["test_count"] > 0
+    def test_latest(self):
+        r = client.get("/v1/benchmark/results", headers=AUTH)
+        assert "latest" in r.json()
+    def test_history(self):
+        r = client.get("/v1/benchmark/results", headers=AUTH)
+        assert "history" in r.json()
+    def test_trend(self):
+        r = client.get("/v1/benchmark/results", headers=AUTH)
+        assert "trend" in r.json()
 
 class TestFailures:
     def test_endpoint(self):

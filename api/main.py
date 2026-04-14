@@ -7228,11 +7228,251 @@ def reject(approval_id: str, key_record: dict = Depends(verify_api_key)):
     return {"approval_id": approval_id, "status": "rejected"}
 
 # ---- #93 Benchmark ----
+# ---- Multi-Model Benchmark MVP (#204) ----
+
+def _load_benchmark_corpus(rounds: list = None) -> list:
+    """Load corpus cases from all round files. Returns list of {round, memory_state, expected_decision, ...}."""
+    import glob
+    _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cases = []
+
+    # Round 1 (joint): expected in .expected.recommended_action, memory in .input.memory_state
+    for f in glob.glob(os.path.join(_base, "tests", "sgraal_grok_joint_corpus.jsonl")):
+        if rounds and 1 not in rounds:
+            continue
+        with open(f) as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                c = _json.loads(line)
+                inp = c.get("input", {})
+                exp = c.get("expected", {})
+                ms = inp.get("memory_state", [])
+                if ms:
+                    cases.append({"round": 1, "memory_state": ms,
+                                  "expected_decision": exp.get("recommended_action", "USE_MEMORY"),
+                                  "domain": inp.get("domain", "general"),
+                                  "action_type": inp.get("action_type", "reversible"),
+                                  "id": c.get("test_id", "")})
+
+    # Rounds 2-4 (sponsored, subtle, hallucination, propagation): expected in .sgraal_output.recommended_action
+    _round_files = [
+        (2, "sgraal_grok_sponsored_drift_corpus.jsonl"),
+        (3, "sgraal_grok_subtle_drift_corpus.jsonl"),
+        (4, "sgraal_grok_hallucination_corpus.jsonl"),
+    ]
+    for rnd, fname in _round_files:
+        if rounds and rnd not in rounds:
+            continue
+        fp = os.path.join(_base, "tests", fname)
+        if not os.path.exists(fp):
+            continue
+        with open(fp) as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                c = _json.loads(line)
+                ms = c.get("memory_state", [])
+                out = c.get("sgraal_output", {})
+                if ms:
+                    cases.append({"round": rnd, "memory_state": ms,
+                                  "expected_decision": out.get("recommended_action", "BLOCK"),
+                                  "domain": c.get("domain", "general"),
+                                  "action_type": c.get("action_type", "reversible"),
+                                  "id": c.get("test_id", "")})
+
+    # Round 4b (propagation)
+    if not rounds or 4 in rounds:
+        fp = os.path.join(_base, "tests", "sgraal_grok_propagation_corpus.jsonl")
+        if os.path.exists(fp):
+            with open(fp) as fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    c = _json.loads(line)
+                    ms = c.get("memory_state", [])
+                    out = c.get("sgraal_output", {})
+                    if ms:
+                        cases.append({"round": 4, "memory_state": ms,
+                                      "expected_decision": out.get("recommended_action", "BLOCK"),
+                                      "domain": c.get("domain", "general"),
+                                      "action_type": c.get("action_type", "reversible"),
+                                      "id": c.get("test_id", "")})
+
+    # Round 9 (federated poisoning)
+    if not rounds or 9 in rounds:
+        fp = os.path.join(_base, "tests", "corpus", "round9_federated_poisoning.json")
+        if os.path.exists(fp):
+            with open(fp) as fh:
+                data = _json.load(fh)
+            for c in data:
+                cases.append({"round": 9, "memory_state": c.get("memory_state", []),
+                              "expected_decision": c.get("expected_decision", "BLOCK"),
+                              "domain": "fintech", "action_type": "irreversible",
+                              "id": c.get("id", "")})
+
+    return cases
+
+
+class BenchmarkRunRequest(BaseModel):
+    rounds: Optional[list] = None
+    sample_size: Optional[int] = None
+    store_results: bool = True
+
+
+@app.post("/v1/benchmark/run")
+def benchmark_run(req: BenchmarkRunRequest, key_record: dict = Depends(verify_api_key)):
+    """Run benchmark corpus through scoring engine. Returns per-round F1 scores."""
+    _check_rate_limit(key_record)
+    _t0 = _time.monotonic()
+
+    cases = _load_benchmark_corpus(req.rounds)
+    if req.sample_size and req.sample_size < len(cases):
+        import random as _brng
+        _brng.seed(42)
+        cases = _brng.sample(cases, req.sample_size)
+
+    if not cases:
+        return {"error": "No corpus cases found", "total_cases": 0}
+
+    # Run each case through the scoring engine
+    round_results: dict = {}
+    for case in cases:
+        rnd = case["round"]
+        if rnd not in round_results:
+            round_results[rnd] = {"tp": 0, "fp": 0, "fn": 0, "tn": 0, "total": 0}
+        rr = round_results[rnd]
+        rr["total"] += 1
+
+        try:
+            ms = case["memory_state"]
+            es = [MemoryEntry(
+                id=e.get("id", f"bench_{rr['total']}"),
+                content=e.get("content", ""),
+                type=e.get("type", "semantic"),
+                timestamp_age_days=e.get("timestamp_age_days") or e.get("age_days") or 0,
+                source_trust=e.get("source_trust", 0.9),
+                source_conflict=e.get("source_conflict", 0.1),
+                downstream_count=e.get("downstream_count", 1),
+                r_belief=e.get("r_belief", 0.5),
+            ) for e in ms]
+            if not es:
+                continue
+            result = compute(es, case.get("action_type", "reversible"), case.get("domain", "general"))
+            actual = result.recommended_action
+        except Exception:
+            actual = "ERROR"
+
+        expected = case["expected_decision"]
+        # For benchmark: expected is BLOCK or WARN. Detection = got BLOCK/WARN/ASK_USER when expected.
+        expected_positive = expected in ("BLOCK", "WARN", "ASK_USER")
+        actual_positive = actual in ("BLOCK", "WARN", "ASK_USER")
+
+        if expected_positive and actual_positive:
+            rr["tp"] += 1
+        elif expected_positive and not actual_positive:
+            rr["fn"] += 1
+        elif not expected_positive and actual_positive:
+            rr["fp"] += 1
+        else:
+            rr["tn"] += 1
+
+    # Compute per-round metrics
+    rounds_out = {}
+    total_tp = total_fp = total_fn = total_tn = 0
+    for rnd, rr in sorted(round_results.items()):
+        tp, fp, fn, tn = rr["tp"], rr["fp"], rr["fn"], rr["tn"]
+        total_tp += tp; total_fp += fp; total_fn += fn; total_tn += tn
+        prec = tp / max(tp + fp, 1)
+        rec = tp / max(tp + fn, 1)
+        f1 = 2 * prec * rec / max(prec + rec, 0.001)
+        rounds_out[str(rnd)] = {
+            "cases": rr["total"],
+            "f1": round(f1, 4),
+            "precision": round(prec, 4),
+            "recall": round(rec, 4),
+            "detection_rate": round((tp + tn) / max(rr["total"], 1), 4),
+        }
+
+    # Overall
+    o_prec = total_tp / max(total_tp + total_fp, 1)
+    o_rec = total_tp / max(total_tp + total_fn, 1)
+    o_f1 = 2 * o_prec * o_rec / max(o_prec + o_rec, 0.001)
+    o_pass = (total_tp + total_tn) / max(len(cases), 1)
+
+    duration = round((_time.monotonic() - _t0) * 1000, 0)
+    ts_now = datetime.now(timezone.utc).isoformat()
+    bench_id = f"bench_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+
+    # Regression check
+    _prev = redis_get("benchmark:latest")
+    _prev_f1 = _prev.get("overall_f1", 1.0) if isinstance(_prev, dict) else 1.0
+    regression = o_f1 < _prev_f1 - 0.01
+
+    result_obj = {
+        "benchmark_id": bench_id,
+        "timestamp": ts_now,
+        "total_cases": len(cases),
+        "overall_f1": round(o_f1, 4),
+        "overall_precision": round(o_prec, 4),
+        "overall_recall": round(o_rec, 4),
+        "overall_pass_rate": round(o_pass, 4),
+        "rounds": rounds_out,
+        "duration_ms": duration,
+        "regression_detected": regression,
+        "previous_f1": round(_prev_f1, 4),
+    }
+
+    # Store results
+    if req.store_results:
+        _persist_store_bg(f"benchmark:history:{ts_now}", result_obj, ttl=7776000)  # 90 days
+        _persist_store_bg("benchmark:latest", result_obj, ttl=0)
+
+    return result_obj
+
+
 @app.get("/v1/benchmark/results")
-def benchmark_results():
-    return {"latency_p50_ms": 5, "latency_p95_ms": 10, "latency_p99_ms": 25,
-            "detection_rates": {"stale_memory": 0.98, "conflict": 0.95, "drift": 0.92, "poisoning": 0.87},
-            "test_count": 1189, "uptime_30d": 99.95}
+def benchmark_results(key_record: dict = Depends(verify_api_key)):
+    """Return latest benchmark results and history."""
+    latest = redis_get("benchmark:latest")
+    if not isinstance(latest, dict):
+        latest = None
+
+    # Try loading a few recent history entries
+    history = []
+    if latest:
+        history.append({"timestamp": latest.get("timestamp"), "f1": latest.get("overall_f1"),
+                        "cases": latest.get("total_cases")})
+
+    # Determine trend
+    trend = "stable"
+    if len(history) >= 2:
+        f1s = [h["f1"] for h in history if h.get("f1") is not None]
+        if len(f1s) >= 2:
+            trend = "improving" if f1s[-1] > f1s[0] else "degrading" if f1s[-1] < f1s[0] else "stable"
+
+    return {
+        "latest": latest,
+        "history": history,
+        "trend": trend,
+    }
+
+
+@app.get("/v1/benchmark/status")
+def benchmark_status(key_record: dict = Depends(verify_api_key)):
+    """Quick health check: corpus loaded, last run, regression status."""
+    cases = _load_benchmark_corpus()
+    rounds_available = sorted(set(c["round"] for c in cases))
+    latest = redis_get("benchmark:latest")
+    return {
+        "corpus_loaded": len(cases) > 0,
+        "total_corpus_cases": len(cases),
+        "rounds_available": rounds_available,
+        "last_run": latest.get("timestamp") if isinstance(latest, dict) else None,
+        "last_f1": latest.get("overall_f1") if isinstance(latest, dict) else None,
+        "regression_detected": latest.get("regression_detected", False) if isinstance(latest, dict) else False,
+    }
+
 
 # ---- #95 Failure Gallery ----
 @app.get("/v1/failures/examples")
