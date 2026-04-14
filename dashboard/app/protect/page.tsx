@@ -337,7 +337,7 @@ export default function ProtectPage() {
                 {dubConf != null && <p className="text-xs text-muted mt-1">{Math.round(dubConf * 100)}% confidence</p>}
               </div>
             </div>
-            <p className="text-xs text-muted mt-3">Estimated using Ornstein-Uhlenbeck, Cox hazard, Kalman trend, and BOCPD changepoint detection.</p>
+            <p className="text-xs text-muted mt-3">Estimated using multiple independent forecasting models.</p>
           </div>
         );
       })()}

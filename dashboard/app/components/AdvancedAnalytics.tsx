@@ -124,6 +124,11 @@ export function AdvancedAnalytics({
           <p className="text-xs text-muted mt-2 font-mono">
             Monitoring: {mewma.monitored_components.join(", ")}
           </p>
+          {mewma.out_of_control && (
+            <p className="text-xs mt-2" style={{ color: "#6b7280", fontStyle: "italic" }}>
+              MEWMA monitors multivariate signal patterns independently of the overall omega score. OUT OF CONTROL indicates unusual signal combinations, not necessarily unsafe memory.
+            </p>
+          )}
         </div>
       )}
     </div>

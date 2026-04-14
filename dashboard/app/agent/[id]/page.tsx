@@ -22,7 +22,8 @@ const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
 };
 
 export default function AgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+  const { id: rawId } = use(params);
+  const id = decodeURIComponent(rawId);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
