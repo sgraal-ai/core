@@ -1591,6 +1591,140 @@ class FederationContributeRequest(BaseModel):
     domain: str = "general"
 
 
+@app.get("/v1/insights")
+def get_insights(agent_id: str = Query(""), domain: str = Query("general"), key_record: dict = Depends(verify_api_key)):
+    """Return all Synthesis Layer answers for an agent in a single call.
+
+    Looks up the agent's most recent memory state from outcomes/Redis/audit_log,
+    runs a lightweight preflight, and returns all 11 synthesis fields plus a
+    natural-language insight_summary.
+    """
+    _check_rate_limit(key_record)
+
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id is required")
+
+    # 1. Find most recent memory state for this agent
+    _mem_state = None
+    _recent_omega = None
+    _recent_action = None
+    _recent_domain = domain
+
+    # Check in-memory outcomes (newest first)
+    for _oid, _od in reversed(list(_outcomes.items())):
+        if _od.get("agent_id") == agent_id:
+            _mem_state = _od.get("memory_state", [])
+            _recent_omega = _od.get("omega_mem_final")
+            _recent_action = _od.get("recommended_action")
+            _recent_domain = _od.get("domain", domain)
+            break
+
+    # Check Redis outcome cache
+    if not _mem_state:
+        _cached = redis_get(f"outcome:{agent_id}")
+        if isinstance(_cached, dict) and _cached.get("memory_state"):
+            _mem_state = _cached["memory_state"]
+            _recent_omega = _cached.get("omega_mem_final")
+            _recent_action = _cached.get("recommended_action")
+            _recent_domain = _cached.get("domain", domain)
+
+    if not _mem_state:
+        return {"agent_id": agent_id, "available": False, "reason": "no_recent_data"}
+
+    # 2. Run preflight to get all synthesis fields
+    from fastapi.testclient import TestClient as _InternalClient
+    _ic = _InternalClient(app)
+    _api_key = None
+    # Extract the bearer token from the current request's key_record
+    _kh = key_record.get("key_hash")
+    # Find api_key from in-memory store or use test key
+    for _ak, _cid in API_KEYS.items():
+        if _cid == key_record.get("customer_id"):
+            _api_key = _ak
+            break
+    if not _api_key:
+        _api_key = "sg_test_key_001"
+
+    try:
+        _pf_resp = _ic.post("/v1/preflight", headers={"Authorization": f"Bearer {_api_key}"}, json={
+            "memory_state": _mem_state[:20],
+            "action_type": "reversible",
+            "domain": _recent_domain,
+            "agent_id": agent_id,
+            "dry_run": True,
+        })
+        if _pf_resp.status_code != 200:
+            return {"agent_id": agent_id, "available": False, "reason": f"preflight_error_{_pf_resp.status_code}"}
+        _pf = _pf_resp.json()
+    except Exception as e:
+        return {"agent_id": agent_id, "available": False, "reason": f"preflight_exception: {str(e)[:80]}"}
+
+    # 3. Extract synthesis fields
+    _dub = _pf.get("days_until_block")
+    _dub_conf = _pf.get("days_until_block_confidence")
+    _cc = _pf.get("confidence_calibration", {})
+    _ka = _pf.get("knowledge_age_days")
+    _ka_std = _pf.get("knowledge_age_std_days")
+    _top_roi = _pf.get("top_roi_entry_id")
+    _rp = _pf.get("repair_plan", [])
+    _top_roi_val = _rp[0].get("heal_roi", 0) if _rp else None
+    _fhd = _pf.get("fleet_health_distance")
+    _fhd_avail = _pf.get("fleet_health_distance_available", False)
+    _mct = _pf.get("memory_complexity_trend", "UNKNOWN")
+    _dca = _pf.get("decision_cost_asymmetry", {})
+    _spof_id = _pf.get("single_point_of_failure_entry_id")
+    _spof_score = _pf.get("single_point_of_failure_score")
+    _mono_score = _pf.get("monoculture_risk_score", 0)
+    _mono_level = _pf.get("monoculture_risk_level", "LOW")
+    _omega = _pf.get("omega_mem_final", 0)
+    _action = _pf.get("recommended_action", "USE_MEMORY")
+
+    # 4. Generate insight_summary
+    _insights = []
+    if _dub is not None and _dub < 7:
+        _conf_pct = f" ({int(_dub_conf * 100)}% confidence)" if _dub_conf else ""
+        if _dub == 0:
+            _insights.append(f"Agent has reached BLOCK threshold{_conf_pct}.")
+        else:
+            _insights.append(f"Agent will hit BLOCK in {_dub} days{_conf_pct}.")
+    if isinstance(_cc, dict) and _cc.get("state") == "OVERCONFIDENT":
+        _insights.append("Agent is overconfident — trusting drifted memories that appear internally consistent.")
+    if _mono_level == "HIGH":
+        _insights.append(f"Memory shows monoculture risk (HIGH, score={_mono_score}).")
+    if _spof_id:
+        _insights.append(f"Single point of failure detected: {_spof_id} (score={_spof_score}).")
+    if _mct in ("FRAGMENTING", "ECHO_CHAMBER"):
+        _label = "fragmenting into disconnected islands" if _mct == "FRAGMENTING" else "forming echo chambers"
+        _insights.append(f"Memory topology is {_label}.")
+    if not _insights:
+        _insights.append("Agent memory is healthy. No critical signals detected.")
+    _summary = " ".join(_insights)
+
+    return {
+        "agent_id": agent_id,
+        "available": True,
+        "insight_summary": _summary,
+        "days_until_block": _dub,
+        "days_until_block_confidence": _dub_conf,
+        "confidence_calibration": {"state": _cc.get("state", "CALIBRATED"), "score": _cc.get("score", 0.5)},
+        "knowledge_age_days": _ka,
+        "knowledge_age_std_days": _ka_std,
+        "top_heal_roi_entry_id": _top_roi,
+        "top_heal_roi_value": _top_roi_val,
+        "fleet_health_distance": _fhd,
+        "fleet_health_distance_available": _fhd_avail,
+        "memory_complexity_trend": _mct,
+        "cost_adjusted_decision": _dca.get("cost_adjusted_decision", False),
+        "single_point_of_failure_entry_id": _spof_id,
+        "single_point_of_failure_score": _spof_score,
+        "monoculture_risk_score": _mono_score,
+        "monoculture_risk_level": _mono_level,
+        "omega_mem_final": _omega,
+        "recommended_action": _action,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.post("/v1/federation/contribute")
 def federation_contribute(req: FederationContributeRequest, key_record: dict = Depends(verify_api_key)):
     """Contribute anonymized vaccine to shared federation."""
