@@ -42,6 +42,7 @@ export default function AnalyticsPage() {
   const [auditEntries, setAuditEntries] = useState<Array<Record<string, unknown>>>([]);
   const [memTypes, setMemTypes] = useState<Record<string, number> | null>(null);
   const [repairEff, setRepairEff] = useState<Record<string, unknown> | null>(null);
+  const [perfRoi, setPerfRoi] = useState<Record<string, unknown> | null>(null);
   const [projVolume, setProjVolume] = useState(100000);
 
   const load = useCallback(async () => {
@@ -52,12 +53,14 @@ export default function AnalyticsPage() {
     const apiUrl = getApiUrl();
     const h = { Authorization: `Bearer ${apiKey}` };
     try {
-      const [sR, wR] = await Promise.all([
+      const [sR, wR, prR] = await Promise.all([
         fetch(`${apiUrl}/v1/analytics/summary`, { headers: h }),
         fetch(`${apiUrl}/v1/analytics/token-waste`, { headers: h }),
+        fetch(`${apiUrl}/v1/analytics/performance-roi`, { headers: h }),
       ]);
       if (sR.ok) setSummary(await sR.json());
       if (wR.ok) setWaste(await wR.json());
+      if (prR.ok) setPerfRoi(await prR.json());
     } catch {}
     // Fetch audit entries for domain/agent breakdown
     try {
@@ -225,6 +228,59 @@ export default function AnalyticsPage() {
             </div>
           );
         })()}
+      </div>
+
+      {/* Performance Impact */}
+      <div style={{ ...CARD, marginBottom: "24px" }}>
+        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Performance Impact</h2>
+        <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>Sgraal as Revenue Enabler</p>
+        {perfRoi && Number((perfRoi as Record<string, unknown>).total_outcomes ?? 0) > 0 ? (() => {
+          const bands = (perfRoi.omega_bands ?? []) as Array<Record<string, unknown>>;
+          const correlation = perfRoi.correlation as Record<string, unknown> | undefined;
+          const impact = perfRoi.governance_impact as Record<string, unknown> | undefined;
+          const percentile = perfRoi.fleet_percentile as Record<string, unknown> | undefined;
+          const bandConfigs = [
+            { label: "Healthy", range: "< 30", color: "#16a34a" },
+            { label: "Caution", range: "30-55", color: "#ca8a04" },
+            { label: "High Risk", range: "55-70", color: "#f97316" },
+            { label: "Critical", range: "> 70", color: "#dc2626" },
+          ];
+          return (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "16px" }}>
+                {bandConfigs.map((cfg, i) => {
+                  const band = bands[i] as Record<string, unknown> | undefined;
+                  const successRate = band ? Number(band.success_rate ?? 0) : 0;
+                  const count = band ? Number(band.count ?? 0) : 0;
+                  return (
+                    <div key={cfg.label} style={{ borderTop: `4px solid ${cfg.color}`, background: "#f9fafb", borderRadius: "6px", padding: "14px", textAlign: "center" }}>
+                      <p style={{ fontSize: "13px", fontWeight: 700, color: "#0B0F14", marginBottom: "2px" }}>{cfg.label}</p>
+                      <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "10px" }}>{"\u03C9"} {cfg.range}</p>
+                      <p style={{ fontSize: "28px", fontWeight: 700, color: cfg.color }}>{Math.round(successRate * 100)}%</p>
+                      <p style={{ fontSize: "12px", color: "#6b7280" }}>success</p>
+                      <p style={{ fontSize: "11px", color: "#9ca3af", marginTop: "4px" }}>{count} outcomes</p>
+                    </div>
+                  );
+                })}
+              </div>
+              {correlation && (
+                <div style={{ background: "#f3f4f6", borderRadius: "6px", padding: "10px 14px", marginBottom: "12px" }}>
+                  <p style={{ fontSize: "13px", color: "#6b7280" }}>
+                    {"\u03C1"} = {Number(correlation.rho ?? 0).toFixed(2)}: Every 10-point drop in omega {"\u2192"} ~{Math.abs(Number(correlation.rho ?? 0) * 10).toFixed(1)}% better outcomes
+                  </p>
+                </div>
+              )}
+              {impact?.roi_message ? (
+                <p style={{ fontSize: "14px", fontWeight: 700, color: "#0B0F14", marginBottom: "8px" }}>{String(impact.roi_message)}</p>
+              ) : null}
+              {percentile?.message ? (
+                <p style={{ fontSize: "13px", color: "#6b7280" }}>{String(percentile.message)}</p>
+              ) : null}
+            </div>
+          );
+        })() : (
+          <p style={{ fontSize: "13px", color: "#9ca3af" }}>Close outcomes via /v1/outcome to see performance impact data</p>
+        )}
       </div>
 
       {/* Decision Breakdown */}
