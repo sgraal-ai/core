@@ -52,8 +52,9 @@ sg = SgraalClient('sg_demo_playground')
 r = sg.preflight([{'id':'bal','content':'Account balance: \$50,000',
   'type':'tool_state','timestamp_age_days':3,'source_trust':0.7,
   'source_conflict':0.3}], domain='fintech', action_type='irreversible')
-print(f'Decision: {r.recommended_action}')
-print(f'Risk: {r.omega_mem_final}/100')
+print(f'Decision: {r[\"recommended_action\"]}')
+print(f'Risk: {r[\"omega_mem_final\"]}/100')
+print(f'Explanation: {r.get(\"block_explanation\") or r.get(\"calibration_note\") or \"Memory is healthy\"}')
 "
 ```
 
