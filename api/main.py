@@ -26,11 +26,14 @@ from concurrent.futures import ThreadPoolExecutor
 _redis_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="redis_bg")
 
 def _persist_store(key: str, value, ttl: int = 0):
-    """Write to Redis with graceful fallback. Never crash."""
+    """Write to Redis with circuit breaker + graceful fallback. Never crash."""
+    if _redis_cb_should_skip():
+        return
     try:
         redis_set(key, value, ttl=ttl)
+        _redis_cb_record_success()
     except Exception:
-        pass
+        _redis_cb_record_failure()
 
 def _persist_store_bg(key: str, value, ttl: int = 0):
     """Fire-and-forget Redis write in background thread. Never blocks the caller."""
@@ -40,11 +43,15 @@ def _persist_store_bg(key: str, value, ttl: int = 0):
         pass
 
 def _load_store(key: str, default=None):
-    """Read from Redis with graceful fallback."""
+    """Read from Redis with circuit breaker + graceful fallback."""
+    if _redis_cb_should_skip():
+        return default
     try:
         v = redis_get(key, default)
+        _redis_cb_record_success()
         return v if v is not None else default
     except Exception:
+        _redis_cb_record_failure()
         return default
 
 def _redis_is_available() -> bool:
@@ -291,6 +298,109 @@ def _evict_if_full(d: dict, name: str = "cache"):
         for k in keys_to_remove:
             d.pop(k, None)
         logger.info("Cache eviction: removed %d oldest entries from %s (was %d)", _DICT_EVICT_BATCH, name, _DICT_MAX_SIZE + 1)
+
+
+# ---------------------------------------------------------------------------
+# Redis circuit breaker (#386)
+# ---------------------------------------------------------------------------
+
+_redis_cb_failures: list[float] = []  # timestamps of recent failures
+_redis_cb_state = "CLOSED"  # CLOSED | OPEN | HALF_OPEN
+_redis_cb_open_until = 0.0
+_REDIS_CB_THRESHOLD = 3  # failures to open
+_REDIS_CB_WINDOW = 30  # seconds to count failures
+_REDIS_CB_RECOVERY = 60  # seconds before half-open
+
+
+def _redis_cb_record_failure():
+    global _redis_cb_state, _redis_cb_open_until
+    now = _time.time()
+    _redis_cb_failures.append(now)
+    # Prune old failures
+    _redis_cb_failures[:] = [t for t in _redis_cb_failures if now - t < _REDIS_CB_WINDOW]
+    if len(_redis_cb_failures) >= _REDIS_CB_THRESHOLD and _redis_cb_state != "OPEN":
+        _redis_cb_state = "OPEN"
+        _redis_cb_open_until = now + _REDIS_CB_RECOVERY
+        logger.warning("Redis circuit breaker OPEN — %d failures in %ds. Skipping Redis for %ds.",
+                        len(_redis_cb_failures), _REDIS_CB_WINDOW, _REDIS_CB_RECOVERY)
+
+
+def _redis_cb_record_success():
+    global _redis_cb_state
+    if _redis_cb_state == "HALF_OPEN":
+        _redis_cb_state = "CLOSED"
+        _redis_cb_failures.clear()
+        logger.info("Redis circuit breaker CLOSED — recovery successful.")
+
+
+def _redis_cb_should_skip() -> bool:
+    global _redis_cb_state, _redis_cb_open_until
+    now = _time.time()
+    if _redis_cb_state == "CLOSED":
+        return False
+    if _redis_cb_state == "OPEN" and now >= _redis_cb_open_until:
+        _redis_cb_state = "HALF_OPEN"
+        return False  # Allow one probe
+    if _redis_cb_state == "OPEN":
+        return True  # Skip
+    return False  # HALF_OPEN — allow probe
+
+
+# ---------------------------------------------------------------------------
+# PagerDuty / OpsGenie auto-incident (#395)
+# ---------------------------------------------------------------------------
+
+_block_rate_window: list[tuple] = []  # (timestamp, is_block)
+_last_incident_time = 0.0
+_INCIDENT_DEDUP_SECONDS = 1800  # 30 minutes
+
+PAGERDUTY_ROUTING_KEY = os.getenv("PAGERDUTY_ROUTING_KEY")
+OPSGENIE_API_KEY = os.getenv("OPSGENIE_API_KEY")
+
+
+def _track_block_rate(is_block: bool, agent_id: str = "", omega: float = 0):
+    global _last_incident_time
+    now = _time.time()
+    _block_rate_window.append((now, is_block, agent_id, omega))
+    # Prune older than 5 minutes
+    _block_rate_window[:] = [e for e in _block_rate_window if now - e[0] < 300]
+
+    total = len(_block_rate_window)
+    if total < 10:
+        return
+    blocks = sum(1 for e in _block_rate_window if e[1])
+    rate = blocks / total
+
+    if rate > 0.5 and now - _last_incident_time > _INCIDENT_DEDUP_SECONDS:
+        _last_incident_time = now
+        # Top 3 affected agents
+        agent_scores = {}
+        for _, is_b, aid, om in _block_rate_window:
+            if is_b and aid:
+                agent_scores[aid] = max(agent_scores.get(aid, 0), om)
+        top3 = sorted(agent_scores.items(), key=lambda x: x[1], reverse=True)[:3]
+        title = f"Sgraal BLOCK rate spike: {rate*100:.0f}% in last 5 minutes ({len(agent_scores)} agents affected)"
+        body = "Top affected agents:\n" + "\n".join(f"  {a}: omega={o:.1f}" for a, o in top3)
+
+        if PAGERDUTY_ROUTING_KEY:
+            try:
+                http_requests.post("https://events.pagerduty.com/v2/enqueue", json={
+                    "routing_key": PAGERDUTY_ROUTING_KEY,
+                    "event_action": "trigger",
+                    "payload": {"summary": title, "source": "sgraal-api", "severity": "critical",
+                                "custom_details": {"block_rate": rate, "agents": dict(top3)}},
+                }, timeout=5)
+            except Exception as e:
+                logger.error("PagerDuty incident creation failed: %s", e)
+        elif OPSGENIE_API_KEY:
+            try:
+                http_requests.post("https://api.opsgenie.com/v2/alerts", json={
+                    "message": title, "description": body, "priority": "P1",
+                }, headers={"Authorization": f"GenieKey {OPSGENIE_API_KEY}"}, timeout=5)
+            except Exception as e:
+                logger.error("OpsGenie alert creation failed: %s", e)
+        else:
+            logger.warning("BLOCK RATE SPIKE: %s — no PagerDuty/OpsGenie configured", title)
 
 
 # ---------------------------------------------------------------------------
@@ -847,6 +957,11 @@ def scheduler_status(key_record: dict = Depends(verify_api_key)):
                 "status": "running",
             },
         },
+        "redis_circuit_breaker": {
+            "state": _redis_cb_state,
+            "failures_last_30s": len([t for t in _redis_cb_failures if _time.time() - t < _REDIS_CB_WINDOW]),
+            "open_until": datetime.fromtimestamp(_redis_cb_open_until, tz=timezone.utc).isoformat() if _redis_cb_open_until > _time.time() else None,
+        },
     }
 
 
@@ -883,6 +998,116 @@ def warmup(key_record: dict = Depends(verify_api_key)):
 
     _latency = round((_time.monotonic() - _t0) * 1000, 1)
     return {"status": "warm", "latency_ms": _latency, "modules_initialized": _modules_init}
+
+
+# ---- Guard endpoints for function calling / tool use (#396) ----
+
+class OpenAIFunctionGuardRequest(BaseModel):
+    name: str
+    arguments: dict = {}
+    memory_state: list[dict]
+    agent_id: str = ""
+    domain: str = "general"
+
+class ClaudeToolGuardRequest(BaseModel):
+    type: str = "tool_use"
+    name: str = ""
+    input: dict = {}
+    memory_state: list[dict]
+    agent_id: str = ""
+    domain: str = "general"
+
+@app.post("/v1/guard/openai-function")
+def guard_openai_function(req: OpenAIFunctionGuardRequest, key_record: dict = Depends(verify_api_key)):
+    """Guard an OpenAI function_call with Sgraal preflight validation."""
+    _check_rate_limit(key_record)
+    # Determine action_type from function name heuristics
+    _destructive = {"delete", "remove", "drop", "kill", "terminate", "destroy"}
+    _irreversible = {"transfer", "send", "execute", "deploy", "submit", "approve", "sign"}
+    name_lower = req.name.lower()
+    if any(w in name_lower for w in _destructive):
+        action_type = "destructive"
+    elif any(w in name_lower for w in _irreversible):
+        action_type = "irreversible"
+    else:
+        action_type = "reversible"
+
+    from fastapi.testclient import TestClient as _GClient
+    _gc = _GClient(app)
+    _gk = None
+    for _ak in API_KEYS:
+        if API_KEYS[_ak] == key_record.get("customer_id"):
+            _gk = _ak
+            break
+    if not _gk:
+        _gk = "sg_test_key_001"
+
+    _pf = _gc.post("/v1/preflight", headers={"Authorization": f"Bearer {_gk}"}, json={
+        "memory_state": req.memory_state[:20],
+        "action_type": action_type,
+        "domain": req.domain,
+        "agent_id": req.agent_id,
+        "dry_run": True,
+    })
+    if _pf.status_code != 200:
+        return {"safe_to_call": False, "block_explanation": f"Preflight error: {_pf.status_code}"}
+
+    _r = _pf.json()
+    _safe = _r.get("recommended_action") == "USE_MEMORY"
+    return {
+        "safe_to_call": _safe,
+        "recommended_action": _r.get("recommended_action"),
+        "omega_mem_final": _r.get("omega_mem_final"),
+        "block_explanation": _r.get("block_explanation"),
+        "function_name": req.name,
+        "action_type_inferred": action_type,
+    }
+
+
+@app.post("/v1/guard/claude-tool")
+def guard_claude_tool(req: ClaudeToolGuardRequest, key_record: dict = Depends(verify_api_key)):
+    """Guard a Claude tool_use block with Sgraal preflight validation."""
+    _check_rate_limit(key_record)
+    _destructive = {"delete", "remove", "drop", "kill", "terminate", "destroy"}
+    _irreversible = {"transfer", "send", "execute", "deploy", "submit", "approve", "sign"}
+    name_lower = req.name.lower()
+    if any(w in name_lower for w in _destructive):
+        action_type = "destructive"
+    elif any(w in name_lower for w in _irreversible):
+        action_type = "irreversible"
+    else:
+        action_type = "reversible"
+
+    from fastapi.testclient import TestClient as _GClient
+    _gc = _GClient(app)
+    _gk = None
+    for _ak in API_KEYS:
+        if API_KEYS[_ak] == key_record.get("customer_id"):
+            _gk = _ak
+            break
+    if not _gk:
+        _gk = "sg_test_key_001"
+
+    _pf = _gc.post("/v1/preflight", headers={"Authorization": f"Bearer {_gk}"}, json={
+        "memory_state": req.memory_state[:20],
+        "action_type": action_type,
+        "domain": req.domain,
+        "agent_id": req.agent_id,
+        "dry_run": True,
+    })
+    if _pf.status_code != 200:
+        return {"safe_to_call": False, "block_explanation": f"Preflight error: {_pf.status_code}"}
+
+    _r = _pf.json()
+    _safe = _r.get("recommended_action") == "USE_MEMORY"
+    return {
+        "safe_to_call": _safe,
+        "recommended_action": _r.get("recommended_action"),
+        "omega_mem_final": _r.get("omega_mem_final"),
+        "block_explanation": _r.get("block_explanation"),
+        "tool_name": req.name,
+        "action_type_inferred": action_type,
+    }
 
 
 # ---- Memory Vaccination endpoints ----
@@ -14483,5 +14708,36 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _exp_parts.append(f"Omega score {response.get('omega_mem_final', 0)} exceeds threshold.")
         _block_exp = " ".join(_exp_parts)
     response["block_explanation"] = _block_exp
+
+    # Track BLOCK rate for PagerDuty/OpsGenie (#395)
+    _track_block_rate(
+        is_block=response.get("recommended_action") == "BLOCK",
+        agent_id=req.agent_id or "",
+        omega=response.get("omega_mem_final", 0),
+    )
+
+    # OTLP export (#394) — emit span if OTLP_ENDPOINT configured
+    _otlp_endpoint = os.getenv("OTLP_ENDPOINT")
+    if _otlp_endpoint and not _is_dry_run:
+        try:
+            _otlp_span = {
+                "resourceSpans": [{"scopeSpans": [{"spans": [{
+                    "name": "sgraal.preflight",
+                    "kind": 1,  # SERVER
+                    "attributes": [
+                        {"key": "omega_mem_final", "value": {"doubleValue": response.get("omega_mem_final", 0)}},
+                        {"key": "recommended_action", "value": {"stringValue": response.get("recommended_action", "")}},
+                        {"key": "domain", "value": {"stringValue": req.domain}},
+                        {"key": "action_type", "value": {"stringValue": req.action_type}},
+                        {"key": "agent_id", "value": {"stringValue": req.agent_id or ""}},
+                        {"key": "early_exit", "value": {"boolValue": response.get("early_exit", False)}},
+                    ],
+                }]}]}],
+            }
+            _redis_pool.submit(lambda: http_requests.post(
+                f"{_otlp_endpoint}/v1/traces", json=_otlp_span,
+                headers={"Content-Type": "application/json"}, timeout=2))
+        except Exception:
+            pass
 
     return response
