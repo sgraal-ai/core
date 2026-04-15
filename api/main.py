@@ -7204,6 +7204,237 @@ def analytics_cost(group_by: str = "team", key_record: dict = Depends(verify_api
 def cost_forecast(key_record: dict = Depends(verify_api_key)):
     return {"forecast_30_days": 0, "trend": "stable", "current_monthly": 0}
 
+# ---- Fleet Intelligence endpoints ----
+
+@app.get("/v1/fleet/compromised-sources")
+def fleet_compromised_sources(days: int = Query(7), key_record: dict = Depends(verify_api_key)):
+    """Identify sources appearing in multiple compromised preflight calls."""
+    _check_rate_limit(key_record)
+    cutoff = _time.time() - days * 86400
+    source_counts: dict[str, dict] = {}  # source_id → {count, agents, first, last, level}
+
+    for _oid, _od in list(_outcomes.items()):
+        ts = _od.get("_ts", 0)
+        if ts < cutoff:
+            continue
+        # Check if this was a compromised call
+        action = _od.get("recommended_action", "USE_MEMORY")
+        if action not in ("BLOCK", "WARN", "ASK_USER"):
+            continue
+        omega = _od.get("omega_mem_final", 0)
+        if omega < 40:
+            continue
+        agent_id = _od.get("agent_id", "")
+        ms = _od.get("memory_state", [])
+        level = "CRITICAL" if omega > 80 else "HIGH" if omega > 60 else "MODERATE"
+        for entry in ms:
+            chain = entry.get("provenance_chain") or []
+            for src in chain:
+                if not src:
+                    continue
+                if src not in source_counts:
+                    source_counts[src] = {"count": 0, "agents": set(), "first": ts, "last": ts, "level": level}
+                sc = source_counts[src]
+                sc["count"] += 1
+                sc["agents"].add(agent_id)
+                sc["first"] = min(sc["first"], ts)
+                sc["last"] = max(sc["last"], ts)
+                if level == "CRITICAL" or (level == "HIGH" and sc["level"] != "CRITICAL"):
+                    sc["level"] = level
+
+    compromised = []
+    for src, sc in sorted(source_counts.items(), key=lambda x: x[1]["count"], reverse=True):
+        if sc["count"] >= 2:
+            compromised.append({
+                "source_id": src,
+                "compromised_call_count": sc["count"],
+                "first_seen": datetime.fromtimestamp(sc["first"], tz=timezone.utc).isoformat(),
+                "last_seen": datetime.fromtimestamp(sc["last"], tz=timezone.utc).isoformat(),
+                "affected_agents": sorted(sc["agents"]),
+                "risk_level": sc["level"],
+            })
+
+    total_compromised = sum(1 for _od in _outcomes.values()
+                           if _od.get("_ts", 0) > cutoff and _od.get("recommended_action") == "BLOCK")
+
+    return {
+        "period_days": days,
+        "compromised_sources": compromised[:50],
+        "total_compromised_calls": total_compromised,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/v1/fleet/divergence")
+def fleet_divergence(key_record: dict = Depends(verify_api_key)):
+    """Detect agents whose omega is diverging from fleet mean."""
+    _check_rate_limit(key_record)
+
+    # Collect last 10 omegas per agent
+    agent_omegas: dict[str, list[float]] = {}
+    for _oid, _od in list(_outcomes.items()):
+        aid = _od.get("agent_id")
+        omega = _od.get("omega_mem_final")
+        if not aid or omega is None:
+            continue
+        if aid not in agent_omegas:
+            agent_omegas[aid] = []
+        agent_omegas[aid].append(omega)
+
+    # Keep last 10 per agent
+    for aid in agent_omegas:
+        agent_omegas[aid] = agent_omegas[aid][-10:]
+
+    if not agent_omegas:
+        return {"fleet_mean_omega": 0, "diverging_agents": [], "stable_agents": 0,
+                "generated_at": datetime.now(timezone.utc).isoformat()}
+
+    # Fleet mean
+    all_omegas = [o for vals in agent_omegas.values() for o in vals]
+    fleet_mean = sum(all_omegas) / len(all_omegas)
+
+    diverging = []
+    stable_count = 0
+
+    for aid, omegas in agent_omegas.items():
+        n = len(omegas)
+        if n < 3:
+            stable_count += 1
+            continue
+        # Linear regression: slope
+        mean_x = (n - 1) / 2
+        mean_y = sum(omegas) / n
+        num = sum((i - mean_x) * (omegas[i] - mean_y) for i in range(n))
+        den = sum((i - mean_x) ** 2 for i in range(n))
+        slope = num / den if den > 0 else 0.0
+        current = omegas[-1]
+
+        if slope > 2.0 and current > fleet_mean:
+            # Predict calls until BLOCK
+            if slope > 0:
+                calls_to_block = max(0, (70 - current) / slope)
+            else:
+                calls_to_block = 999
+            diverging.append({
+                "agent_id": aid,
+                "current_omega": round(current, 1),
+                "omega_trend": round(slope, 2),
+                "divergence_type": "DEGRADING",
+                "calls_analyzed": n,
+                "predicted_block_in_calls": round(calls_to_block, 0),
+            })
+        elif slope < -2.0:
+            diverging.append({
+                "agent_id": aid,
+                "current_omega": round(current, 1),
+                "omega_trend": round(slope, 2),
+                "divergence_type": "GAMING" if current < 25 and slope < -3 else "RECOVERING",
+                "calls_analyzed": n,
+                "predicted_block_in_calls": None,
+            })
+        else:
+            stable_count += 1
+
+    diverging.sort(key=lambda x: abs(x["omega_trend"]), reverse=True)
+
+    return {
+        "fleet_mean_omega": round(fleet_mean, 1),
+        "diverging_agents": diverging[:20],
+        "stable_agents": stable_count,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/v1/fleet/gaming-detection")
+def fleet_gaming_detection(days: int = Query(7), key_record: dict = Depends(verify_api_key)):
+    """Detect agents potentially gaming the scoring system."""
+    _check_rate_limit(key_record)
+    cutoff = _time.time() - days * 86400
+
+    # Collect per-agent stats
+    agent_stats: dict[str, dict] = {}
+    for _oid, _od in list(_outcomes.items()):
+        ts = _od.get("_ts", 0)
+        if ts < cutoff:
+            continue
+        aid = _od.get("agent_id")
+        if not aid:
+            continue
+        omega = _od.get("omega_mem_final", 0)
+        action = _od.get("recommended_action", "USE_MEMORY")
+        input_hash = _od.get("input_hash", "")
+
+        if aid not in agent_stats:
+            agent_stats[aid] = {"omegas": [], "actions": [], "hashes": [], "count": 0}
+        st = agent_stats[aid]
+        st["omegas"].append(omega)
+        st["actions"].append(action)
+        st["hashes"].append(input_hash)
+        st["count"] += 1
+
+    suspects = []
+    clean_count = 0
+
+    for aid, st in agent_stats.items():
+        if st["count"] < 10:
+            clean_count += 1
+            continue
+
+        signals = []
+        gaming_score = 0.0
+        omegas = st["omegas"]
+        n = st["count"]
+
+        # Signal 1: Omega too stable (variance < 5)
+        omega_var = sum((o - sum(omegas)/n)**2 for o in omegas) / n
+        if omega_var < 5.0:
+            gaming_score += 0.3
+            signals.append("omega_too_stable")
+
+        # Signal 2: Always success (no BLOCK/WARN ever, with 20+ calls)
+        block_warn_count = sum(1 for a in st["actions"] if a in ("BLOCK", "WARN", "ASK_USER"))
+        if block_warn_count == 0 and n >= 20:
+            gaming_score += 0.2
+            signals.append("always_success")
+
+        # Signal 3: Identical input (same hash > 50% of calls)
+        if st["hashes"]:
+            hash_counts = {}
+            for h in st["hashes"]:
+                if h:
+                    hash_counts[h] = hash_counts.get(h, 0) + 1
+            max_hash_count = max(hash_counts.values()) if hash_counts else 0
+            if max_hash_count / n > 0.5:
+                gaming_score += 0.3
+                signals.append("identical_input")
+
+        # Signal 4: Boundary gaming (omega within 2 of threshold on 30%+ calls)
+        boundary_count = sum(1 for o in omegas if any(abs(o - t) < 2 for t in [25, 45, 70]))
+        if boundary_count / n > 0.3:
+            gaming_score += 0.2
+            signals.append("boundary_gaming")
+
+        if gaming_score >= 0.5:
+            suspects.append({
+                "agent_id": aid,
+                "gaming_score": round(gaming_score, 2),
+                "signals": signals,
+                "call_count": n,
+                "recommendation": "Manual review recommended",
+            })
+        else:
+            clean_count += 1
+
+    suspects.sort(key=lambda x: x["gaming_score"], reverse=True)
+
+    return {
+        "period_days": days,
+        "gaming_suspects": suspects[:20],
+        "clean_agents": clean_count,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # ---- Analytics: Decision Entropy, Module Health, Temporal Patterns ----
 
 @app.get("/v1/analytics/decision-entropy")
