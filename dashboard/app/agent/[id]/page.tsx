@@ -729,6 +729,18 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         )}
       </div>
 
+      {/* Calibration warning */}
+      {(() => {
+        const calNote = (agent as unknown as Record<string, unknown>).calibration_note;
+        if (!calNote) return null;
+        return (
+          <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-lg px-4 py-3 mb-6 text-sm text-yellow-500 flex items-center gap-2">
+            <span>&#x26A0;</span>
+            <span>{String(calNote)}</span>
+          </div>
+        );
+      })()}
+
       <div className="grid md:grid-cols-2 gap-8 mb-10">
         <div>
           <h2 className="text-lg font-semibold mb-2">Component Breakdown</h2>
@@ -770,6 +782,112 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
             );
           })()}
           <RepairPlanList plan={agent.repair_plan ?? []} />
+        </div>
+      </div>
+
+      {/* Counterfactual + Forecast */}
+      <div className="grid md:grid-cols-2 gap-6 mb-10">
+        {/* Counterfactual */}
+        <div className="bg-surface border border-surface-light rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold">Counterfactual</h2>
+            <button
+              onClick={async () => {
+                const apiKey = getApiKey();
+                if (!apiKey) return;
+                try {
+                  const ms = (agent as unknown as Record<string, unknown>).memory_state ?? [{id: `mem_${agent.id}`, content: `Memory for ${agent.name}`, type: "semantic", timestamp_age_days: 1, source_trust: 0.8}];
+                  const res = await fetch(`${getApiUrl()}/v1/simulate/counterfactual`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({ memory_state: ms, action_type: "reversible", domain: agent.domain, scenarios: ["current", "refreshed", "verified", "healed"] }),
+                  });
+                  if (res.ok) {
+                    const data = await res.json();
+                    const el = document.getElementById("cf-result");
+                    if (el) {
+                      const scenarios = data.scenarios ?? [];
+                      el.innerHTML = scenarios.map((s: Record<string, unknown>) =>
+                        `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid #f5f4f0">
+                          <span style="font-weight:600">${String(s.name)}</span>
+                          <span style="font-family:monospace;color:${Number(s.risk_delta) < 0 ? '#16a34a' : '#dc2626'}">${Number(s.risk_delta) >= 0 ? '+' : ''}${String(s.risk_delta)}</span>
+                        </div>`
+                      ).join('');
+                      if (data.safest_scenario) {
+                        el.innerHTML += `<p style="font-size:11px;color:#c9a962;margin-top:8px">Best path: ${String(data.safest_scenario)}</p>`;
+                      }
+                    }
+                  }
+                } catch {}
+              }}
+              className="text-xs font-semibold px-3 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition"
+            >Run Counterfactual</button>
+          </div>
+          <p className="text-xs text-muted mb-3">What-if analysis: how would omega change under different scenarios?</p>
+          {(() => {
+            const cfSugg = (agent as unknown as Record<string, unknown>).counterfactual_heal_suggested;
+            const cfEntry = String((agent as unknown as Record<string, unknown>).counterfactual_top_entry_id ?? "");
+            if (!cfSugg) return null;
+            return (
+              <div className="bg-green-400/10 border border-green-400/30 rounded px-3 py-2 mb-3 text-xs text-green-400">
+                Counterfactual suggests healing entry <strong className="font-mono">{cfEntry}</strong>
+              </div>
+            );
+          })()}
+          <div id="cf-result" className="text-sm"></div>
+        </div>
+
+        {/* Forecast */}
+        <div className="bg-surface border border-surface-light rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold">Forecast</h2>
+            <button
+              onClick={async () => {
+                const apiKey = getApiKey();
+                if (!apiKey) return;
+                try {
+                  const res = await fetch(`${getApiUrl()}/v1/forecast`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({ agent_id: agent.id, domain: agent.domain }),
+                  });
+                  if (res.ok) {
+                    const data = await res.json();
+                    const el = document.getElementById("forecast-result");
+                    if (el) {
+                      const fs5 = data.forecast_scores?.slice(0, 5) ?? [];
+                      const fs10 = data.forecast_scores?.slice(0, 10) ?? [];
+                      let html = '<div style="display:flex;gap:4px;align-items:flex-end;height:60px;margin-bottom:8px">';
+                      const maxV = Math.max(...(fs10.length ? fs10 : [1]), 1);
+                      for (const v of fs10) {
+                        const h = Math.max(4, (Number(v) / maxV) * 55);
+                        const c = Number(v) > 70 ? '#dc2626' : Number(v) > 40 ? '#ca8a04' : '#16a34a';
+                        html += `<div style="flex:1;height:${h}px;background:${c};border-radius:2px 2px 0 0" title="omega=${v}"></div>`;
+                      }
+                      html += '</div>';
+                      if (data.predicted_failure_steps != null) {
+                        html += `<p style="font-size:12px;color:#dc2626;font-weight:600">Predicted failure in ${String(data.predicted_failure_steps)} steps</p>`;
+                      }
+                      const r5 = data.failure_risk_5_steps ?? data.collapse_risk;
+                      if (r5 != null) {
+                        const pct = Math.round(Number(r5) * 100);
+                        html += `<div style="display:flex;gap:8px;font-size:11px;margin-top:4px">`;
+                        html += `<span style="background:${pct > 50 ? '#fee2e2' : '#f0fdf4'};color:${pct > 50 ? '#dc2626' : '#16a34a'};padding:2px 8px;border-radius:4px">5-step risk: ${pct}%</span>`;
+                        html += `</div>`;
+                      }
+                      if (!fs10.length && !data.predicted_failure_steps) {
+                        html = '<p style="font-size:12px;color:#6b7280">Insufficient history for forecast. Send more preflight calls.</p>';
+                      }
+                      el.innerHTML = html;
+                    }
+                  }
+                } catch {}
+              }}
+              className="text-xs font-semibold px-3 py-1.5 rounded bg-gold text-background hover:bg-gold-dim transition"
+            >Run Forecast</button>
+          </div>
+          <p className="text-xs text-muted mb-3">Predict future omega scores and failure probability.</p>
+          <div id="forecast-result" className="text-sm"></div>
         </div>
       </div>
 

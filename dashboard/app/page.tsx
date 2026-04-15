@@ -481,6 +481,86 @@ export default function DashboardHome() {
         </div>
       )}
 
+      {/* Fleet Divergence + Gaming Detection */}
+      {realAgents.length > 0 && (
+        <div className="grid md:grid-cols-2 gap-4 mb-8">
+          {/* Divergence */}
+          <div className="bg-surface border border-surface-light rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold">Fleet Divergence</h3>
+              <button
+                onClick={async () => {
+                  const apiKey = getApiKey();
+                  if (!apiKey) return;
+                  try {
+                    const res = await fetch(`${getApiUrl()}/v1/fleet/divergence`, { headers: { Authorization: `Bearer ${apiKey}` } });
+                    if (res.ok) {
+                      const data = await res.json();
+                      const el = document.getElementById("divergence-result");
+                      if (el) {
+                        const agents = data.diverging_agents ?? [];
+                        const degrading = agents.filter((a: Record<string, unknown>) => a.divergence_type === "DEGRADING");
+                        const recovering = agents.filter((a: Record<string, unknown>) => a.divergence_type === "RECOVERING");
+                        let html = `<div style="display:flex;gap:12px;margin-bottom:8px">`;
+                        html += `<span style="font-size:20px;font-weight:700;color:#dc2626">${degrading.length}</span><span style="font-size:11px;color:#6b7280">degrading</span>`;
+                        html += `<span style="font-size:20px;font-weight:700;color:#16a34a">${recovering.length}</span><span style="font-size:11px;color:#6b7280">recovering</span>`;
+                        html += `<span style="font-size:20px;font-weight:700;color:#6b7280">${data.stable_agents ?? 0}</span><span style="font-size:11px;color:#6b7280">stable</span>`;
+                        html += `</div>`;
+                        if (degrading.length > 0) {
+                          const top = degrading[0] as Record<string, unknown>;
+                          html += `<p style="font-size:11px;color:#dc2626">Top: ${String(top.agent_id)} (trend +${String(top.omega_trend)}/call, BLOCK in ~${String(top.predicted_block_in_calls)} calls)</p>`;
+                        }
+                        el.innerHTML = html;
+                      }
+                    }
+                  } catch {}
+                }}
+                className="text-xs px-2 py-1 rounded bg-surface-light hover:bg-gold/10 transition"
+              >Refresh</button>
+            </div>
+            <div id="divergence-result"><p className="text-xs text-muted">Click refresh to load</p></div>
+          </div>
+
+          {/* Gaming Detection */}
+          <div className="bg-surface border border-surface-light rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold">Gaming Detection</h3>
+              <button
+                onClick={async () => {
+                  const apiKey = getApiKey();
+                  if (!apiKey) return;
+                  try {
+                    const res = await fetch(`${getApiUrl()}/v1/fleet/gaming-detection`, { headers: { Authorization: `Bearer ${apiKey}` } });
+                    if (res.ok) {
+                      const data = await res.json();
+                      const el = document.getElementById("gaming-result");
+                      if (el) {
+                        const suspects = data.gaming_suspects ?? [];
+                        if (suspects.length === 0) {
+                          el.innerHTML = `<div style="text-align:center;padding:8px"><span style="background:#f0fdf4;color:#16a34a;font-size:11px;padding:2px 10px;border-radius:4px;font-weight:600">Clean</span><p style="font-size:11px;color:#6b7280;margin-top:4px">${data.clean_agents ?? 0} agents verified</p></div>`;
+                        } else {
+                          let html = `<p style="font-size:12px;color:#ca8a04;font-weight:600;margin-bottom:6px">${suspects.length} suspect(s)</p>`;
+                          for (const s of suspects.slice(0, 3)) {
+                            html += `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid #f5f4f0">`;
+                            html += `<span style="font-family:monospace;font-weight:600">${String((s as Record<string, unknown>).agent_id)}</span>`;
+                            html += ` <span style="color:#ca8a04">score=${String((s as Record<string, unknown>).gaming_score)}</span>`;
+                            html += ` <span style="color:#6b7280;font-size:10px">${((s as Record<string, unknown>).signals as string[])?.join(", ")}</span>`;
+                            html += `</div>`;
+                          }
+                          el.innerHTML = html;
+                        }
+                      }
+                    }
+                  } catch {}
+                }}
+                className="text-xs px-2 py-1 rounded bg-surface-light hover:bg-gold/10 transition"
+              >Refresh</button>
+            </div>
+            <div id="gaming-result"><p className="text-xs text-muted">Click refresh to load</p></div>
+          </div>
+        </div>
+      )}
+
       {agents.filter(a => _isRealAgentId(a.id)).length === 0 ? (
         <p className="text-muted text-sm">No agents found. Send your first preflight call to see agents here.</p>
       ) : (
