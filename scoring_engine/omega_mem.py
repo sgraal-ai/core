@@ -270,11 +270,17 @@ def compute(
     if use_pagerank:
         components["r_importance"] = r_importance
 
+    # Weight Normalization Theorem:
+    #   For any c ∈ [0,100]^n and w with S = Σ|wᵢ| > 0,
+    #   ω = Σwᵢcᵢ / S satisfies |ω| ≤ 100.
+    #   Proof: |ω| = |Σwᵢcᵢ|/S ≤ Σ|wᵢ|·|cᵢ|/S ≤ Σ|wᵢ|·100/S = 100. □
+    #   After clamp: max(0, min(100, ω)) ∈ [0, 100].
+    #   Note: s_recovery has negative weight, so ω can be slightly negative
+    #   before clamping (minimum ≈ -10.1 when only recovery is active).
     weights = custom_weights if custom_weights else WEIGHTS
     _applied_weights = {k: weights.get(k, WEIGHTS.get(k, 0)) for k in components}
     _weight_sum = sum(abs(w) for w in _applied_weights.values())
     omega = sum(_applied_weights[k] * v for k, v in components.items())
-    # Normalize by sum of absolute applied weights to ensure omega stays in [0, 100]
     if _weight_sum > 0 and abs(_weight_sum - 1.0) > 0.001:
         omega = omega / _weight_sum
     omega = max(0, min(100, omega))

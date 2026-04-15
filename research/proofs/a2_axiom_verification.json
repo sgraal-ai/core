@@ -1,0 +1,10 @@
+{
+  "cases_tested": 100,
+  "identical": 100,
+  "different": 0,
+  "max_difference": 0.0,
+  "differences": [],
+  "nondeterministic_calls": [],
+  "nondeterministic_count": 0,
+  "a2_holds": true
+}

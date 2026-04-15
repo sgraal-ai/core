@@ -1,0 +1,11 @@
+{
+  "total_actions": 1347,
+  "decreased": 1200,
+  "decreased_pct": 89.1,
+  "stayed_same": 147,
+  "stayed_same_pct": 10.9,
+  "increased": 0,
+  "increased_pct": 0.0,
+  "increases": [],
+  "theorem_holds": true
+}
