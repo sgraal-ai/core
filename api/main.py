@@ -12654,11 +12654,44 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if len(_lyap_history) >= 10:
             lyap = compute_lyapunov_exponent(_lyap_history, omega_out)
             if lyap:
+                # Feigenbaum period-doubling detection (#627)
+                _FEIGENBAUM_DELTA = 4.66920
+                _chaos_type = "stochastic"
+                _chaos_onset = False
+                # Check BOCPD changepoints for period-doubling convergence
+                _td_data = response.get("trend_detection", {})
+                _bocpd_data = _td_data.get("bocpd") if isinstance(_td_data, dict) else None
+                if isinstance(_bocpd_data, dict) and len(_lyap_history) >= 10:
+                    # Compute intervals between score direction changes as proxy for changepoints
+                    _intervals = []
+                    _last_dir = 0
+                    _last_change = 0
+                    for _fi in range(1, len(_lyap_history)):
+                        _dir = 1 if _lyap_history[_fi] > _lyap_history[_fi - 1] else -1
+                        if _dir != _last_dir and _last_dir != 0:
+                            if _last_change > 0:
+                                _intervals.append(_fi - _last_change)
+                            _last_change = _fi
+                        _last_dir = _dir
+                    # Check if interval ratios converge toward δ₁
+                    if len(_intervals) >= 4:
+                        _converge_count = 0
+                        for _ri in range(len(_intervals) - 1):
+                            if _intervals[_ri + 1] > 0:
+                                _ratio = _intervals[_ri] / _intervals[_ri + 1]
+                                if abs(_ratio - _FEIGENBAUM_DELTA) < 2.0:  # Within tolerance
+                                    _converge_count += 1
+                        if _converge_count >= 2:
+                            _chaos_type = "period_doubling"
+                            _chaos_onset = True
+
                 response["lyapunov_exponent"] = {
                     "lambda_estimate": lyap.lambda_estimate,
                     "chaos_risk": lyap.chaos_risk,
                     "stability_class": lyap.stability_class,
                     "divergence_rate": lyap.divergence_rate,
+                    "chaos_type": _chaos_type,
+                    "chaos_onset_predicted": _chaos_onset,
                 }
                 _lyap_lambda = lyap.lambda_estimate
 
@@ -15011,10 +15044,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _rp_item["heal_roi"] = round(_voi / max(_cost, 0.01), 2)
     _rp_list = response.get("repair_plan", [])
     _rp_list.sort(key=lambda x: x.get("heal_roi", 0), reverse=True)
+    # Apply golden ratio diminishing returns weighting (#625)
+    _PHI = 1.61803
+    for _phi_i, _phi_rp in enumerate(_rp_list):
+        _phi_rp["priority_weight"] = round(1.0 / (_PHI ** _phi_i), 4)
     _top_roi_entry = _rp_list[0]["entry_id"] if _rp_list else None
 
     # New response fields
     response["top_roi_entry_id"] = _top_roi_entry
+    response["phi_weighted"] = True
     response["knowledge_age_days"] = _ka_mean
     response["knowledge_age_std_days"] = _ka_std
     response["fleet_health_distance"] = _fhd
@@ -15142,7 +15180,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _entropy_risk = max(0.0, 1.0 - _pe_mean)
 
     _n_clusters = _dp_data.get("n_clusters", 2) if isinstance(_dp_data, dict) else 2
-    _cluster_risk = 1.0 if _n_clusters <= 1 else max(0.0, 1.0 - _n_clusters / 5.0)
+    # Euler-Mascheroni coupon collector threshold (#626)
+    _GAMMA_EM = 0.57721  # Euler-Mascheroni constant
+    _n_ent = len(entries) if entries else 2
+    if _n_ent >= 2:
+        _expected_sources = _n_ent * (math.log(_n_ent) + _GAMMA_EM)
+        _cluster_risk = max(0.0, 1.0 - _n_clusters / max(_expected_sources, 1.0))
+    else:
+        _cluster_risk = 0.5
 
     _consistency_bonus = 0.2 if _h1 == 0 and _entropy_risk > 0.5 else 0.0
 
@@ -15151,6 +15196,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     response["monoculture_risk_score"] = _mono_score
     response["monoculture_risk_level"] = _mono_level
+    response["monoculture_gamma_used"] = True
 
     # -----------------------------------------------------------------------
     # NEW: Counterfactual → Heal connection (#252)
