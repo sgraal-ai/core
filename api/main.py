@@ -15329,7 +15329,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                             "s_propagation": "high dependency risk", "r_recall": "recall failure", "r_encode": "encoding issue",
                             "s_interference": "data conflict", "s_recovery": "slow recovery", "r_belief": "low confidence",
                             "s_relevance": "intent drift"}
-            _label = _comp_labels.get(_top_comp[0], _top_comp[0].replace("_", " "))
+            _label = _comp_labels.get(_top_comp[0], _top_comp[0])
             if isinstance(_top_comp[1], (int, float)) and _top_comp[1] > 20:
                 _exp_parts.append(f"Primary risk: {_label} at {_top_comp[1]:.0f}/100.")
         # 4. Sheaf inconsistency
