@@ -30,9 +30,9 @@ result = client.preflight(
     domain="fintech",
 )
 
-print(result.recommended_action)  # USE_MEMORY, WARN, ASK_USER, or BLOCK
-print(result.omega_mem_final)     # Risk score 0-100
-print(result.assurance_score)     # Confidence score
+print(result["recommended_action"])  # USE_MEMORY, WARN, ASK_USER, or BLOCK
+print(result["omega_mem_final"])     # Risk score 0-100
+print(result["assurance_score"])     # Confidence score
 ```
 
 ## Sign Up
@@ -114,7 +114,7 @@ from sgraal.guard import SgraalBlockedError
 try:
     charge_customer("cus_123", 99.00)
 except SgraalBlockedError as e:
-    print(f"Blocked: {e.result.explainability_note}")
+    print(f"Blocked: {e.result['block_explanation']}")
 ```
 
 ## LangGraph Integration
@@ -131,9 +131,9 @@ def preflight_node(state):
         action_type=state.get("action_type", "reversible"),
         domain=state.get("domain", "general"),
     )
-    if result.recommended_action == "BLOCK":
-        return {**state, "blocked": True, "reason": result.explainability_note}
-    return {**state, "blocked": False, "omega_score": result.omega_mem_final}
+    if result["recommended_action"] == "BLOCK":
+        return {**state, "blocked": True, "reason": result["block_explanation"]}
+    return {**state, "blocked": False, "omega_score": result["omega_mem_final"]}
 ```
 
 ## GeminiGuard

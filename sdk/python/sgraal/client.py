@@ -107,23 +107,23 @@ class SgraalClient:
                 "Sgraal API key required. Pass api_key or set SGRAAL_API_KEY."
             )
 
-    def _fallback_result(self, entries: list[dict[str, Any]]) -> PreflightResult:
+    def _fallback_result(self, entries: list[dict[str, Any]]) -> dict[str, Any]:
         omega = _local_score(entries)
         if self.fallback_policy == "block":
-            action: Literal["USE_MEMORY", "WARN", "BLOCK"] = "BLOCK"
+            action = "BLOCK"
         elif self.fallback_policy == "warn":
             action = "WARN"
         else:
             action = "USE_MEMORY"
-        return PreflightResult(
-            omega_mem_final=omega,
-            recommended_action=action,
-            assurance_score=0,
-            explainability_note="API_UNAVAILABLE — fallback scoring only.",
-            component_breakdown={},
-            fallback=True,
-            circuit_state=self.circuit.state,
-        )
+        return {
+            "omega_mem_final": omega,
+            "recommended_action": action,
+            "assurance_score": 0,
+            "explainability_note": "API_UNAVAILABLE — fallback scoring only.",
+            "component_breakdown": {},
+            "fallback": True,
+            "circuit_state": self.circuit.state,
+        }
 
     def preflight(
         self,
@@ -132,8 +132,12 @@ class SgraalClient:
         domain: str = "general",
         agent_id: Optional[str] = None,
         task_id: Optional[str] = None,
-    ) -> PreflightResult:
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         """Run a preflight check on memory state before acting.
+
+        Returns the full API response as a dict, including all 83 module
+        outputs, repair_plan, shapley_values, and synthesis fields.
 
         If the API is unavailable and circuit is open, returns a fallback
         result based on fallback_policy (allow/warn/block).
@@ -146,6 +150,7 @@ class SgraalClient:
             "memory_state": memory_state,
             "action_type": action_type,
             "domain": domain,
+            **kwargs,
         }
         if agent_id is not None:
             payload["agent_id"] = agent_id
@@ -166,15 +171,9 @@ class SgraalClient:
             data = resp.json()
             self.circuit.record_success()
 
-            return PreflightResult(
-                omega_mem_final=data["omega_mem_final"],
-                recommended_action=data["recommended_action"],
-                assurance_score=data["assurance_score"],
-                explainability_note=data["explainability_note"],
-                component_breakdown=data["component_breakdown"],
-                fallback=False,
-                circuit_state=self.circuit.state,
-            )
+            data["fallback"] = False
+            data["circuit_state"] = self.circuit.state
+            return data
         except Exception:
             self.circuit.record_failure()
             return self._fallback_result(memory_state)

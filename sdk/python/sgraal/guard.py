@@ -15,8 +15,8 @@ class SgraalBlockedError(Exception):
     def __init__(self, result: Any):
         self.result = result
         super().__init__(
-            f"Sgraal BLOCKED (Ω={result.omega_mem_final}): "
-            f"{result.explainability_note}"
+            f"Sgraal BLOCKED (Ω={result['omega_mem_final']}): "
+            f"{result.get('explainability_note', result.get('block_explanation', ''))}"
         )
 
 
@@ -74,15 +74,15 @@ def guard(
                 domain=domain,
             )
 
-            if result.recommended_action in blocked_actions:
+            if result["recommended_action"] in blocked_actions:
                 raise SgraalBlockedError(result)
 
-            if result.recommended_action in ("WARN", "ASK_USER"):
+            if result["recommended_action"] in ("WARN", "ASK_USER"):
                 logger.warning(
                     "Sgraal %s (Ω=%s): %s",
-                    result.recommended_action,
-                    result.omega_mem_final,
-                    result.explainability_note,
+                    result["recommended_action"],
+                    result["omega_mem_final"],
+                    result.get("explainability_note", result.get("block_explanation", "")),
                 )
 
             return fn(*args, **kwargs)

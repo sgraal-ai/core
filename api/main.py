@@ -9130,9 +9130,14 @@ def explain(req: ExplainRequest, key_record: dict = Depends(verify_api_key)):
         root = f"{top} (Shapley={shapley[top]:.2f})"
     else:
         cb = pr.get("component_breakdown", {})
-        if cb:
-            top = max(cb, key=cb.get)
-            root = f"{top}={cb[top]:.1f}"
+        # Only consider real scoring components (exclude display-only keys like s_fairness)
+        _scoring_keys = {"s_freshness", "s_drift", "s_provenance", "s_propagation",
+                         "r_recall", "r_encode", "s_interference", "s_recovery",
+                         "r_belief", "s_relevance"}
+        cb_real = {k: v for k, v in cb.items() if k in _scoring_keys}
+        if cb_real:
+            top = max(cb_real, key=cb_real.get)
+            root = f"{top}={cb_real[top]:.1f}"
         else:
             root = "unknown"
 
@@ -15324,14 +15329,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         # 3. Highest component
         _cb_exp = response.get("component_breakdown", {})
         if isinstance(_cb_exp, dict) and _cb_exp:
-            _top_comp = max(_cb_exp.items(), key=lambda x: x[1] if isinstance(x[1], (int, float)) else 0)
             _comp_labels = {"s_freshness": "stale data", "s_drift": "memory drift", "s_provenance": "untrusted source",
                             "s_propagation": "high dependency risk", "r_recall": "recall failure", "r_encode": "encoding issue",
                             "s_interference": "data conflict", "s_recovery": "slow recovery", "r_belief": "low confidence",
                             "s_relevance": "intent drift"}
-            _label = _comp_labels.get(_top_comp[0], _top_comp[0])
-            if isinstance(_top_comp[1], (int, float)) and _top_comp[1] > 20:
-                _exp_parts.append(f"Primary risk: {_label} at {_top_comp[1]:.0f}/100.")
+            # Only consider real scoring components (exclude display-only keys like s_fairness)
+            _cb_scoring = {k: v for k, v in _cb_exp.items() if k in _comp_labels}
+            if _cb_scoring:
+                _top_comp = max(_cb_scoring.items(), key=lambda x: x[1] if isinstance(x[1], (int, float)) else 0)
+                _label = _comp_labels[_top_comp[0]]
+                if isinstance(_top_comp[1], (int, float)) and _top_comp[1] > 20:
+                    _exp_parts.append(f"Primary risk: {_label} at {_top_comp[1]:.0f}/100.")
         # 4. Sheaf inconsistency
         _h1_exp = response.get("consistency_analysis", {})
         if isinstance(_h1_exp, dict) and _h1_exp.get("h1_rank", 0) > 0:

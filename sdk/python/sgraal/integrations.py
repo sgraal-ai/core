@@ -73,18 +73,18 @@ class GeminiGuard(_BaseGuard):
         """
         result = self._preflight(memory_data, action_type, domain)
 
-        if result.recommended_action == "BLOCK":
+        if result["recommended_action"] == "BLOCK":
             return (
                 f"[SGRAAL BLOCKED] Memory governance check failed "
-                f"(Ω={result.omega_mem_final}). {result.explainability_note} "
+                f"(Ω={result['omega_mem_final']}). {result.get('explainability_note', result.get('block_explanation', ''))} "
                 f"Resolve memory issues before proceeding."
             )
 
         warning_prefix = ""
-        if result.recommended_action in ("WARN", "ASK_USER"):
+        if result["recommended_action"] in ("WARN", "ASK_USER"):
             warning_prefix = (
-                f"[SGRAAL WARNING: Ω={result.omega_mem_final}, "
-                f"{result.explainability_note}] "
+                f"[SGRAAL WARNING: Ω={result['omega_mem_final']}, "
+                f"{result.get('explainability_note', result.get('block_explanation', ''))}] "
             )
 
         if genai is None:
@@ -131,18 +131,18 @@ class OpenAIGuard(_BaseGuard):
         """
         result = self._preflight(memory_data, action_type, domain)
 
-        if result.recommended_action == "BLOCK":
+        if result["recommended_action"] == "BLOCK":
             return (
                 f"[SGRAAL BLOCKED] Memory governance check failed "
-                f"(Ω={result.omega_mem_final}). {result.explainability_note} "
+                f"(Ω={result['omega_mem_final']}). {result.get('explainability_note', result.get('block_explanation', ''))} "
                 f"Resolve memory issues before proceeding."
             )
 
         warning_prefix = ""
-        if result.recommended_action in ("WARN", "ASK_USER"):
+        if result["recommended_action"] in ("WARN", "ASK_USER"):
             warning_prefix = (
-                f"[SGRAAL WARNING: Ω={result.omega_mem_final}, "
-                f"{result.explainability_note}] "
+                f"[SGRAAL WARNING: Ω={result['omega_mem_final']}, "
+                f"{result.get('explainability_note', result.get('block_explanation', ''))}] "
             )
 
         if OpenAI is None:

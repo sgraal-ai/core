@@ -1907,13 +1907,13 @@ class TestLLMGuards:
 
     def _mock_preflight(self, action, omega):
         _, _, PreflightResult = self._get_guards()
-        return PreflightResult(
-            omega_mem_final=omega,
-            recommended_action=action,
-            assurance_score=max(0, round(100 - omega * 0.7)),
-            explainability_note=f"Test: Action={action}.",
-            component_breakdown={},
-        )
+        return {
+            "omega_mem_final": omega,
+            "recommended_action": action,
+            "assurance_score": max(0, round(100 - omega * 0.7)),
+            "explainability_note": f"Test: Action={action}.",
+            "component_breakdown": {},
+        }
 
     def test_gemini_guard_blocks_on_high_omega(self):
         GeminiGuard, _, _ = self._get_guards()
@@ -2181,9 +2181,9 @@ class TestFallbackEngine:
             "id": "m1", "content": "test", "type": "semantic",
             "timestamp_age_days": 10,
         }])
-        assert result.fallback is True
-        assert result.recommended_action == "WARN"
-        assert result.circuit_state in ("CLOSED", "OPEN")
+        assert result["fallback"] is True
+        assert result["recommended_action"] == "WARN"
+        assert result["circuit_state"] in ("CLOSED", "OPEN")
 
     def test_sdk_circuit_opens_after_failures(self):
         _sdk_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sdk", "python")
@@ -2206,7 +2206,7 @@ class TestFallbackEngine:
         assert sdk.circuit.state == "OPEN"
         # Next call should fail-fast (fallback without trying)
         result = sdk.preflight(memory_state=mem)
-        assert result.fallback is True
+        assert result["fallback"] is True
 
 
 class TestShapleyValues:
