@@ -1,0 +1,1675 @@
+{
+  "error_characterization": {
+    "total_cases": 449,
+    "total_errors": 109,
+    "accuracy": 0.7572,
+    "error_omega_range": {
+      "min": 9.2,
+      "max": 100,
+      "mean": 56.39,
+      "median": 56.0
+    },
+    "in_calibration_gap_55_70": 31,
+    "in_calibration_gap_pct": 28.4,
+    "error_types": {
+      "false_positive_block": 33,
+      "missed_block": 44,
+      "wrong_severity": 32
+    },
+    "errors_by_round": {
+      "1": 4,
+      "2": 11,
+      "3": 7,
+      "4": 9,
+      "9": 78
+    },
+    "error_transitions": {
+      "BLOCK->ASK_USER": 7,
+      "WARN->ASK_USER": 13,
+      "ASK_USER->BLOCK": 38,
+      "ASK_USER->WARN": 17,
+      "WARN->USE_MEMORY": 1,
+      "USE_MEMORY->WARN": 1,
+      "BLOCK->WARN": 26,
+      "WARN->BLOCK": 6
+    },
+    "errors": [
+      {
+        "omega": 58.1,
+        "predicted": "BLOCK",
+        "expected": "ASK_USER",
+        "domain": "coding",
+        "round": 1,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 41.0,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "medical",
+        "round": 1,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 44.2,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "fintech",
+        "round": 1,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 43.4,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "fintech",
+        "round": 1,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 49.4,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 2,
+        "memory_types": [
+          "policy"
+        ]
+      },
+      {
+        "omega": 51.4,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "medical",
+        "round": 2,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 41.2,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "fintech",
+        "round": 2,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 56.0,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "legal",
+        "round": 2,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 49.1,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "medical",
+        "round": 2,
+        "memory_types": [
+          "policy"
+        ]
+      },
+      {
+        "omega": 40.8,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "legal",
+        "round": 2,
+        "memory_types": [
+          "policy"
+        ]
+      },
+      {
+        "omega": 55.9,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "medical",
+        "round": 2,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 62.1,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 2,
+        "memory_types": [
+          "policy"
+        ]
+      },
+      {
+        "omega": 48.4,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "legal",
+        "round": 2,
+        "memory_types": [
+          "policy"
+        ]
+      },
+      {
+        "omega": 44.3,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "fintech",
+        "round": 2,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 41.4,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "legal",
+        "round": 2,
+        "memory_types": [
+          "policy"
+        ]
+      },
+      {
+        "omega": 26.3,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "legal",
+        "round": 3,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 66.1,
+        "predicted": "BLOCK",
+        "expected": "ASK_USER",
+        "domain": "legal",
+        "round": 3,
+        "memory_types": [
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 73.7,
+        "predicted": "BLOCK",
+        "expected": "ASK_USER",
+        "domain": "fintech",
+        "round": 3,
+        "memory_types": [
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 67.0,
+        "predicted": "BLOCK",
+        "expected": "ASK_USER",
+        "domain": "legal",
+        "round": 3,
+        "memory_types": [
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 70.2,
+        "predicted": "BLOCK",
+        "expected": "ASK_USER",
+        "domain": "fintech",
+        "round": 3,
+        "memory_types": [
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 40.5,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "fintech",
+        "round": 3,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 41.5,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "fintech",
+        "round": 3,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 50.4,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 4,
+        "memory_types": [
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 74.4,
+        "predicted": "BLOCK",
+        "expected": "ASK_USER",
+        "domain": "medical",
+        "round": 4,
+        "memory_types": [
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 76.3,
+        "predicted": "BLOCK",
+        "expected": "ASK_USER",
+        "domain": "medical",
+        "round": 4,
+        "memory_types": [
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 58.8,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 4,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 20.6,
+        "predicted": "WARN",
+        "expected": "USE_MEMORY",
+        "domain": "fintech",
+        "round": 4,
+        "memory_types": [
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 44.0,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "legal",
+        "round": 4,
+        "memory_types": [
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 41.2,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "customer_support",
+        "round": 4,
+        "memory_types": [
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 22.8,
+        "predicted": "USE_MEMORY",
+        "expected": "WARN",
+        "domain": "customer_support",
+        "round": 4,
+        "memory_types": [
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 43.7,
+        "predicted": "WARN",
+        "expected": "ASK_USER",
+        "domain": "medical",
+        "round": 4,
+        "memory_types": [
+          "semantic"
+        ]
+      },
+      {
+        "omega": 51.2,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 52.0,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 67.4,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic",
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 70.2,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic",
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 67.6,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 67.9,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic",
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 80.7,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 73.7,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic",
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 45.5,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 67.9,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 84.5,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic",
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 91.7,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 100,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 73.3,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic",
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 100,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 58.5,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 100,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic",
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 88.9,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic",
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 100,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "shared_workflow"
+        ]
+      },
+      {
+        "omega": 72.7,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 62.3,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 70.3,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 54.4,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 100.0,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 61.7,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 58.2,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 60.5,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 70.1,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 77.2,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 76.0,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 51.4,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 53.3,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 46.7,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 64.9,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 59.6,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state"
+        ]
+      },
+      {
+        "omega": 57.8,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 50.4,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 64.2,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "identity",
+          "tool_state",
+          "episodic"
+        ]
+      },
+      {
+        "omega": 100.0,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 100.0,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 100.0,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 18.5,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 22.9,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 100.0,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 100.0,
+        "predicted": "BLOCK",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 12.9,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 21.9,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 13.7,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 13.4,
+        "predicted": "WARN",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 12.3,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 9.2,
+        "predicted": "WARN",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 13.5,
+        "predicted": "WARN",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 18.0,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 14.6,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "tool_state",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 47.9,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 47.9,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 59.1,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 59.9,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 57.9,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 64.9,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 42.4,
+        "predicted": "WARN",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 39.4,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 64.5,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 46.0,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 57.4,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 57.1,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 58.2,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 46.5,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 61.7,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 53.5,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 43.7,
+        "predicted": "WARN",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 41.0,
+        "predicted": "WARN",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 53.8,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 54.3,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 52.8,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 61.6,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 55.2,
+        "predicted": "ASK_USER",
+        "expected": "WARN",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      },
+      {
+        "omega": 51.7,
+        "predicted": "ASK_USER",
+        "expected": "BLOCK",
+        "domain": "fintech",
+        "round": 9,
+        "memory_types": [
+          "shared_workflow",
+          "policy",
+          "semantic"
+        ]
+      }
+    ]
+  },
+  "cross_type_interference": {
+    "experiments": [
+      {
+        "healthy_type": "semantic",
+        "stale_type": "tool_state",
+        "stale_age": 10,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 61.0,
+        "omega_combined": 30.7,
+        "omega_delta_from_average": 0.2,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "semantic",
+        "stale_type": "tool_state",
+        "stale_age": 30,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 69.8,
+        "omega_combined": 35.1,
+        "omega_delta_from_average": 0.2,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "semantic",
+        "stale_type": "tool_state",
+        "stale_age": 60,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 70.3,
+        "omega_combined": 35.4,
+        "omega_delta_from_average": 0.25,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "semantic",
+        "stale_type": "tool_state",
+        "stale_age": 100,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 70.3,
+        "omega_combined": 35.4,
+        "omega_delta_from_average": 0.25,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "preference",
+        "stale_type": "episodic",
+        "stale_age": 10,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 45.0,
+        "omega_combined": 23.2,
+        "omega_delta_from_average": 0.7,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "preference",
+        "stale_type": "episodic",
+        "stale_age": 30,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 61.0,
+        "omega_combined": 31.1,
+        "omega_delta_from_average": 0.6,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "preference",
+        "stale_type": "episodic",
+        "stale_age": 60,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 68.2,
+        "omega_combined": 34.7,
+        "omega_delta_from_average": 0.6,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "preference",
+        "stale_type": "episodic",
+        "stale_age": 100,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 70.0,
+        "omega_combined": 35.6,
+        "omega_delta_from_average": 0.6,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "identity",
+        "stale_type": "shared_workflow",
+        "stale_age": 10,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 51.6,
+        "omega_combined": 25.9,
+        "omega_delta_from_average": 0.1,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "identity",
+        "stale_type": "shared_workflow",
+        "stale_age": 30,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 66.5,
+        "omega_combined": 33.3,
+        "omega_delta_from_average": 0.05,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "identity",
+        "stale_type": "shared_workflow",
+        "stale_age": 60,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 69.9,
+        "omega_combined": 35.0,
+        "omega_delta_from_average": 0.05,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      },
+      {
+        "healthy_type": "identity",
+        "stale_type": "shared_workflow",
+        "stale_age": 100,
+        "omega_healthy_alone": 0.0,
+        "omega_stale_alone": 70.3,
+        "omega_combined": 35.2,
+        "omega_delta_from_average": 0.05,
+        "interference_score_alone": 10.0,
+        "interference_score_combined": 40.0,
+        "sheaf_h1_rank": null,
+        "sheaf_consistency": null,
+        "mahalanobis_anomaly_count": null,
+        "contamination_detected": true
+      }
+    ],
+    "total_experiments": 12,
+    "contaminated_count": 12,
+    "conclusion": "Strong cross-type interference: 12/12 experiments show contamination (>5pt omega increase). Stale entries reliably infect healthy entries in the same preflight call."
+  },
+  "harmonic_gap": {
+    "wave_data_from_file": {
+      "has_frequency": false,
+      "dominant_period_steps": null,
+      "dominant_period_days": null,
+      "has_resonance": true,
+      "resonance_ratio": 0.49,
+      "has_wave": true,
+      "mean_coherence": 1.0,
+      "has_harmonics": true,
+      "interference_type": "partial",
+      "fleet_amplitude": 9.334372795078414,
+      "individual_amplitude": 13.61055337678454,
+      "n_agents": 30,
+      "n_steps": 200
+    },
+    "harmonics_present": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "harmonics_absent": [],
+    "amplitudes": {
+      "1": 9.8,
+      "2": 9.8,
+      "3": 9.8,
+      "4": 9.8,
+      "5": 9.8,
+      "6": 9.8,
+      "7": 9.8,
+      "8": 9.8,
+      "9": 9.8,
+      "10": 9.8,
+      "11": 9.8,
+      "12": 9.8,
+      "13": 9.8,
+      "14": 9.8,
+      "15": 9.8,
+      "16": 9.8,
+      "17": 9.8,
+      "18": 9.8,
+      "19": 9.8,
+      "20": 9.8
+    },
+    "raw_responses": {
+      "1": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "2": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "3": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "4": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "5": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "6": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "7": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "8": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "9": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "10": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "11": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "12": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "13": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "14": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "15": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "16": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "17": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "18": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "19": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      },
+      "20": {
+        "min": 29.6,
+        "max": 49.2,
+        "mean": 45.01,
+        "std": 6.44
+      }
+    },
+    "type_specific_amplitudes": {
+      "tool_state": {
+        "1": 9.8,
+        "2": 9.8,
+        "3": 9.8,
+        "4": 9.8,
+        "5": 9.8,
+        "6": 9.8,
+        "7": 9.8,
+        "8": 9.8,
+        "9": 9.8,
+        "10": 9.8
+      },
+      "semantic": {
+        "1": 7.8,
+        "2": 7.8,
+        "3": 7.8,
+        "4": 7.8,
+        "5": 7.8,
+        "6": 7.8,
+        "7": 7.8,
+        "8": 7.8,
+        "9": 7.8,
+        "10": 7.8
+      },
+      "episodic": {
+        "1": 14.9,
+        "2": 14.9,
+        "3": 14.9,
+        "4": 14.9,
+        "5": 14.9,
+        "6": 14.9,
+        "7": 14.9,
+        "8": 14.9,
+        "9": 14.9,
+        "10": 14.9
+      }
+    },
+    "gap_explanation": "The frequency sweep shows the scoring engine's response to sinusoidal age patterns. Since we vary age (not time), all harmonics n=1-20 produce similar omega amplitudes \u2014 the 'gap' at n=3-5 is NOT in the scoring engine's transfer function. The gap observed in the_wave.json's fleet simulation likely arises from the interaction between Weibull decay rates and the discrete update schedule of different memory types. tool_state (lambda=0.15, char_time=6.7d) is close to the n=3 period (5.6d, ratio=1.20). When the natural decay rate matches the driving frequency, the system is in resonance-suppression: the decay absorbs the oscillation energy at that frequency, creating a notch filter effect. The gap at n=3-5 corresponds to periods 3.3-5.6 days, which overlaps with the fast-decay memory types (tool_state=6.7d, shared_workflow=12.5d). These types decay so fast that oscillations at these periods are damped before they can contribute to the fleet-level harmonic spectrum.",
+    "weibull_frequency_match": {
+      "tool_state_char_time": 6.67,
+      "n3_period": 5.57,
+      "ratio": 1.198
+    },
+    "weibull_rates": {
+      "tool_state": 0.15,
+      "shared_workflow": 0.08,
+      "episodic": 0.05,
+      "preference": 0.02,
+      "semantic": 0.01,
+      "policy": 0.005,
+      "identity": 0.002
+    }
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "healing_budget": {
+    "F_baseline": 80.6126,
+    "mean_delta_F": 0.5537,
+    "total_budget": 145.6,
+    "per_type": {
+      "tool_state": 141.52,
+      "episodic": 131.63,
+      "semantic": 91.79,
+      "identity": 521.76
+    }
+  },
+  "decision_boundary": {
+    "weights": {
+      "risk": 0.237196,
+      "decay": 0.580298,
+      "trust": 0.651501,
+      "corruption": 0.427246,
+      "belief": 0.0
+    },
+    "threshold": 73.523915,
+    "equation": "w_risk*Risk + w_decay*Decay + w_trust*Trust + w_corruption*Corruption + w_belief*Belief > theta",
+    "accuracy": 0.75,
+    "n_samples": 500,
+    "n_block": 316,
+    "n_non_block": 184
+  },
+  "per_axis_temperature": {
+    "axes": [
+      {
+        "pc": 1,
+        "temperature": 2265.3777,
+        "dominant_component": "s_provenance",
+        "variance_explained": 0.5732,
+        "eigenvalue": 1132.6889,
+        "loadings": {
+          "s_freshness": 0.1032,
+          "s_drift": 0.4219,
+          "s_provenance": 0.7036,
+          "s_interference": 0.5624,
+          "r_belief": 0.0
+        }
+      },
+      {
+        "pc": 2,
+        "temperature": 945.6996,
+        "dominant_component": "s_freshness",
+        "variance_explained": 0.2393,
+        "eigenvalue": 472.8498,
+        "loadings": {
+          "s_freshness": -0.8788,
+          "s_drift": -0.3688,
+          "s_provenance": 0.295,
+          "s_interference": 0.0689,
+          "r_belief": 0.0
+        }
+      },
+      {
+        "pc": 3,
+        "temperature": 523.2332,
+        "dominant_component": "s_provenance",
+        "variance_explained": 0.1324,
+        "eigenvalue": 261.6166,
+        "loadings": {
+          "s_freshness": 0.3763,
+          "s_drift": -0.4884,
+          "s_provenance": 0.6227,
+          "s_interference": -0.4817,
+          "r_belief": 0.0
+        }
+      },
+      {
+        "pc": 4,
+        "temperature": 217.5742,
+        "dominant_component": "s_drift",
+        "variance_explained": 0.0551,
+        "eigenvalue": 108.7871,
+        "loadings": {
+          "s_freshness": -0.2748,
+          "s_drift": 0.6689,
+          "s_provenance": 0.1735,
+          "s_interference": -0.6685,
+          "r_belief": -0.0
+        }
+      },
+      {
+        "pc": 5,
+        "temperature": 0.0,
+        "dominant_component": "r_belief",
+        "variance_explained": 0.0,
+        "eigenvalue": 0.0,
+        "loadings": {
+          "s_freshness": 0.0,
+          "s_drift": 0.0,
+          "s_provenance": 0.0,
+          "s_interference": 0.0,
+          "r_belief": 1.0
+        }
+      }
+    ],
+    "hottest_axis": "s_provenance",
+    "coldest_axis": "r_belief",
+    "temperature_ratio": "Infinity"
+  },
+  "saturation_constant": {
+    "by_type": {
+      "tool_state": 2.2297,
+      "episodic": 2.2297,
+      "semantic": 2.2462,
+      "preference": 2.2297,
+      "shared_workflow": 2.2297,
+      "policy": 2.3328,
+      "identity": 2.4509
+    },
+    "by_domain": {
+      "general": 2.2462,
+      "fintech": 2.2281,
+      "medical": 2.2281
+    },
+    "mean": 2.2651,
+    "std": 0.069,
+    "coefficient_of_variation": 0.0304,
+    "universal": true
+  }
+}
