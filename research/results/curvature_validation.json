@@ -1,0 +1,60 @@
+{
+  "n_samples": 449,
+  "n_active_dimensions": 12,
+  "methods": [
+    {
+      "method": "Linear PCA (d=5)",
+      "K_mean": 0.0,
+      "K_std": 0.0,
+      "K_median": 0.0,
+      "K_abs_mean": 0.0,
+      "n_triangles": 1999,
+      "t_statistic": 0.28,
+      "significantly_nonzero": false
+    },
+    {
+      "method": "Kernel PCA (RBF \u03b3=0.1)",
+      "K_mean": -0.0,
+      "K_std": 0.0,
+      "K_median": -0.0,
+      "K_abs_mean": 0.0,
+      "n_triangles": 1999,
+      "t_statistic": 1.85,
+      "significantly_nonzero": false
+    },
+    {
+      "method": "Kernel PCA (RBF \u03b3=0.5)",
+      "K_mean": -0.0,
+      "K_std": 0.0,
+      "K_median": -0.0,
+      "K_abs_mean": 0.0,
+      "n_triangles": 1999,
+      "t_statistic": 1.64,
+      "significantly_nonzero": false
+    },
+    {
+      "method": "Kernel PCA (RBF \u03b3=1.0)",
+      "K_mean": -0.0,
+      "K_std": 0.0,
+      "K_median": -0.0,
+      "K_abs_mean": 0.0,
+      "n_triangles": 1999,
+      "t_statistic": 2.69,
+      "significantly_nonzero": true
+    },
+    {
+      "method": "Isomap (geodesic MDS, d=5)",
+      "K_mean": 0.0,
+      "K_std": 0.0,
+      "K_median": 0.0,
+      "K_abs_mean": 0.0,
+      "n_triangles": 1999,
+      "t_statistic": 0.88,
+      "significantly_nonzero": false
+    }
+  ],
+  "any_significant_curvature": true,
+  "nonlinear_methods_curved": true,
+  "linear_pca_curved": false,
+  "verdict": "K=0 was artifact \u2014 true space is curved"
+}

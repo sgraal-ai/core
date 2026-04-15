@@ -1,0 +1,89 @@
+{
+  "systems": {
+    "Sgraal": {
+      "kappa": 0.033,
+      "d": 12,
+      "geometry": "euclidean",
+      "K": 0,
+      "R": null,
+      "c_formula_a": 0.363
+    },
+    "Grok": {
+      "kappa": 0.68,
+      "d": 12,
+      "geometry": "hyperbolic",
+      "K": -1,
+      "R": 25.12,
+      "kappa_euclidean": 0.033,
+      "c_formula_a": 0.363
+    },
+    "ChatGPT": {
+      "kappa": 0.3,
+      "d": 11,
+      "geometry": "unknown",
+      "K": null,
+      "R": null,
+      "c_formula_a": 3.0
+    },
+    "DeepSeek": {
+      "kappa": 0.1,
+      "d": 11,
+      "geometry": "unknown",
+      "K": null,
+      "R": null,
+      "c_formula_a": 1.0
+    },
+    "Gemini": {
+      "kappa": 0.14,
+      "d": 4,
+      "geometry": "hyper_torus",
+      "K": null,
+      "R": null,
+      "c_formula_a": 0.42
+    }
+  },
+  "formula_a": {
+    "formula": "\u03ba \u00d7 (d-1)",
+    "values": {
+      "Sgraal": 0.363,
+      "Grok": 0.363,
+      "ChatGPT": 3.0,
+      "DeepSeek": 1.0,
+      "Gemini": 0.42
+    },
+    "universal": false
+  },
+  "geometric_correction": {
+    "sgraal_to_grok": {
+      "R": 25.12,
+      "exact": true
+    }
+  },
+  "optimal_single_param": {
+    "formula": "\u03ba \u00d7 d^-0.4",
+    "alpha": -0.4,
+    "cv": 0.7808,
+    "mean_c": 0.0516
+  },
+  "optimal_two_param": {
+    "formula": "\u03ba \u00d7 d^1.6 \u00d7 (d-1)^-1.7",
+    "alpha": 1.6,
+    "beta": -1.7,
+    "cv": 0.7784,
+    "mean_c": 0.1257
+  },
+  "universal_constant_found": false,
+  "candidate_formula": "\u03ba \u00d7 d^1.6 \u00d7 (d-1)^-1.7",
+  "candidate_value": 0.1257,
+  "what_unifies": [
+    "Sgraal-Grok exact geometric conversion (R=25.12)",
+    "All systems find a phase transition",
+    "Cluster structure: c\u22480.36 and c\u22481.0"
+  ],
+  "what_differs": [
+    "Measurement methodology",
+    "Signal definition",
+    "Corpus composition",
+    "Geometry"
+  ]
+}
