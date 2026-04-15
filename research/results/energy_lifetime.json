@@ -1,0 +1,98 @@
+{
+  "F_baseline": 80.6126,
+  "per_type": {
+    "tool_state": {
+      "lambda": 0.15,
+      "mean_sigma": 0.03506,
+      "F_over_sigma": 2299.28,
+      "days_until_entropy_death": 2299.28,
+      "sigma_samples": 20
+    },
+    "episodic": {
+      "lambda": 0.05,
+      "mean_sigma": 0.03215,
+      "F_over_sigma": 2507.39,
+      "days_until_entropy_death": 2507.39,
+      "sigma_samples": 20
+    },
+    "semantic": {
+      "lambda": 0.02,
+      "mean_sigma": 0.028325,
+      "F_over_sigma": 2845.99,
+      "days_until_entropy_death": 2845.99,
+      "sigma_samples": 20
+    },
+    "identity": {
+      "lambda": 0.002,
+      "mean_sigma": 0.02716,
+      "F_over_sigma": 2968.06,
+      "days_until_entropy_death": 2968.06,
+      "sigma_samples": 20
+    }
+  },
+  "healing_recovery": {
+    "tool_state": {
+      "F_before": 2.3435,
+      "F_after": 1.7739,
+      "delta_F": -0.5696,
+      "omega_before": 67.1,
+      "omega_after": 0.0
+    },
+    "episodic": {
+      "F_before": 2.3863,
+      "F_after": 1.7739,
+      "delta_F": -0.6124,
+      "omega_before": 65.0,
+      "omega_after": 0.0
+    },
+    "semantic": {
+      "F_before": 2.6521,
+      "F_after": 1.7739,
+      "delta_F": -0.8782,
+      "omega_before": 44.2,
+      "omega_after": 0.0
+    },
+    "identity": {
+      "F_before": 1.9284,
+      "F_after": 1.7739,
+      "delta_F": -0.1545,
+      "omega_before": 30.2,
+      "omega_after": 0.0
+    }
+  },
+  "energy_age_curve": {
+    "ages": [
+      0,
+      1,
+      2,
+      3,
+      5,
+      7,
+      10,
+      15,
+      20,
+      30,
+      45,
+      60,
+      75,
+      90
+    ],
+    "F_values": [
+      1.5519,
+      0.8955,
+      0.3986,
+      0.5615,
+      1.6637,
+      2.2438,
+      2.4764,
+      2.5002,
+      2.4795,
+      2.4588,
+      2.4536,
+      2.4532,
+      2.4532,
+      2.4532
+    ],
+    "shape": "non-monotonic: dip at age 2-3 then saturating rise to plateau ~2.45"
+  }
+}

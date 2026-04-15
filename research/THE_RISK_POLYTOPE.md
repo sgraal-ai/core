@@ -425,6 +425,46 @@ The thermodynamic quantities were not imposed — they emerged from practical sc
 
 **Open question:** Does the Jarzynski equality hold across non-equilibrium transitions? If ⟨exp(-W/kT)⟩ = exp(-ΔF/kT) holds for the measured free energy differences, the thermodynamic structure is rigorous, not merely analogical.
 
+### 8.4 Thermodynamic Lifetime: F/σ
+
+The ratio F/σ gives the remaining useful lifetime of a memory system — the number of calls before entropy production exhausts the free energy budget and the system reaches permanent BLOCK.
+
+| Memory type | Weibull λ | Mean σ | F/σ (calls) | Time to entropy death |
+|------------|-----------|--------|-------------|----------------------|
+| tool_state | 0.15 | 0.0351 | 2,299 | ~6.3 years |
+| episodic | 0.05 | 0.0322 | 2,507 | ~6.9 years |
+| semantic | 0.02 | 0.0283 | 2,846 | ~7.8 years |
+| identity | 0.002 | 0.0272 | 2,968 | ~8.1 years |
+
+The spread is only 29% — entropy production is dominated by scoring dynamics, not the Weibull decay rate. All memory types converge to the same thermodynamic fate on the same timescale.
+
+### 8.5 Healing as Energy Recovery
+
+A single REFETCH heal recovers free energy by returning the system to a lower-energy (healthier) state:
+
+| Memory type | F before heal | F after heal | ΔF | Energy recovered |
+|------------|--------------|-------------|-----|-----------------|
+| tool_state | 2.34 | 1.77 | -0.57 | 24% |
+| episodic | 2.39 | 1.77 | -0.61 | 26% |
+| semantic | 2.65 | 1.77 | -0.88 | 33% |
+| identity | 1.93 | 1.77 | -0.15 | 8% |
+
+Semantic entries yield the highest energy recovery per heal. Identity entries barely need healing — they degrade so slowly that there is little energy to recover. This provides a principled basis for healing prioritization: heal the entries with the highest ΔF first.
+
+### 8.6 Energy-Age Curve
+
+Free energy F as a function of memory age (tool_state, single entry) follows a **non-monotonic bathtub-then-plateau** curve with three distinct phases:
+
+| Phase | Age range | F behavior | Mechanism |
+|-------|----------|------------|-----------|
+| Relaxation | 0–2 days | F drops (1.55 → 0.40) | Score history stabilizes, surprise decreases |
+| Rapid rise | 3–15 days | F climbs (0.56 → 2.50) | Weibull decay activates, omega rises |
+| Saturation | 15+ days | F plateaus (~2.45) | Freshness fully decayed, no new information |
+
+The inflection point at age 2–3 days is where governance interventions have maximum ROI — healing before the rapid rise phase prevents the exponential energy cost of late intervention. The saturation plateau at F ≈ 2.45 represents the equilibrium free energy for a fully-stale entry.
+
+This curve is the thermodynamic justification for proactive healing: the energy cost of a REFETCH at age 2 is 0.40. The energy cost of waiting until age 15 is 2.50 — a 6.25× penalty for delayed action.
+
 ---
 
 ## 9. The Observer Effect
@@ -674,6 +714,9 @@ python3 scripts/formal_proofs.py
 
 # Validate the polytope
 python3 scripts/validate_polytope.py
+
+# Compute thermodynamic lifetime F/σ
+python3 scripts/energy_lifetime.py
 ```
 
 ---
