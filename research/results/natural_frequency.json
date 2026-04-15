@@ -1,0 +1,69 @@
+{
+  "agents_analyzed": 10,
+  "agent_periods": [
+    {
+      "agent_id": "research-agent-000",
+      "period_calls": 25.0,
+      "period_days": 25.0,
+      "peak_power": 0.0
+    },
+    {
+      "agent_id": "research-agent-001",
+      "period_calls": 3.6,
+      "period_days": 3.6,
+      "peak_power": 1721.3
+    },
+    {
+      "agent_id": "research-agent-002",
+      "period_calls": 3.6,
+      "period_days": 3.6,
+      "peak_power": 1503.0
+    },
+    {
+      "agent_id": "research-agent-003",
+      "period_calls": 25.0,
+      "period_days": 25.0,
+      "peak_power": 0.0
+    },
+    {
+      "agent_id": "research-agent-004",
+      "period_calls": 25.0,
+      "period_days": 25.0,
+      "peak_power": 0.0
+    },
+    {
+      "agent_id": "research-agent-005",
+      "period_calls": 25.0,
+      "period_days": 25.0,
+      "peak_power": 0.0
+    },
+    {
+      "agent_id": "research-agent-006",
+      "period_calls": 25.0,
+      "period_days": 25.0,
+      "peak_power": 0.0
+    },
+    {
+      "agent_id": "research-agent-007",
+      "period_calls": 2.1,
+      "period_days": 2.1,
+      "peak_power": 6921.8
+    },
+    {
+      "agent_id": "research-agent-008",
+      "period_calls": 25.0,
+      "period_days": 25.0,
+      "peak_power": 0.0
+    },
+    {
+      "agent_id": "research-agent-009",
+      "period_calls": 25.0,
+      "period_days": 25.0,
+      "peak_power": 0.0
+    }
+  ],
+  "fleet_median_period_days": 25.0,
+  "fleet_mean_period_days": 18.4,
+  "matches_weibull_episodic": false,
+  "weibull_episodic_halflife": 14
+}

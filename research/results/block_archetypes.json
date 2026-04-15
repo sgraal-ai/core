@@ -1,0 +1,12 @@
+{
+  "archetypes": [
+    {
+      "archetype_id": 1,
+      "representative": "Primary risk: s fairness at 100/100. Recommended fix: SLA_WARNING entry *.",
+      "size": 387,
+      "pct": 100.0
+    }
+  ],
+  "total_explanations": 387,
+  "coverage": 1.0
+}

@@ -1,0 +1,24 @@
+{
+  "compound_attacks_analyzed": 46,
+  "firing_order": [
+    {
+      "layer": "timestamp_integrity",
+      "avg_position": 1.48,
+      "fires_first_pct": 55.2,
+      "times_fired": 29
+    },
+    {
+      "layer": "provenance_chain_integrity",
+      "avg_position": 1.53,
+      "fires_first_pct": 53.1,
+      "times_fired": 32
+    },
+    {
+      "layer": "consensus_collapse",
+      "avg_position": 1.79,
+      "fires_first_pct": 33.3,
+      "times_fired": 39
+    }
+  ],
+  "canary_layer": "timestamp_integrity"
+}

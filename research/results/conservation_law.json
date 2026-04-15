@@ -1,0 +1,8 @@
+{
+  "conservation_detected": false,
+  "mean_component_sum": 280.2,
+  "std_component_sum": 9.5,
+  "agents_analyzed": 10,
+  "conserved_agents": 1,
+  "interpretation": "No conservation law: 1/10 agents have stable sums. Component_sum varies significantly \u2014 total risk is not conserved."
+}
