@@ -1,0 +1,191 @@
+{
+  "temperature_map": {
+    "PC1_Risk": {
+      "eigenvalue": 5.1367,
+      "pct_variance": 47.0,
+      "equipartition_deviation_pct": 135.1,
+      "temperature_T_i": 2.351
+    },
+    "PC2_Decay": {
+      "eigenvalue": 2.5084,
+      "pct_variance": 23.0,
+      "equipartition_deviation_pct": 14.8,
+      "temperature_T_i": 1.148
+    },
+    "PC3_Trust": {
+      "eigenvalue": 1.4884,
+      "pct_variance": 13.6,
+      "equipartition_deviation_pct": -31.9,
+      "temperature_T_i": 0.681
+    },
+    "PC4_Corruption": {
+      "eigenvalue": 0.9969,
+      "pct_variance": 9.1,
+      "equipartition_deviation_pct": -54.4,
+      "temperature_T_i": 0.456
+    },
+    "PC5_Belief": {
+      "eigenvalue": 0.7958,
+      "pct_variance": 7.3,
+      "equipartition_deviation_pct": -63.6,
+      "temperature_T_i": 0.364
+    }
+  },
+  "onsager_coupling": {
+    "matrix": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        -0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        -0.0,
+        0.0,
+        1.0,
+        -0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        -0.0,
+        1.0
+      ]
+    ],
+    "symmetric": true,
+    "max_asymmetry": 0.0,
+    "strongest_coupling": {
+      "axes": [
+        "PC3_Trust",
+        "PC5_Belief"
+      ],
+      "value": 0.0
+    }
+  },
+  "dissipative_structure": {
+    "entropy_production_per_axis": {
+      "PC1_Risk": 1.5696,
+      "PC2_Decay": 0.4655,
+      "PC3_Trust": 0.6061,
+      "PC4_Corruption": 0.4891,
+      "PC5_Belief": 0.2644
+    },
+    "sources": [
+      "PC1_Risk"
+    ],
+    "sinks": [
+      "PC2_Decay",
+      "PC4_Corruption",
+      "PC5_Belief"
+    ],
+    "dissipative_structure": true
+  },
+  "phase_trajectories": {
+    "trajectories": {
+      "thermo-agent-000": {
+        "type": "transient",
+        "converging": false,
+        "periodic": false,
+        "period": null,
+        "area_fill_ratio": 0.19,
+        "n_steps": 30
+      },
+      "thermo-agent-001": {
+        "type": "limit_cycle",
+        "converging": false,
+        "periodic": true,
+        "period": 12,
+        "area_fill_ratio": 0.18,
+        "n_steps": 30
+      },
+      "thermo-agent-002": {
+        "type": "transient",
+        "converging": false,
+        "periodic": false,
+        "period": null,
+        "area_fill_ratio": 0.15,
+        "n_steps": 30
+      },
+      "thermo-agent-003": {
+        "type": "limit_cycle",
+        "converging": false,
+        "periodic": true,
+        "period": 10,
+        "area_fill_ratio": 0.16,
+        "n_steps": 30
+      },
+      "thermo-agent-004": {
+        "type": "fixed_point",
+        "converging": true,
+        "periodic": false,
+        "period": null,
+        "area_fill_ratio": 0.15,
+        "n_steps": 30
+      },
+      "thermo-agent-005": {
+        "type": "limit_cycle",
+        "converging": false,
+        "periodic": true,
+        "period": 12,
+        "area_fill_ratio": 0.19,
+        "n_steps": 30
+      },
+      "thermo-agent-006": {
+        "type": "transient",
+        "converging": false,
+        "periodic": false,
+        "period": null,
+        "area_fill_ratio": 0.13,
+        "n_steps": 30
+      },
+      "thermo-agent-007": {
+        "type": "transient",
+        "converging": false,
+        "periodic": false,
+        "period": null,
+        "area_fill_ratio": 0.2,
+        "n_steps": 30
+      },
+      "thermo-agent-008": {
+        "type": "transient",
+        "converging": false,
+        "periodic": false,
+        "period": null,
+        "area_fill_ratio": 0.19,
+        "n_steps": 30
+      },
+      "thermo-agent-009": {
+        "type": "transient",
+        "converging": false,
+        "periodic": false,
+        "period": null,
+        "area_fill_ratio": 0.15,
+        "n_steps": 30
+      }
+    },
+    "type_counts": {
+      "transient": 6,
+      "limit_cycle": 3,
+      "fixed_point": 1
+    },
+    "dominant_type": "transient"
+  },
+  "elapsed_seconds": 14.2
+}
