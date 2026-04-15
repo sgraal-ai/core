@@ -7,7 +7,9 @@
   "free_energy": 80.6126,
   "convexity_ratio": 0.148,
   "mean_curvature": -0.0,
-  "kappa_mem": 0.046,
+  "kappa_mem": 0.033,
+  "kappa_mem_v1": 0.046,
+  "kappa_mem_note": "v1=0.046 (s_relevance inactive), v2=0.033 (s_relevance active, current)",
   "eigenvalues": [
     3.5973,
     2.1405,

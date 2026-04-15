@@ -1,0 +1,55 @@
+{
+  "curve": {
+    "0-10": {
+      "n": 6,
+      "p_success": 1.0
+    },
+    "10-20": {
+      "n": 4,
+      "p_success": 1.0
+    },
+    "20-30": {
+      "n": 9,
+      "p_success": 0.667
+    },
+    "30-40": {
+      "n": 2,
+      "p_success": 1.0
+    },
+    "40-50": {
+      "n": 6,
+      "p_success": 0.5
+    },
+    "50-60": {
+      "n": 15,
+      "p_success": 0.533
+    },
+    "60-70": {
+      "n": 16,
+      "p_success": 0.062
+    },
+    "70-80": {
+      "n": 16,
+      "p_success": 0.125
+    },
+    "80-90": {
+      "n": 20,
+      "p_success": 0.1
+    },
+    "90-100": {
+      "n": 9,
+      "p_success": 0.0
+    }
+  },
+  "sigmoid_fit": {
+    "beta": 0.07,
+    "theta": 46.0,
+    "fit_error": 0.0936,
+    "formula": "P(success) = 1 / (1 + exp(0.070 * (omega - 46.0)))"
+  },
+  "curve_shape": "step_function",
+  "inflection_point": 46.0,
+  "our_block_threshold": 70,
+  "threshold_comparison": "too_high",
+  "n_cases": 200
+}

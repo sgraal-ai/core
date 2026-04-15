@@ -1,0 +1,79 @@
+{
+  "total_cases": 449,
+  "decision_changes": 17,
+  "decision_change_rate": 0.0379,
+  "change_types": {
+    "BLOCK\u2192ASK_USER": 11,
+    "ASK_USER\u2192WARN": 4,
+    "WARN\u2192USE_MEMORY": 1,
+    "WARN\u2192ASK_USER": 1
+  },
+  "mean_omega_shift": -1.404,
+  "std_omega_shift": 1.5355,
+  "max_omega_shift": 1.9,
+  "min_omega_shift": -5.2,
+  "nonzero_shift_count": 357,
+  "boundary_cases_count": 117,
+  "boundary_cases": [
+    {
+      "case_id": "SG-0A8B30FA",
+      "omega_after": 49.5,
+      "threshold": 45,
+      "distance": 4.5
+    },
+    {
+      "case_id": "SG-2BE90B6B",
+      "omega_after": 29.1,
+      "threshold": 25,
+      "distance": 4.1
+    },
+    {
+      "case_id": "SG-53810780",
+      "omega_after": 67.8,
+      "threshold": 70,
+      "distance": 2.2
+    },
+    {
+      "case_id": "SG-EC3B6AFC",
+      "omega_after": 45.6,
+      "threshold": 45,
+      "distance": 0.6
+    },
+    {
+      "case_id": "SG-1B5BB755",
+      "omega_after": 41.0,
+      "threshold": 45,
+      "distance": 4.0
+    },
+    {
+      "case_id": "SG-48D0EFED",
+      "omega_after": 20.8,
+      "threshold": 25,
+      "distance": 4.2
+    },
+    {
+      "case_id": "SG-D8D907DF",
+      "omega_after": 44.2,
+      "threshold": 45,
+      "distance": 0.8
+    },
+    {
+      "case_id": "SG-840D7FF0",
+      "omega_after": 28.0,
+      "threshold": 25,
+      "distance": 3.0
+    },
+    {
+      "case_id": "SG-5F01D75C",
+      "omega_after": 43.4,
+      "threshold": 45,
+      "distance": 1.6
+    },
+    {
+      "case_id": "sd_001",
+      "omega_after": 49.4,
+      "threshold": 45,
+      "distance": 4.4
+    }
+  ]
+}

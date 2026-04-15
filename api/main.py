@@ -14709,6 +14709,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _block_exp = " ".join(_exp_parts)
     response["block_explanation"] = _block_exp
 
+    # Calibration warning (#614): omega 55-70 is empirically high-risk
+    # Data shows P(success) drops from ~50% to ~6% in this range.
+    # Threshold change deferred to #631 (needs production validation).
+    _cal_note = None
+    if 55 <= omega_out <= 70 and response.get("recommended_action") not in ("BLOCK",):
+        _cal_note = "omega in empirically high-risk zone (55-70). Consider ASK_USER escalation."
+    response["calibration_note"] = _cal_note
+
     # Track BLOCK rate for PagerDuty/OpsGenie (#395)
     _track_block_rate(
         is_block=response.get("recommended_action") == "BLOCK",

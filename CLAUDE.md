@@ -83,6 +83,13 @@ python3 tests/corpus/run_all.py
 ### Scoring weight note:
 - `s_recovery` has **negative weight** (-0.10) — recovery capability *reduces* risk. This is intentional.
 - Component weights sum to 0.95 (without PageRank) or 0.99 (with PageRank). The scoring engine normalizes by `sum(abs(applied_weights))` so `omega_mem_final` is always in [0.0, 100.0].
+- `s_relevance` now uses TF-IDF fallback (Jaccard token similarity) when no embeddings provided. Active on all 2+ entry calls. Previous: always 0.0.
+
+### Research findings (research/results/):
+- **The Risk Polytope**: 5-dimensional convex body with flat geometry. Axes: Risk, Decay, Trust, Corruption, Belief. 97.9% variance in 5 dimensions.
+- **κ_MEM = 0.033** (phase constant, updated from 0.046 after s_relevance activation). Percolation threshold of signal correlation graph.
+- **Calibration curve**: P(success|omega) shows step-function drop at omega ≈ 55-60. Inflection point θ=46. Our BLOCK=70 may be too high. Flagged as **#631** for production validation — do NOT change thresholds based on synthetic data.
+- **calibration_note field**: preflight response includes `calibration_note` when omega is in 55-70 range (empirically high-risk zone). Advisory only — does not change decision.
 
 ### When to run tests:
 - **pytest**: only when `api/` or `tests/` files change
