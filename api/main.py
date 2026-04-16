@@ -10237,6 +10237,7 @@ def compliance_nist_ai_rmf():
                     {"id": "GOVERN-1.4", "name": "Audit trail and decision logging", "satisfied": True, "evidence": "Every preflight, heal, and destroy is logged to Supabase audit_log with request_id, decision, omega, agent_id", "endpoint": "/v1/audit-log"},
                     {"id": "GOVERN-2.1", "name": "Roles and responsibilities documented", "satisfied": True, "evidence": "Tenant isolation via _safe_key_hash, per-tenant data scoping, service account separation", "endpoint": "/v1/team"},
                     {"id": "GOVERN-4.1", "name": "Incident response for AI failures", "satisfied": True, "evidence": "PagerDuty/OpsGenie auto-incident on BLOCK rate spike, daily scoring drift monitor", "endpoint": "/v1/scheduler/status"},
+                    {"id": "GOVERN-6.1", "name": "Third-party and plugin risk policies", "satisfied": True, "evidence": "Plugin system is registry-only — code upload over HTTP is rejected with 410 Gone. Plugins must be pre-installed via CI/CD. See plugins/base.py SECURITY_MODEL.", "endpoint": "/v1/plugins"},
                 ],
             },
             "MAP": {
@@ -10270,6 +10271,7 @@ def compliance_nist_ai_rmf():
                     {"id": "MANAGE-2.4", "name": "Incident response plan activated", "satisfied": True, "evidence": "Memory vaccination fleet-wide (<1s), compromised agent registry, POST /v1/destroy with Landauer+Merkle+audit", "endpoint": "/v1/destroy"},
                     {"id": "MANAGE-3.1", "name": "Benefits realized and impacts reduced", "satisfied": True, "evidence": "Expected savings metric per call (ρ=-0.54 ROI), dashboard shows real-time savings counter, 1,564× minimum ROI per call at break-even", "endpoint": "/v1/analytics/performance-roi"},
                     {"id": "MANAGE-4.1", "name": "Risk treatment documented", "satisfied": True, "evidence": "block_explanation field on every BLOCK, counterfactual_heal_suggested, proof-of-decision via W3C Verifiable Credentials", "endpoint": "/v1/certify"},
+                    {"id": "MANAGE-4.3", "name": "Continuous improvement via outcome feedback", "satisfied": True, "evidence": "Every /v1/outcome call updates the RL Q-table (Causal Q-learning with alpha=0.1, gamma=0.9) and geodesic weights; MTTR history, Hotelling T² reference distributions, and fleet health baselines all recalibrate from production outcomes", "endpoint": "/v1/outcome"},
                 ],
             },
         },
