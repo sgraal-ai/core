@@ -1,0 +1,36 @@
+Sgraal API has been deployed.
+
+1. Check pod status:
+   kubectl --namespace {{ .Release.Namespace }} get pods -l "app.kubernetes.io/name={{ include "sgraal.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+2. Port-forward for local testing:
+   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "sgraal.fullname" . }} 8000:{{ .Values.service.port }}
+
+   Then open http://localhost:8000/health
+
+{{- if .Values.ingress.enabled }}
+
+3. Ingress is enabled. The API is reachable at:
+  {{- range .Values.ingress.hosts }}
+  {{- range .paths }}
+   http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ .path }}
+  {{- end }}
+  {{- end }}
+{{- else }}
+
+3. Ingress is not enabled. To expose publicly, set --set ingress.enabled=true and configure your cluster's ingress controller.
+{{- end }}
+
+IMPORTANT — Secret configuration
+Before production use, provide the required secrets via --set flags or a values file:
+
+  helm upgrade {{ .Release.Name }} ./charts/sgraal \
+    --set secrets.supabaseUrl=https://your.supabase.co \
+    --set secrets.supabaseServiceKey=... \
+    --set secrets.redisUrl=https://your-redis.upstash.io \
+    --set secrets.redisToken=... \
+    --set secrets.attestationSecret=$(openssl rand -hex 32) \
+    --set secrets.passportSigningKey=$(openssl rand -hex 32) \
+    --set secrets.unsubHmacSecret=$(openssl rand -hex 32)
+
+Autoscaling: {{ if .Values.autoscaling.enabled }}enabled ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas at {{ .Values.autoscaling.targetCPUUtilizationPercentage }}% CPU){{ else }}disabled ({{ .Values.replicaCount }} replicas){{ end }}

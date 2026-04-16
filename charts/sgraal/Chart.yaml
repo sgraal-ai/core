@@ -1,0 +1,18 @@
+apiVersion: v2
+name: sgraal
+description: Memory governance protocol for AI agents — Helm chart for self-hosted Kubernetes deployment
+type: application
+version: 0.1.0
+appVersion: "0.3.1"
+home: https://sgraal.com
+sources:
+  - https://github.com/sgraal-ai/core
+maintainers:
+  - name: Sgraal
+    email: hello@sgraal.com
+keywords:
+  - ai
+  - memory
+  - governance
+  - agents
+  - llm

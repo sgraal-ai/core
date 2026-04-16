@@ -1,0 +1,112 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sgraal-operator
+  namespace: sgraal-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sgraal-operator
+rules:
+  # Framework bookkeeping: kopf needs to read/patch its own CRs and emit events.
+  - apiGroups:
+      - sgraal.com
+    resources:
+      - sgraaldeployments
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+      - update
+  - apiGroups:
+      - sgraal.com
+    resources:
+      - sgraaldeployments/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - sgraal.com
+    resources:
+      - sgraaldeployments/finalizers
+    verbs:
+      - update
+
+  # Managed workloads: Deployments and Services.
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  # Kopf emits Kubernetes Events for every reconcile outcome.
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+      - update
+  - apiGroups:
+      - events.k8s.io
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+      - update
+
+  # Required so kopf can discover CRDs and namespaces at startup.
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sgraal-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sgraal-operator
+subjects:
+  - kind: ServiceAccount
+    name: sgraal-operator
+    namespace: sgraal-system

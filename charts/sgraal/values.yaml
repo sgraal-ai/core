@@ -1,0 +1,95 @@
+replicaCount: 2
+
+image:
+  repository: sgraal-api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podSecurityContext:
+  fsGroup: 2000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: api.sgraal.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# Environment variables — non-secret config
+env:
+  ALLOWED_ORIGINS: "https://sgraal.com,https://app.sgraal.com,https://api.sgraal.com"
+  PORT: "8000"
+
+# Secrets — referenced from k8s Secret. Provide via --set or values file.
+secrets:
+  supabaseUrl: ""
+  supabaseKey: ""
+  supabaseServiceKey: ""
+  stripeSecretKey: ""
+  redisUrl: ""
+  redisToken: ""
+  attestationSecret: ""
+  passportSigningKey: ""
+  unsubHmacSecret: ""
+
+# Probes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 30
+  periodSeconds: 15
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podAnnotations: {}

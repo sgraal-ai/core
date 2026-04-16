@@ -93,3 +93,24 @@ For production self-hosting:
 - Set `STRIPE_SECRET_KEY` for billing
 - Run behind a reverse proxy (nginx, Caddy) with TLS
 - Set rate limits at the proxy level in addition to API-level limits
+
+## Kubernetes (Helm)
+
+For production Kubernetes deployments, use the Helm chart at `charts/sgraal/`.
+
+```bash
+helm install sgraal ./charts/sgraal \
+  --set secrets.supabaseUrl=https://your.supabase.co \
+  --set secrets.supabaseServiceKey=eyJ... \
+  --set secrets.redisUrl=https://your-redis.upstash.io \
+  --set secrets.redisToken=... \
+  --set secrets.attestationSecret=$(openssl rand -hex 32) \
+  --set secrets.passportSigningKey=$(openssl rand -hex 32) \
+  --set secrets.unsubHmacSecret=$(openssl rand -hex 32)
+```
+
+Default deployment: 2 replicas, HPA 2-10 at 70% CPU, ClusterIP service on port 8000. Enable ingress with `--set ingress.enabled=true`.
+
+Resources per pod: 250m CPU / 512Mi memory request, 1000m / 2Gi limit.
+
+See `charts/sgraal/values.yaml` for all configurable options.

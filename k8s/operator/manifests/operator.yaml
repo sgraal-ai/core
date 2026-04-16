@@ -1,0 +1,70 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sgraal-system
+  labels:
+    app.kubernetes.io/name: sgraal-operator
+    app.kubernetes.io/part-of: sgraal
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sgraal-operator
+  namespace: sgraal-system
+  labels:
+    app: sgraal-operator
+    app.kubernetes.io/name: sgraal-operator
+    app.kubernetes.io/part-of: sgraal
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sgraal-operator
+  template:
+    metadata:
+      labels:
+        app: sgraal-operator
+        app.kubernetes.io/name: sgraal-operator
+        app.kubernetes.io/part-of: sgraal
+    spec:
+      serviceAccountName: sgraal-operator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: operator
+          image: sgraal-operator:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
