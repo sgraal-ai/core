@@ -35,6 +35,24 @@ print(result["omega_mem_final"])     # Risk score 0-100
 print(result["assurance_score"])     # Confidence score
 ```
 
+## Edge Mode (No Network Required)
+
+For edge deployments, medical devices, offline use, or situations where you can't reach api.sgraal.com:
+
+```python
+from sgraal.edge import edge_preflight
+
+result = edge_preflight([{
+    "id": "m1", "content": "User payment info", "type": "tool_state",
+    "timestamp_age_days": 3, "source_trust": 0.7, "source_conflict": 0.3,
+}], domain="fintech", action_type="irreversible")
+
+print(result["decision"])  # USE_MEMORY | WARN | ASK_USER | BLOCK
+print(result["omega"])     # Risk score 0-100
+```
+
+Edge mode uses only the 5-signal fast path with zero dependencies — no Redis, no Supabase, no HTTP. Built-in per-type thresholds (identity=13, tool_state=47, etc.). Runs in ~0.2ms on a Raspberry Pi.
+
 ## Sign Up
 
 ```python

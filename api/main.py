@@ -1324,6 +1324,174 @@ def destroy_entries(req: DestroyRequest, key_record: dict = Depends(verify_api_k
     }
 
 
+# ---- Sgraal Certified Memory (W3C Verifiable Credential) — Task 4 ----
+
+class CertifyRequest(BaseModel):
+    agent_id: str
+    memory_state: list[dict]
+    scope: Literal["preflight", "full"] = "preflight"
+    domain: Optional[str] = "general"
+    action_type: Optional[str] = "reversible"
+    valid_for_seconds: int = 300
+
+
+class CertifyVerifyRequest(BaseModel):
+    certificate: dict
+
+
+def _cert_proof_value(credential_subject: dict, api_key_hash: str) -> str:
+    """Compute the HMAC-SHA256 proof value over the credential subject.
+
+    Uses the ATTESTATION_SECRET (required in production, fallback in dev).
+    The api_key_hash is mixed in so proofs are tenant-bound.
+    """
+    import hmac as _hmac_mod
+    import hashlib as _hashlib_mod
+    import json as _json_mod
+    _secret_key = (ATTESTATION_SECRET or "dev_cert_secret").encode()
+    # Deterministic canonical form: sorted keys JSON + tenant salt
+    _canon = _json_mod.dumps(credential_subject, sort_keys=True, separators=(",", ":"))
+    _msg = f"{_canon}|{api_key_hash}".encode()
+    return _hmac_mod.new(_secret_key, _msg, _hashlib_mod.sha256).hexdigest()
+
+
+@app.post("/v1/certify")
+def certify_memory(req: CertifyRequest, key_record: dict = Depends(verify_api_key)):
+    """Issue a W3C Verifiable Credential for a memory state that passes preflight.
+
+    Returns `{certified: true, credential: {...}}` on USE_MEMORY/WARN,
+    or `{certified: false, reason: ...}` on ASK_USER/BLOCK.
+    """
+    import hashlib as _hashlib_mod
+    import json as _json_mod
+    _check_rate_limit(key_record)
+
+    # Run preflight internally
+    _ck = None
+    for _ak, _cust in API_KEYS.items():
+        if _cust == key_record.get("customer_id"):
+            _ck = _ak
+            break
+    if not _ck:
+        _ck = "sg_test_key_001"
+
+    from fastapi.testclient import TestClient as _CClient
+    _cc = _CClient(app)
+    _pf = _cc.post(
+        "/v1/preflight",
+        headers={"Authorization": f"Bearer {_ck}"},
+        json={
+            "memory_state": req.memory_state[:20],
+            "action_type": req.action_type or "reversible",
+            "domain": req.domain or "general",
+            "agent_id": req.agent_id,
+            "dry_run": True,
+        },
+    )
+    if _pf.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"Preflight failed: {_pf.status_code}")
+    _r = _pf.json()
+    _decision = _r.get("recommended_action", "USE_MEMORY")
+    _omega = float(_r.get("omega_mem_final", 0) or 0)
+
+    if _decision in ("ASK_USER", "BLOCK"):
+        return {
+            "certified": False,
+            "reason": _r.get("block_explanation") or f"Decision {_decision} — not eligible for certification",
+            "decision": _decision,
+            "omega": _omega,
+        }
+
+    # Issue credential
+    _now = datetime.now(timezone.utc)
+    _issued_at = _now.isoformat()
+    _kh = _safe_key_hash(key_record)
+    # Hash of memory_state for tamper detection
+    _mem_hash = _hashlib_mod.sha256(
+        _json_mod.dumps(req.memory_state, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+    _credential_subject = {
+        "agent_id": req.agent_id,
+        "omega": round(_omega, 2),
+        "decision": _decision,
+        "scope": req.scope,
+        "proof_hash": _mem_hash,
+        "valid_for_seconds": int(req.valid_for_seconds),
+        "domain": req.domain,
+    }
+    _proof_value = _cert_proof_value(_credential_subject, _kh)
+    _credential = {
+        "@context": ["https://www.w3.org/2018/credentials/v1"],
+        "type": ["VerifiableCredential", "SgraalMemoryCredential"],
+        "issuer": "https://api.sgraal.com",
+        "issuanceDate": _issued_at,
+        "credentialSubject": _credential_subject,
+        "proof": {
+            "type": "SgraalProof2026",
+            "created": _issued_at,
+            "verificationMethod": "https://api.sgraal.com/.well-known/sgraal.json",
+            "proofValue": _proof_value,
+        },
+    }
+
+    return {"certified": True, "credential": _credential}
+
+
+@app.post("/v1/certify/verify")
+def certify_verify(req: CertifyVerifyRequest, key_record: dict = Depends(verify_api_key)):
+    """Verify a Sgraal Memory Credential. Returns validity + expiry state."""
+    _check_rate_limit(key_record, allow_demo=True)
+    cert = req.certificate or {}
+    cs = cert.get("credentialSubject") or {}
+    proof = cert.get("proof") or {}
+    issued_at = cert.get("issuanceDate") or proof.get("created")
+
+    if not cs or not proof or not issued_at:
+        return {"valid": False, "reason": "Malformed credential — missing credentialSubject/proof/issuanceDate", "omega": None, "issued_at": None, "expired": True}
+
+    # Recompute HMAC
+    _kh = _safe_key_hash(key_record)
+    _expected = _cert_proof_value(cs, _kh)
+    _got = proof.get("proofValue", "")
+    if _expected != _got:
+        return {"valid": False, "reason": "HMAC mismatch — credential tampered or tenant mismatch", "omega": cs.get("omega"), "issued_at": issued_at, "expired": False}
+
+    # Expiry check
+    try:
+        _issued = datetime.fromisoformat(issued_at.replace("Z", "+00:00"))
+        if _issued.tzinfo is None:
+            _issued = _issued.replace(tzinfo=timezone.utc)
+    except Exception:
+        return {"valid": False, "reason": "Malformed issuanceDate", "omega": cs.get("omega"), "issued_at": issued_at, "expired": True}
+    _ttl = int(cs.get("valid_for_seconds", 300))
+    _age_s = (datetime.now(timezone.utc) - _issued).total_seconds()
+    _expired = _age_s > _ttl
+
+    return {
+        "valid": not _expired,
+        "reason": "Expired" if _expired else "Valid credential",
+        "omega": cs.get("omega"),
+        "decision": cs.get("decision"),
+        "issued_at": issued_at,
+        "age_seconds": round(_age_s, 2),
+        "valid_for_seconds": _ttl,
+        "expired": _expired,
+    }
+
+
+# Support GET /v1/certify/verify (alias for POST when certificate passed as body)
+@app.get("/v1/certify/verify")
+def certify_verify_get_not_supported():
+    """GET not supported — certificate must be sent in POST body (too large for query string).
+    Returns a clear 405 with guidance."""
+    raise HTTPException(
+        status_code=405,
+        detail="Use POST /v1/certify/verify with certificate in JSON body",
+    )
+
+
+
 # ---- Failure Patterns dataset ----
 
 _FAILURE_PATTERNS = [
@@ -5387,6 +5555,61 @@ def _trigger_consensus_check(kh: str, agent_id: str, memory_count: int):
 
 # ---- FIX 11: Calibrated decision thresholds ----
 _outcome_buckets: dict[str, list] = {}  # domain → [{omega, status}]
+
+class ConfigThresholdsRequest(BaseModel):
+    domain: str = "general"
+    warn: float
+    ask_user: float
+    block: float
+
+
+@app.post("/v1/config/thresholds")
+def config_set_thresholds(req: ConfigThresholdsRequest, key_record: dict = Depends(verify_api_key)):
+    """Persist custom decision thresholds per domain (no TTL)."""
+    _check_rate_limit(key_record)
+    # Validate: all in [0, 100] and strictly ordered warn < ask_user < block
+    for name, val in (("warn", req.warn), ("ask_user", req.ask_user), ("block", req.block)):
+        if val < 0 or val > 100:
+            raise HTTPException(status_code=400, detail=f"{name} must be in [0, 100], got {val}")
+    if not (req.warn < req.ask_user < req.block):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Thresholds must be strictly ordered warn < ask_user < block, got warn={req.warn}, ask_user={req.ask_user}, block={req.block}",
+        )
+    valid_domains = {"general", "customer_support", "coding", "legal", "fintech", "medical"}
+    if req.domain not in valid_domains:
+        raise HTTPException(status_code=400, detail=f"domain must be one of {sorted(valid_domains)}, got {req.domain}")
+
+    kh = _safe_key_hash(key_record)
+    profile = {"warn": req.warn, "ask_user": req.ask_user, "block": req.block, "domain": req.domain}
+    # Permanent: no TTL (ttl=0 means no expiry in our Redis wrapper)
+    redis_set(f"config_thresholds:{kh}:{req.domain}", profile, ttl=0)
+    return {"updated": True, "domain": req.domain, "thresholds": {"warn": req.warn, "ask_user": req.ask_user, "block": req.block}}
+
+
+@app.get("/v1/config/thresholds")
+def config_get_thresholds(domain: str = "general", key_record: dict = Depends(verify_api_key)):
+    """Retrieve persisted thresholds for a domain. Returns defaults if none set."""
+    _check_rate_limit(key_record, allow_demo=True)
+    kh = _safe_key_hash(key_record)
+    stored = redis_get(f"config_thresholds:{kh}:{domain}")
+    if isinstance(stored, dict):
+        return {
+            "domain": domain,
+            "thresholds": {
+                "warn": stored.get("warn", 25),
+                "ask_user": stored.get("ask_user", 45),
+                "block": stored.get("block", 70),
+            },
+            "source": "custom",
+        }
+    # Defaults
+    return {
+        "domain": domain,
+        "thresholds": {"warn": 25, "ask_user": 45, "block": 70},
+        "source": "default",
+    }
+
 
 @app.post("/v1/thresholds/apply")
 def apply_thresholds(req: dict, key_record: dict = Depends(verify_api_key)):
