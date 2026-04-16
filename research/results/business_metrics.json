@@ -1,0 +1,388 @@
+{
+  "decision_boundaries": {
+    "action_distribution": {
+      "ASK_USER": 116,
+      "BLOCK": 316,
+      "USE_MEMORY": 24,
+      "WARN": 44
+    },
+    "ask_or_block_vs_other": {
+      "accuracy": 0.756,
+      "n_ask_or_block": 432,
+      "n_other": 68,
+      "rule": "dot(w,x) > theta => ASK_USER or BLOCK",
+      "threshold": 66.610396,
+      "weights": {
+        "belief": 0.0,
+        "corruption": 0.384021,
+        "decay": 0.564232,
+        "risk": 0.393456,
+        "trust": 0.615923
+      }
+    },
+    "block_vs_other": {
+      "accuracy": 0.75,
+      "n_block": 316,
+      "n_non_block": 184,
+      "n_samples": 500,
+      "source": "research/results/ten_findings_batch1.json",
+      "threshold": 73.523915,
+      "weights": {
+        "belief": 0.0,
+        "corruption": 0.427246,
+        "decay": 0.580298,
+        "risk": 0.237196,
+        "trust": 0.651501
+      }
+    },
+    "equations": [
+      "USE_MEMORY -> WARN: +0.4187*Risk +0.5684*Decay +0.6272*Trust +0.3290*Corruption +0.0000*Belief > 58.9217  =>  not USE_MEMORY (WARN/ASK_USER/BLOCK)",
+      "WARN -> ASK_USER: +0.3935*Risk +0.5642*Decay +0.6159*Trust +0.3840*Corruption +0.0000*Belief > 66.6104  =>  ASK_USER or BLOCK",
+      "ASK_USER -> BLOCK: +0.2372*Risk +0.5803*Decay +0.6515*Trust +0.4272*Corruption +0.0000*Belief > 73.5239  =>  BLOCK"
+    ],
+    "n_errors": 0,
+    "n_samples": 500,
+    "use_memory_vs_other": {
+      "accuracy": 0.774,
+      "n_other": 476,
+      "n_use_memory": 24,
+      "rule": "dot(w,x) > theta => not USE_MEMORY",
+      "threshold": 58.921652,
+      "weights": {
+        "belief": 0.0,
+        "corruption": 0.328953,
+        "decay": 0.568399,
+        "risk": 0.418721,
+        "trust": 0.627204
+      }
+    }
+  },
+  "expected_savings": {
+    "assumptions": {
+      "avg_transaction_value_usd": {
+        "coding": 100.0,
+        "customer_support": 50.0,
+        "fintech": 1000.0,
+        "general": 200.0,
+        "legal": 2000.0,
+        "medical": 5000.0
+      },
+      "block_rate_per_day_per_agent": 3.0,
+      "sigmoid_k": 0.15,
+      "sigmoid_theta": 46.0
+    },
+    "fleet_1000_agents_annual_savings": {
+      "assumptions": "1% block rate, 100 calls/agent/day => 1.0 blocks/agent/day, default transaction values, equal domain mix for headline, weighted P(failure)=0.6700 from calibration curve",
+      "blocks_per_agent_per_day": 1.0,
+      "num_agents": 1000,
+      "per_domain": {
+        "coding": 24455000.0,
+        "customer_support": 12227500.0,
+        "fintech": 244550000.0,
+        "general": 48910000.0,
+        "legal": 489100000.0,
+        "medical": 1222750000.0
+      },
+      "total_annual_savings_usd": 340332083.33,
+      "weighted_p_failure": 0.67
+    },
+    "method": "calibration curve (per-band P(success) from calibration_curve.json, sigmoid fallback for empty bands)",
+    "per_band_domain": {
+      "omega_35_fintech": {
+        "P_failure": 0.0,
+        "annual_savings_100_agents": 0.0,
+        "avg_transaction_value": 1000.0,
+        "expected_savings_per_block": 0.0,
+        "omega_band": "30-40"
+      },
+      "omega_35_legal": {
+        "P_failure": 0.0,
+        "annual_savings_100_agents": 0.0,
+        "avg_transaction_value": 2000.0,
+        "expected_savings_per_block": 0.0,
+        "omega_band": "30-40"
+      },
+      "omega_35_medical": {
+        "P_failure": 0.0,
+        "annual_savings_100_agents": 0.0,
+        "avg_transaction_value": 5000.0,
+        "expected_savings_per_block": 0.0,
+        "omega_band": "30-40"
+      },
+      "omega_50_fintech": {
+        "P_failure": 0.467,
+        "annual_savings_100_agents": 51136500.0,
+        "avg_transaction_value": 1000.0,
+        "expected_savings_per_block": 467.0,
+        "omega_band": "50-60"
+      },
+      "omega_50_legal": {
+        "P_failure": 0.467,
+        "annual_savings_100_agents": 102273000.0,
+        "avg_transaction_value": 2000.0,
+        "expected_savings_per_block": 934.0,
+        "omega_band": "50-60"
+      },
+      "omega_50_medical": {
+        "P_failure": 0.467,
+        "annual_savings_100_agents": 255682500.0,
+        "avg_transaction_value": 5000.0,
+        "expected_savings_per_block": 2335.0,
+        "omega_band": "50-60"
+      },
+      "omega_65_fintech": {
+        "P_failure": 0.938,
+        "annual_savings_100_agents": 102711000.0,
+        "avg_transaction_value": 1000.0,
+        "expected_savings_per_block": 938.0,
+        "omega_band": "60-70"
+      },
+      "omega_65_legal": {
+        "P_failure": 0.938,
+        "annual_savings_100_agents": 205422000.0,
+        "avg_transaction_value": 2000.0,
+        "expected_savings_per_block": 1876.0,
+        "omega_band": "60-70"
+      },
+      "omega_65_medical": {
+        "P_failure": 0.938,
+        "annual_savings_100_agents": 513555000.0,
+        "avg_transaction_value": 5000.0,
+        "expected_savings_per_block": 4690.0,
+        "omega_band": "60-70"
+      },
+      "omega_75_fintech": {
+        "P_failure": 0.875,
+        "annual_savings_100_agents": 95812500.0,
+        "avg_transaction_value": 1000.0,
+        "expected_savings_per_block": 875.0,
+        "omega_band": "70-80"
+      },
+      "omega_75_legal": {
+        "P_failure": 0.875,
+        "annual_savings_100_agents": 191625000.0,
+        "avg_transaction_value": 2000.0,
+        "expected_savings_per_block": 1750.0,
+        "omega_band": "70-80"
+      },
+      "omega_75_medical": {
+        "P_failure": 0.875,
+        "annual_savings_100_agents": 479062500.0,
+        "avg_transaction_value": 5000.0,
+        "expected_savings_per_block": 4375.0,
+        "omega_band": "70-80"
+      },
+      "omega_85_fintech": {
+        "P_failure": 0.9,
+        "annual_savings_100_agents": 98550000.0,
+        "avg_transaction_value": 1000.0,
+        "expected_savings_per_block": 900.0,
+        "omega_band": "80-90"
+      },
+      "omega_85_legal": {
+        "P_failure": 0.9,
+        "annual_savings_100_agents": 197100000.0,
+        "avg_transaction_value": 2000.0,
+        "expected_savings_per_block": 1800.0,
+        "omega_band": "80-90"
+      },
+      "omega_85_medical": {
+        "P_failure": 0.9,
+        "annual_savings_100_agents": 492750000.0,
+        "avg_transaction_value": 5000.0,
+        "expected_savings_per_block": 4500.0,
+        "omega_band": "80-90"
+      }
+    }
+  },
+  "vaccination_doubling": {
+    "model": "I(t) = N * (1 - exp(-k*t)); t(f) = -ln(1-f)/k",
+    "scenarios_linear": [
+      {
+        "label": "A",
+        "N": 1000,
+        "attacks_per_N_day": 2,
+        "k_per_day": 0.002,
+        "t_50_days": 346.57,
+        "t_90_days": 1151.29,
+        "t_99_days": 2302.59,
+        "doubling_time_surrogate_days": 346.57
+      },
+      {
+        "label": "B",
+        "N": 10000,
+        "attacks_per_N_day": 20,
+        "k_per_day": 0.002,
+        "t_50_days": 346.57,
+        "t_90_days": 1151.29,
+        "t_99_days": 2302.59,
+        "doubling_time_surrogate_days": 346.57
+      },
+      {
+        "label": "C",
+        "N": 100000,
+        "attacks_per_N_day": 200,
+        "k_per_day": 0.002,
+        "t_50_days": 346.57,
+        "t_90_days": 1151.29,
+        "t_99_days": 2302.59,
+        "doubling_time_surrogate_days": 346.57
+      }
+    ],
+    "scenarios_metcalfe": [
+      {
+        "N": 1000,
+        "attacks_per_N_day": 2.0,
+        "share_factor": 1.0,
+        "k_eff": 0.002,
+        "t_50_days": 346.57
+      },
+      {
+        "N": 10000,
+        "attacks_per_N_day": 20.0,
+        "share_factor": 1.3333,
+        "k_eff": 0.002666666666666667,
+        "t_50_days": 259.93
+      },
+      {
+        "N": 100000,
+        "attacks_per_N_day": 200.0,
+        "share_factor": 1.6667,
+        "k_eff": 0.0033333333333333335,
+        "t_50_days": 207.94
+      }
+    ],
+    "linear_multiplier": 1.0,
+    "metcalfe_multiplier": 1.6667,
+    "doubling_shrinks_with_scale": true,
+    "interpretation": "Under the pure linear model (constant per-agent attack rate), t_50 is scale-invariant \u2014 no network effect. Under a Metcalfe model where signature sharing propagates O(log N) faster as the fleet grows, t_50 shrinks by 1.67x from N=1k to N=100k."
+  },
+  "type_stratified_calibration": {
+    "per_type": {
+      "tool_state": {
+        "n_samples": 100,
+        "theta": 47,
+        "k": 1.0,
+        "sse": 0.0,
+        "mean_omega_success": 19.95,
+        "mean_omega_failure": 70.42,
+        "theta_in_55_70_band": false
+      },
+      "episodic": {
+        "n_samples": 100,
+        "theta": 37,
+        "k": 1.0,
+        "sse": 0.0,
+        "mean_omega_success": 6.82,
+        "mean_omega_failure": 68.67,
+        "theta_in_55_70_band": false
+      },
+      "semantic": {
+        "n_samples": 100,
+        "theta": 21,
+        "k": 1.0,
+        "sse": 0.0,
+        "mean_omega_success": 0.7,
+        "mean_omega_failure": 48.6,
+        "theta_in_55_70_band": false
+      },
+      "identity": {
+        "n_samples": 100,
+        "theta": 13,
+        "k": 1.0,
+        "sse": 0.0,
+        "mean_omega_success": 0.22,
+        "mean_omega_failure": 33.09,
+        "theta_in_55_70_band": false
+      },
+      "policy": {
+        "n_samples": 100,
+        "theta": 17,
+        "k": 1.0,
+        "sse": 0.0,
+        "mean_omega_success": 0.39,
+        "mean_omega_failure": 40.64,
+        "theta_in_55_70_band": false
+      },
+      "preference": {
+        "n_samples": 100,
+        "theta": 33,
+        "k": 1.0,
+        "sse": 0.0,
+        "mean_omega_success": 2.99,
+        "mean_omega_failure": 64.15,
+        "theta_in_55_70_band": false
+      },
+      "shared_workflow": {
+        "n_samples": 100,
+        "theta": 43,
+        "k": 1.0,
+        "sse": 0.0,
+        "mean_omega_success": 12.39,
+        "mean_omega_failure": 71.05,
+        "theta_in_55_70_band": false
+      }
+    },
+    "theta_spread": 34,
+    "type_specific_threshold_warranted": true,
+    "any_type_in_55_70_band": false,
+    "interpretation": "\u03b8 spread of 34.0 points across 7 memory types > 10-point criterion \u2192 type-specific thresholds recommended."
+  },
+  "q_table_convergence": {
+    "theoretical_bound": 3067629,
+    "theoretical_formula": "N = C * (1/(1-\u03b3)^2) * |S|*|A| * log(1/\u03b4) / \u03b1",
+    "parameters": {
+      "alpha": 0.1,
+      "gamma": 0.9,
+      "S": 256,
+      "A": 4,
+      "delta": 0.05,
+      "C": 1.0
+    },
+    "practical_estimate_per_domain": {
+      "general": {
+        "calls_to_converge": 10,
+        "currently_converged": true,
+        "learning_episodes": 200,
+        "confidence": 1.0,
+        "final_q_unique_values": 1
+      },
+      "fintech": {
+        "calls_to_converge": 10,
+        "currently_converged": true,
+        "learning_episodes": 200,
+        "confidence": 1.0,
+        "final_q_unique_values": 1
+      },
+      "medical": {
+        "calls_to_converge": 10,
+        "currently_converged": true,
+        "learning_episodes": 200,
+        "confidence": 1.0,
+        "final_q_unique_values": 1
+      },
+      "coding": {
+        "calls_to_converge": 10,
+        "currently_converged": true,
+        "learning_episodes": 200,
+        "confidence": 1.0,
+        "final_q_unique_values": 1
+      },
+      "legal": {
+        "calls_to_converge": 10,
+        "currently_converged": true,
+        "learning_episodes": 200,
+        "confidence": 1.0,
+        "final_q_unique_values": 1
+      },
+      "customer_support": {
+        "calls_to_converge": 10,
+        "currently_converged": true,
+        "learning_episodes": 200,
+        "confidence": 1.0,
+        "final_q_unique_values": 1
+      }
+    },
+    "recommendation": "Deploy with at least 10 preflight+outcome calls (practical empirical) before trusting RL adjustment. Theoretical worst-case bound of 3,067,629 is 306,763x higher than empirical \u2014 worst case is rarely reached because real state distributions are sparse."
+  }
+}

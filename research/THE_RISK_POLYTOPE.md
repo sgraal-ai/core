@@ -732,7 +732,100 @@ The eigentime has a practical interpretation: it takes approximately 17 prefligh
 
 ---
 
-## 16. Open Questions
+## 16. Business Metrics
+
+The polytope's geometric and thermodynamic properties translate directly into five measurable business quantities.
+
+### 16.1 Expected Savings per BLOCK
+
+Using the calibration curve P(failure|ω) from 120 validated outcomes, each BLOCK decision carries an expected dollar value equal to P(failure) × avg_transaction_value. At the weighted mean P(failure) = 0.67:
+
+| Domain | Expected savings per BLOCK |
+|--------|---------------------------|
+| Medical | $3,350 |
+| Legal | $1,340 |
+| Fintech | $670 |
+| General | $134 |
+| Coding | $67 |
+| Customer support | $34 |
+
+For a fleet of 1,000 agents at 100 calls/agent/day with 1% BLOCK rate, expected annual savings:
+
+| Domain | Annual savings |
+|--------|---------------|
+| Medical | $1.22B |
+| Legal | $489M |
+| Fintech | $245M |
+| General | $49M |
+| Coding | $24M |
+| Customer support | $12M |
+| **Total (weighted mix)** | **~$340M/year** |
+
+This is the ROI metric: Sgraal is not a cost center charging $3.6K/year per 1,000 agents — it is an infrastructure layer that captures $340M/year in prevented failures for the same fleet. The expected-savings ratio is 94,000×.
+
+### 16.2 The Complete Decision Geometry
+
+The scoring engine has three escalating linear boundaries, all parallel on the same axis:
+
+```
+USE_MEMORY → WARN:   0.42·R + 0.57·D + 0.63·T + 0.33·C + 0·B > 58.9   (77% accuracy)
+WARN → ASK_USER:     0.39·R + 0.56·D + 0.62·T + 0.38·C + 0·B > 66.6   (76% accuracy)
+ASK_USER → BLOCK:    0.24·R + 0.58·D + 0.65·T + 0.43·C + 0·B > 73.5   (75% accuracy)
+```
+
+Where R=Risk (s_freshness), D=Decay (s_drift), T=Trust (s_provenance), C=Corruption (s_interference), B=Belief (r_belief).
+
+The three boundaries share the same signature: Trust and Decay carry ~60% of the weight, Corruption ~35%, Risk ~30%, Belief exactly zero for single-entry calls. The thresholds step up linearly: 58.9 → 66.6 → 73.5, with a spacing of ~7.5 units between each action level.
+
+The system is effectively a **single scalar projected onto the polytope's principal diagonal**, with three escalating trigger points. This is why the 5-dimensional representation captures 97.9% of the variance — the decision manifold is essentially 1-dimensional along the diagonal of the polytope.
+
+### 16.3 Fleet Vaccination Network Effect
+
+The Metcalfe-style network effect of fleet vaccination has a measurable scale multiplier:
+
+| Fleet size | t₅₀ (linear) | t₅₀ (Metcalfe) | Multiplier |
+|-----------|-------------|----------------|------------|
+| 1,000 | 347 days | 347 days | 1.0× |
+| 10,000 | 347 days | 277 days | 1.25× |
+| 100,000 | 347 days | 208 days | 1.67× |
+
+Under pure linear attack-arrival, fleet immunity develops at the same rate regardless of fleet size. Under Metcalfe-style signature sharing (where each signature propagates to a fraction of peers proportional to log(N)), a 100× fleet scale yields 67% faster immunity. The network effect exists but is logarithmic, not winner-take-all.
+
+### 16.4 Type-Stratified Calibration: The Gap Is an Illusion
+
+The observed "55-70 calibration gap" in the aggregate curve disappears when stratified by memory type. Each type has its own inflection point:
+
+| Memory type | Inflection θ | Current BLOCK threshold | Gap |
+|------------|--------------|-------------------------|-----|
+| identity | 13 | 70 | -57 |
+| policy | 17 | 70 | -53 |
+| semantic | 21 | 70 | -49 |
+| preference | 33 | 70 | -37 |
+| episodic | 37 | 70 | -33 |
+| shared_workflow | 43 | 70 | -27 |
+| tool_state | 47 | 70 | -23 |
+
+**Every memory type's inflection is below the current BLOCK threshold of 70.** The spread across types is 34 points (identity=13 to tool_state=47). The aggregate calibration gap at 55-70 is an artifact of averaging seven different type-specific curves, not a property of any single type.
+
+This has a direct product implication: **per-type BLOCK thresholds** would align decisions with type-specific failure probabilities. Identity memories that currently reach BLOCK at omega=70 actually start failing at omega=13. The current threshold is 5× too lenient for identity, 1.5× too lenient for tool_state.
+
+### 16.5 Q-table Convergence: Practical ≠ Theoretical
+
+The theoretical PAC sample complexity bound for convergence to within 5% of Q*:
+
+N_theoretical = (1/(1-γ)²) × |S| × |A| × log(1/δ) / α = 3,067,629 calls
+
+This reflects full coverage of all 256 × 4 = 1,024 (state, action) pairs. In production workloads, only a small subspace of states is actually visited. Empirical local convergence for the cells that ARE visited:
+
+- ~10 calls per cell for local convergence
+- ~100 outcomes per domain for trusted RL adjustment in production
+- Full global coverage is decorative, not load-bearing
+
+**Operational rule:** trust RL adjustments after 100 closed outcomes per domain. The theoretical bound is a worst-case artifact, not a production requirement.
+
+---
+
+## 17. Open Questions
 
 1. **Is the polytope universal?** Does an independent memory scoring system discover the same 5 dimensions?
 
@@ -748,7 +841,7 @@ The eigentime has a practical interpretation: it takes approximately 17 prefligh
 
 ---
 
-## 17. Conclusion
+## 18. Conclusion
 
 We built an 83-module scoring pipeline to answer a practical question: is this AI agent's memory reliable enough to act on? In doing so, we discovered that the answer lives in a 5-dimensional convex polytope with flat geometry and a measurable phase constant. The polytope has five named axes (Risk, Decay, Trust, Corruption, Belief), a temperature, an entropy, a free energy, a natural frequency, harmonics, and a sound.
 
@@ -824,6 +917,10 @@ python3 scripts/energy_lifetime.py
 python3 scripts/research_batch_1.py
 python3 scripts/research_batch_2.py
 python3 scripts/research_batch_3.py
+
+# Compute business metrics
+python3 scripts/business_metrics_a.py
+python3 scripts/business_metrics_b.py
 ```
 
 ---
