@@ -1491,6 +1491,113 @@ def certify_verify_get_not_supported():
     )
 
 
+# ---- Plugin system (registry-only) ----
+# Plugin CODE is loaded from the filesystem at startup (pre-installed).
+# HTTP endpoints only manage activation/deactivation. Arbitrary code upload
+# is intentionally NOT supported — see plugins/base.py SECURITY_MODEL.
+
+try:
+    from plugins import registry as _plugin_registry, loader as _plugin_loader  # noqa: E402
+    # Load bundled example plugins (installed but NOT activated by default)
+    try:
+        _plugin_loader.load_examples(activate=False)
+    except Exception as _pe:
+        logger.warning("Failed to load example plugins: %s", _pe)
+    # Optionally load plugins from an operator-supplied directory
+    _custom_plugin_dir = os.getenv("SGRAAL_PLUGIN_DIR", "")
+    if _custom_plugin_dir:
+        try:
+            _plugin_loader.load_from_directory(_custom_plugin_dir, activate=False)
+        except Exception as _pe:
+            logger.warning("Failed to load plugins from %s: %s", _custom_plugin_dir, _pe)
+except Exception as _pe:
+    logger.warning("Plugin system unavailable: %s", _pe)
+    _plugin_registry = None  # type: ignore
+
+
+class PluginActivateRequest(BaseModel):
+    name: str
+
+
+@app.get("/v1/plugins")
+def plugins_list(key_record: dict = Depends(verify_api_key)):
+    """List all installed plugins with their activation state."""
+    _check_rate_limit(key_record, allow_demo=True)
+    if _plugin_registry is None:
+        return {"plugins": [], "error": "plugin_system_unavailable"}
+    return {"plugins": _plugin_registry.list_plugins()}
+
+
+@app.get("/v1/plugins/{name}")
+def plugins_get(name: str, key_record: dict = Depends(verify_api_key)):
+    """Get details for a single plugin by name."""
+    _check_rate_limit(key_record, allow_demo=True)
+    if _plugin_registry is None:
+        raise HTTPException(status_code=503, detail="Plugin system unavailable")
+    p = _plugin_registry.get_plugin(name)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"Plugin '{name}' is not installed")
+    return {**p.describe(), "active": _plugin_registry.is_active(name)}
+
+
+@app.post("/v1/plugins/activate")
+def plugins_activate(req: PluginActivateRequest, key_record: dict = Depends(verify_api_key)):
+    """Activate a pre-installed plugin. Plugin code is NOT accepted here —
+    only activation of plugins already loaded via filesystem or packages."""
+    _check_rate_limit(key_record)
+    if _plugin_registry is None:
+        raise HTTPException(status_code=503, detail="Plugin system unavailable")
+    if not _plugin_registry.activate(req.name):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Plugin '{req.name}' is not installed. Only pre-installed plugins can be activated. "
+                   "To install a plugin, deploy it via CI/CD (baked into the container image or pip-installed) "
+                   "and set SGRAAL_PLUGIN_DIR to its directory.",
+        )
+    return {"activated": True, "name": req.name}
+
+
+@app.post("/v1/plugins/deactivate")
+def plugins_deactivate(req: PluginActivateRequest, key_record: dict = Depends(verify_api_key)):
+    """Deactivate an active plugin. The plugin remains installed."""
+    _check_rate_limit(key_record)
+    if _plugin_registry is None:
+        raise HTTPException(status_code=503, detail="Plugin system unavailable")
+    was_active = _plugin_registry.deactivate(req.name)
+    return {"deactivated": was_active, "name": req.name}
+
+
+@app.delete("/v1/plugins/{name}")
+def plugins_unregister(name: str, key_record: dict = Depends(verify_api_key)):
+    """Unregister (uninstall) a plugin from the runtime registry.
+
+    NOTE: this does not delete the plugin's code from disk — on next server
+    restart the plugin will be re-loaded if its file is still in the plugin
+    directory. Use this endpoint for runtime deregistration only.
+    """
+    _check_rate_limit(key_record)
+    if _plugin_registry is None:
+        raise HTTPException(status_code=503, detail="Plugin system unavailable")
+    existed = _plugin_registry.unregister(name)
+    if not existed:
+        raise HTTPException(status_code=404, detail=f"Plugin '{name}' is not installed")
+    return {"unregistered": True, "name": name}
+
+
+# Alias: some SDKs use POST /v1/plugins/register — we return 410 Gone with
+# guidance toward the activate endpoint.
+@app.post("/v1/plugins/register")
+def plugins_register_not_supported():
+    """Code upload is not supported — plugins must be pre-installed via CI/CD.
+    Use POST /v1/plugins/activate with the name of a pre-installed plugin."""
+    raise HTTPException(
+        status_code=410,
+        detail="Remote plugin code upload is not supported for security reasons. "
+               "Deploy plugins via CI/CD (filesystem or pip package), then activate "
+               "with POST /v1/plugins/activate {\"name\": \"...\"}.",
+    )
+
+
 
 # ---- Failure Patterns dataset ----
 
@@ -11710,6 +11817,19 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
+    # --- Plugin hook: on_preflight_start ---------------------------------
+    _plugin_results: list = []
+    try:
+        if _plugin_registry is not None and _plugin_registry.active_plugins():
+            _plugin_registry.run_hook(
+                "on_preflight_start",
+                [e.model_dump() if hasattr(e, "model_dump") else dict(e.__dict__) for e in req.memory_state],
+                {"domain": req.domain, "action_type": req.action_type, "agent_id": req.agent_id},
+                collect_results=_plugin_results,
+            )
+    except Exception as _pe:
+        logger.debug("Plugin on_preflight_start failed: %s", _pe)
+
     # Rate limit check — atomic via Redis INCR (skip for dry_run/test/demo)
     tier = key_record.get("tier", "free")
     calls = key_record.get("calls_this_month", 0)  # stale Supabase count as baseline
@@ -16077,6 +16197,63 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 headers={"Content-Type": "application/json"}, timeout=2))
         except Exception:
             pass
+
+    # --- Plugin hooks: on_component_score / on_omega_computed / on_preflight_complete ---
+    try:
+        if _plugin_registry is not None and _plugin_registry.active_plugins():
+            _mem_for_plugin = [e.model_dump() if hasattr(e, "model_dump") else dict(e.__dict__) for e in req.memory_state]
+
+            # on_component_score — per component, update component_breakdown
+            _cb = response.get("component_breakdown", {})
+            if isinstance(_cb, dict):
+                _scoring_comp_keys = {"s_freshness", "s_drift", "s_provenance", "s_propagation",
+                                      "r_recall", "r_encode", "s_interference", "s_recovery",
+                                      "r_belief", "s_relevance"}
+                for _comp_name in list(_cb.keys()):
+                    if _comp_name not in _scoring_comp_keys:
+                        continue
+                    try:
+                        _old_score = float(_cb[_comp_name])
+                    except (TypeError, ValueError):
+                        continue
+                    _new_score = _plugin_registry.run_hook(
+                        "on_component_score",
+                        _comp_name, _old_score, _mem_for_plugin,
+                        collect_results=_plugin_results,
+                    )
+                    if isinstance(_new_score, (int, float)):
+                        _cb[_comp_name] = round(float(_new_score), 2)
+
+            # on_omega_computed — may override omega + decision
+            _current_omega = float(response.get("omega_mem_final", 0) or 0)
+            _current_decision = response.get("recommended_action", "USE_MEMORY")
+            _ctx = {"domain": req.domain, "action_type": req.action_type, "agent_id": req.agent_id}
+            _hook_out = _plugin_registry.run_hook(
+                "on_omega_computed",
+                _current_omega, _current_decision, _ctx,
+                collect_results=_plugin_results,
+            )
+            if isinstance(_hook_out, tuple) and len(_hook_out) == 2:
+                _new_omega, _new_decision = _hook_out
+                if abs(float(_new_omega) - _current_omega) > 1e-9:
+                    response["omega_mem_final"] = round(float(_new_omega), 2)
+                if _new_decision != _current_decision:
+                    response["recommended_action"] = _new_decision
+                    response["plugin_override_decision"] = True
+
+            # on_preflight_complete — full response transformation
+            _final = _plugin_registry.run_hook(
+                "on_preflight_complete",
+                response,
+                collect_results=_plugin_results,
+            )
+            if isinstance(_final, dict):
+                response = _final
+    except Exception as _pe:
+        logger.debug("Plugin hooks failed: %s", _pe)
+
+    if _plugin_results:
+        response["plugin_results"] = [pr.to_dict() for pr in _plugin_results]
 
     return response
 
