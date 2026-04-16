@@ -1,0 +1,729 @@
+{
+  "module_dag": {
+    "total_modules": 82,
+    "total_edges": 10,
+    "critical_path": [
+      "client_optimizer",
+      "omega_mem",
+      "pagerank"
+    ],
+    "critical_path_length": 3,
+    "bottleneck_modules": [
+      {
+        "module": "omega_mem",
+        "dependents": 4
+      },
+      {
+        "module": "compliance_engine",
+        "dependents": 2
+      },
+      {
+        "module": "dependency_graph",
+        "dependents": 1
+      },
+      {
+        "module": "pagerank",
+        "dependents": 1
+      },
+      {
+        "module": "sheaf_cohomology",
+        "dependents": 1
+      },
+      {
+        "module": "sinkhorn",
+        "dependents": 1
+      },
+      {
+        "module": "arrhenius",
+        "dependents": 0
+      },
+      {
+        "module": "banach",
+        "dependents": 0
+      },
+      {
+        "module": "bocpd",
+        "dependents": 0
+      },
+      {
+        "module": "calibration",
+        "dependents": 0
+      }
+    ],
+    "parallel_groups": [
+      [
+        "arrhenius",
+        "banach",
+        "bocpd",
+        "calibration",
+        "causal_graph",
+        "cohomological_gradient",
+        "compliance_engine",
+        "consolidation",
+        "copula",
+        "cox_hazard",
+        "ctl_verification",
+        "cvar",
+        "dependency_graph",
+        "differential_privacy",
+        "dirichlet_process",
+        "dual_process_auq",
+        "ergodicity",
+        "expected_utility",
+        "extended_freshness",
+        "fisher_rao",
+        "frechet",
+        "free_energy",
+        "frontdoor",
+        "geodesic_flow",
+        "gumbel_softmax",
+        "hawkes_process",
+        "hmm",
+        "homology_torsion",
+        "hotelling_t2",
+        "info_thermodynamics",
+        "jump_diffusion",
+        "kalman_forecast",
+        "koopman",
+        "levy_flight",
+        "lqr_control",
+        "lyapunov",
+        "lyapunov_exponent",
+        "mahalanobis",
+        "mdp",
+        "mewma",
+        "mttr",
+        "mutual_information",
+        "ornstein_uhlenbeck",
+        "owa_provenance",
+        "page_hinkley",
+        "pagerank",
+        "particle_filter",
+        "pctl_verification",
+        "persistence_landscape",
+        "persistent_homology",
+        "poisson_recall",
+        "policy_gradient",
+        "privacy_layer",
+        "provenance_entropy",
+        "rate_distortion",
+        "recursive_colimit",
+        "ricci_curvature",
+        "rl_policy",
+        "rmt",
+        "roc_monitoring",
+        "security_transfer_entropy",
+        "sheaf_cohomology",
+        "simulated_annealing",
+        "sinkhorn",
+        "sparse_merkle",
+        "spectral",
+        "stability_score",
+        "subjective_logic",
+        "thread_manager",
+        "topological_entropy",
+        "trend_detection",
+        "unified_loss"
+      ],
+      [
+        "drift_detector",
+        "formal_verification",
+        "healing_policy_matrix",
+        "memory_tracker",
+        "omega_mem",
+        "zk_sheaf"
+      ],
+      [
+        "client_optimizer",
+        "fallback_engine",
+        "importance_detector",
+        "shapley_explain"
+      ]
+    ],
+    "max_parallel_speedup": "27.33x",
+    "longest_parallel_group_size": 72,
+    "num_layers": 3,
+    "adjacency": {
+      "arrhenius": [],
+      "banach": [],
+      "bocpd": [],
+      "calibration": [],
+      "causal_graph": [],
+      "client_optimizer": [
+        "omega_mem"
+      ],
+      "cohomological_gradient": [],
+      "compliance_engine": [],
+      "consolidation": [],
+      "copula": [],
+      "cox_hazard": [],
+      "ctl_verification": [],
+      "cvar": [],
+      "dependency_graph": [],
+      "differential_privacy": [],
+      "dirichlet_process": [],
+      "drift_detector": [
+        "sinkhorn"
+      ],
+      "dual_process_auq": [],
+      "ergodicity": [],
+      "expected_utility": [],
+      "extended_freshness": [],
+      "fallback_engine": [
+        "omega_mem"
+      ],
+      "fisher_rao": [],
+      "formal_verification": [
+        "compliance_engine"
+      ],
+      "frechet": [],
+      "free_energy": [],
+      "frontdoor": [],
+      "geodesic_flow": [],
+      "gumbel_softmax": [],
+      "hawkes_process": [],
+      "healing_policy_matrix": [
+        "compliance_engine"
+      ],
+      "hmm": [],
+      "homology_torsion": [],
+      "hotelling_t2": [],
+      "importance_detector": [
+        "omega_mem"
+      ],
+      "info_thermodynamics": [],
+      "jump_diffusion": [],
+      "kalman_forecast": [],
+      "koopman": [],
+      "levy_flight": [],
+      "lqr_control": [],
+      "lyapunov": [],
+      "lyapunov_exponent": [],
+      "mahalanobis": [],
+      "mdp": [],
+      "memory_tracker": [
+        "dependency_graph"
+      ],
+      "mewma": [],
+      "mttr": [],
+      "mutual_information": [],
+      "omega_mem": [
+        "pagerank"
+      ],
+      "ornstein_uhlenbeck": [],
+      "owa_provenance": [],
+      "page_hinkley": [],
+      "pagerank": [],
+      "particle_filter": [],
+      "pctl_verification": [],
+      "persistence_landscape": [],
+      "persistent_homology": [],
+      "poisson_recall": [],
+      "policy_gradient": [],
+      "privacy_layer": [],
+      "provenance_entropy": [],
+      "rate_distortion": [],
+      "recursive_colimit": [],
+      "ricci_curvature": [],
+      "rl_policy": [],
+      "rmt": [],
+      "roc_monitoring": [],
+      "security_transfer_entropy": [],
+      "shapley_explain": [
+        "omega_mem"
+      ],
+      "sheaf_cohomology": [],
+      "simulated_annealing": [],
+      "sinkhorn": [],
+      "sparse_merkle": [],
+      "spectral": [],
+      "stability_score": [],
+      "subjective_logic": [],
+      "thread_manager": [],
+      "topological_entropy": [],
+      "trend_detection": [],
+      "unified_loss": [],
+      "zk_sheaf": [
+        "sheaf_cohomology"
+      ]
+    }
+  },
+  "kappa_mem_dollar_value": {
+    "kappa_mem": 0.033,
+    "block_rate_at_threshold": 0.046,
+    "cost_per_call": {
+      "full": 0.001,
+      "lite": 1e-05
+    },
+    "savings_per_block": {
+      "medical": 3350.0,
+      "legal": 1340.0,
+      "fintech": 670.0,
+      "general": 134.0,
+      "coding": 67.0,
+      "customer_support": 34.0
+    },
+    "per_domain_tier": {
+      "medical_lite": {
+        "domain": "medical",
+        "tier": "lite",
+        "savings_per_call": 154.1,
+        "cost_per_call": 1e-05,
+        "roi_multiplier_per_call": 15410000.0,
+        "calls_paid_by_one_block": 335000000,
+        "break_even_annual_call_volume": 335000000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 335,000,000 calls of governance. ROI = 15,410,000.0x per call."
+      },
+      "medical_full": {
+        "domain": "medical",
+        "tier": "full",
+        "savings_per_call": 154.1,
+        "cost_per_call": 0.001,
+        "roi_multiplier_per_call": 154100.0,
+        "calls_paid_by_one_block": 3350000,
+        "break_even_annual_call_volume": 3350000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 3,350,000 calls of governance. ROI = 154,100.0x per call."
+      },
+      "legal_lite": {
+        "domain": "legal",
+        "tier": "lite",
+        "savings_per_call": 61.64,
+        "cost_per_call": 1e-05,
+        "roi_multiplier_per_call": 6164000.0,
+        "calls_paid_by_one_block": 133999999,
+        "break_even_annual_call_volume": 134000000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 133,999,999 calls of governance. ROI = 6,164,000.0x per call."
+      },
+      "legal_full": {
+        "domain": "legal",
+        "tier": "full",
+        "savings_per_call": 61.64,
+        "cost_per_call": 0.001,
+        "roi_multiplier_per_call": 61640.0,
+        "calls_paid_by_one_block": 1340000,
+        "break_even_annual_call_volume": 1340000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 1,340,000 calls of governance. ROI = 61,640.0x per call."
+      },
+      "fintech_lite": {
+        "domain": "fintech",
+        "tier": "lite",
+        "savings_per_call": 30.82,
+        "cost_per_call": 1e-05,
+        "roi_multiplier_per_call": 3082000.0,
+        "calls_paid_by_one_block": 66999999,
+        "break_even_annual_call_volume": 67000000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 66,999,999 calls of governance. ROI = 3,082,000.0x per call."
+      },
+      "fintech_full": {
+        "domain": "fintech",
+        "tier": "full",
+        "savings_per_call": 30.82,
+        "cost_per_call": 0.001,
+        "roi_multiplier_per_call": 30820.0,
+        "calls_paid_by_one_block": 670000,
+        "break_even_annual_call_volume": 670000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 670,000 calls of governance. ROI = 30,820.0x per call."
+      },
+      "general_lite": {
+        "domain": "general",
+        "tier": "lite",
+        "savings_per_call": 6.164,
+        "cost_per_call": 1e-05,
+        "roi_multiplier_per_call": 616400.0,
+        "calls_paid_by_one_block": 13399999,
+        "break_even_annual_call_volume": 13400000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 13,399,999 calls of governance. ROI = 616,400.0x per call."
+      },
+      "general_full": {
+        "domain": "general",
+        "tier": "full",
+        "savings_per_call": 6.164,
+        "cost_per_call": 0.001,
+        "roi_multiplier_per_call": 6164.0,
+        "calls_paid_by_one_block": 134000,
+        "break_even_annual_call_volume": 134000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 134,000 calls of governance. ROI = 6,164.0x per call."
+      },
+      "coding_lite": {
+        "domain": "coding",
+        "tier": "lite",
+        "savings_per_call": 3.082,
+        "cost_per_call": 1e-05,
+        "roi_multiplier_per_call": 308200.0,
+        "calls_paid_by_one_block": 6699999,
+        "break_even_annual_call_volume": 6700000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 6,699,999 calls of governance. ROI = 308,200.0x per call."
+      },
+      "coding_full": {
+        "domain": "coding",
+        "tier": "full",
+        "savings_per_call": 3.082,
+        "cost_per_call": 0.001,
+        "roi_multiplier_per_call": 3082.0,
+        "calls_paid_by_one_block": 67000,
+        "break_even_annual_call_volume": 67000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 67,000 calls of governance. ROI = 3,082.0x per call."
+      },
+      "customer_support_lite": {
+        "domain": "customer_support",
+        "tier": "lite",
+        "savings_per_call": 1.564,
+        "cost_per_call": 1e-05,
+        "roi_multiplier_per_call": 156400.0,
+        "calls_paid_by_one_block": 3399999,
+        "break_even_annual_call_volume": 3400000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 3,399,999 calls of governance. ROI = 156,400.0x per call."
+      },
+      "customer_support_full": {
+        "domain": "customer_support",
+        "tier": "full",
+        "savings_per_call": 1.564,
+        "cost_per_call": 0.001,
+        "roi_multiplier_per_call": 1564.0,
+        "calls_paid_by_one_block": 34000,
+        "break_even_annual_call_volume": 34000.0,
+        "profitable_from_call_1": true,
+        "roi_above_10x": true,
+        "break_even_analysis": "Every call is profitable. One prevented BLOCK pays for 34,000 calls of governance. ROI = 1,564.0x per call."
+      }
+    },
+    "economic_verdict": "At every tested domain x tier, governance ROI > 10x per call. Governance is economically inevitable from call #1."
+  },
+  "component_correlation": {
+    "n_cases": 449,
+    "components": [
+      "s_freshness",
+      "s_drift",
+      "s_provenance",
+      "s_propagation",
+      "r_recall",
+      "r_encode",
+      "s_interference",
+      "s_recovery",
+      "r_belief",
+      "s_relevance"
+    ],
+    "correlation_matrix": {
+      "s_freshness": {
+        "s_freshness": 1.0,
+        "s_drift": 0.5655,
+        "s_provenance": 0.4243,
+        "s_propagation": 0.0844,
+        "r_recall": 0.5432,
+        "r_encode": 0.2977,
+        "s_interference": 0.2904,
+        "s_recovery": -0.1917,
+        "r_belief": 0.1496,
+        "s_relevance": 0.069
+      },
+      "s_drift": {
+        "s_freshness": 0.5655,
+        "s_drift": 1.0,
+        "s_provenance": 0.6006,
+        "s_propagation": 0.3015,
+        "r_recall": 0.9547,
+        "r_encode": 0.3569,
+        "s_interference": 0.4788,
+        "s_recovery": -0.3489,
+        "r_belief": 0.2875,
+        "s_relevance": -0.0318
+      },
+      "s_provenance": {
+        "s_freshness": 0.4243,
+        "s_drift": 0.6006,
+        "s_provenance": 1.0,
+        "s_propagation": 0.304,
+        "r_recall": 0.4987,
+        "r_encode": 0.6358,
+        "s_interference": 0.695,
+        "s_recovery": -0.0793,
+        "r_belief": 0.1005,
+        "s_relevance": -0.0207
+      },
+      "s_propagation": {
+        "s_freshness": 0.0844,
+        "s_drift": 0.3015,
+        "s_provenance": 0.304,
+        "s_propagation": 1.0,
+        "r_recall": 0.2553,
+        "r_encode": 0.4211,
+        "s_interference": 0.2357,
+        "s_recovery": 0.1929,
+        "r_belief": 0.3445,
+        "s_relevance": 0.2845
+      },
+      "r_recall": {
+        "s_freshness": 0.5432,
+        "s_drift": 0.9547,
+        "s_provenance": 0.4987,
+        "s_propagation": 0.2553,
+        "r_recall": 1.0,
+        "r_encode": 0.3071,
+        "s_interference": 0.2999,
+        "s_recovery": -0.4084,
+        "r_belief": 0.2847,
+        "s_relevance": -0.0037
+      },
+      "r_encode": {
+        "s_freshness": 0.2977,
+        "s_drift": 0.3569,
+        "s_provenance": 0.6358,
+        "s_propagation": 0.4211,
+        "r_recall": 0.3071,
+        "r_encode": 1.0,
+        "s_interference": 0.6119,
+        "s_recovery": 0.0732,
+        "r_belief": 0.1755,
+        "s_relevance": 0.4148
+      },
+      "s_interference": {
+        "s_freshness": 0.2904,
+        "s_drift": 0.4788,
+        "s_provenance": 0.695,
+        "s_propagation": 0.2357,
+        "r_recall": 0.2999,
+        "r_encode": 0.6119,
+        "s_interference": 1.0,
+        "s_recovery": -0.3156,
+        "r_belief": -0.2503,
+        "s_relevance": 0.0686
+      },
+      "s_recovery": {
+        "s_freshness": -0.1917,
+        "s_drift": -0.3489,
+        "s_provenance": -0.0793,
+        "s_propagation": 0.1929,
+        "r_recall": -0.4084,
+        "r_encode": 0.0732,
+        "s_interference": -0.3156,
+        "s_recovery": 1.0,
+        "r_belief": 0.7395,
+        "s_relevance": 0.1069
+      },
+      "r_belief": {
+        "s_freshness": 0.1496,
+        "s_drift": 0.2875,
+        "s_provenance": 0.1005,
+        "s_propagation": 0.3445,
+        "r_recall": 0.2847,
+        "r_encode": 0.1755,
+        "s_interference": -0.2503,
+        "s_recovery": 0.7395,
+        "r_belief": 1.0,
+        "s_relevance": 0.0975
+      },
+      "s_relevance": {
+        "s_freshness": 0.069,
+        "s_drift": -0.0318,
+        "s_provenance": -0.0207,
+        "s_propagation": 0.2845,
+        "r_recall": -0.0037,
+        "r_encode": 0.4148,
+        "s_interference": 0.0686,
+        "s_recovery": 0.1069,
+        "r_belief": 0.0975,
+        "s_relevance": 1.0
+      }
+    },
+    "high_correlation_pairs_r_gt_0_7": [
+      {
+        "a": "s_drift",
+        "b": "r_recall",
+        "r": 0.9547
+      },
+      {
+        "a": "s_recovery",
+        "b": "r_belief",
+        "r": 0.7395
+      }
+    ],
+    "anti_correlation_pairs_r_lt_minus_0_3": [
+      {
+        "a": "r_recall",
+        "b": "s_recovery",
+        "r": -0.4084
+      },
+      {
+        "a": "s_drift",
+        "b": "s_recovery",
+        "r": -0.3489
+      },
+      {
+        "a": "s_interference",
+        "b": "s_recovery",
+        "r": -0.3156
+      }
+    ],
+    "most_independent_components_by_mean_abs_corr": [
+      {
+        "component": "s_relevance",
+        "mean_abs_corr": 0.1219
+      },
+      {
+        "component": "s_propagation",
+        "mean_abs_corr": 0.2693
+      },
+      {
+        "component": "r_belief",
+        "mean_abs_corr": 0.27
+      }
+    ],
+    "mean_abs_corr_all": {
+      "s_freshness": 0.2906,
+      "s_drift": 0.4363,
+      "s_provenance": 0.3732,
+      "s_propagation": 0.2693,
+      "r_recall": 0.3951,
+      "r_encode": 0.366,
+      "s_interference": 0.3607,
+      "s_recovery": 0.2729,
+      "r_belief": 0.27,
+      "s_relevance": 0.1219
+    }
+  },
+  "pca_reconstruction": {
+    "n_cases": 449,
+    "n_components_original": 10,
+    "n_components_kept": 5,
+    "variance_fraction_top5": 0.907122,
+    "variance_percent_top5": 90.7122,
+    "variance_discarded_percent": 9.2878,
+    "eigenvalues_desc": [
+      3.847236,
+      2.093595,
+      1.465791,
+      0.947028,
+      0.737814,
+      0.460068,
+      0.237506,
+      0.218681,
+      0.014424,
+      0.000178
+    ],
+    "eigenvalue_ratios_desc": [
+      0.383867,
+      0.208893,
+      0.146253,
+      0.094492,
+      0.073617,
+      0.045904,
+      0.023698,
+      0.021819,
+      0.001439,
+      1.8e-05
+    ],
+    "per_row_reconstruction_error": {
+      "mean": 0.8354,
+      "std": 0.4806,
+      "min": 0.0969,
+      "max": 3.0404
+    },
+    "correct_vs_error": {
+      "n_correct": 340,
+      "n_error": 109,
+      "mean_recon_error_correct": 0.800587,
+      "mean_recon_error_error": 0.943868,
+      "ratio_error_over_correct": 1.178969,
+      "errors_concentrated_in_discarded_variance": false
+    },
+    "per_component_reconstruction_error": [
+      {
+        "component": "s_freshness",
+        "rmse": 0.443096
+      },
+      {
+        "component": "s_propagation",
+        "rmse": 0.390298
+      },
+      {
+        "component": "r_encode",
+        "rmse": 0.388943
+      },
+      {
+        "component": "s_provenance",
+        "rmse": 0.363676
+      },
+      {
+        "component": "s_interference",
+        "rmse": 0.348572
+      },
+      {
+        "component": "s_relevance",
+        "rmse": 0.232039
+      },
+      {
+        "component": "r_recall",
+        "rmse": 0.205624
+      },
+      {
+        "component": "s_drift",
+        "rmse": 0.204873
+      },
+      {
+        "component": "r_belief",
+        "rmse": 0.164699
+      },
+      {
+        "component": "s_recovery",
+        "rmse": 0.09928
+      }
+    ]
+  },
+  "latency_distribution": {
+    "n_samples": 1000,
+    "p50_ms": 29.2787,
+    "p75_ms": 56.1051,
+    "p90_ms": 82.5936,
+    "p95_ms": 90.8696,
+    "p99_ms": 119.1873,
+    "p999_ms": 131.1205,
+    "max_ms": 131.4675,
+    "min_ms": 15.1122,
+    "mean_ms": 42.4638,
+    "stddev_ms": 26.3677,
+    "outlier_analysis": {
+      "n_outliers": 10,
+      "correlation_with_entries": 0.4757,
+      "early_exit_rate_in_outliers": 1.0,
+      "early_exit_rate_in_non_outliers": 0.604,
+      "outlier_domain_counts": {
+        "general": 3,
+        "customer_support": 2,
+        "coding": 1,
+        "fintech": 2,
+        "legal": 2
+      },
+      "overall_domain_counts": {
+        "coding": 177,
+        "fintech": 168,
+        "general": 147,
+        "medical": 160,
+        "customer_support": 164,
+        "legal": 184
+      },
+      "interpretation": "Outliers correlate with larger memory_state; early_exit does not explain the difference."
+    }
+  }
+}

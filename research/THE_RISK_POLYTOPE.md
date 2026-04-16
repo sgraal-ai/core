@@ -825,7 +825,97 @@ This reflects full coverage of all 256 × 4 = 1,024 (state, action) pairs. In pr
 
 ---
 
-## 17. Open Questions
+## 17. Structural Properties
+
+Five properties that describe the internal architecture of the scoring engine — its shape, its redundancies, its latency, and its economics.
+
+### 17.1 The Module DAG Is Nearly Flat
+
+The 82-module scoring engine has only **10 internal dependencies**. The dependency graph has:
+
+- **Critical path length: 3** (`client_optimizer → omega_mem → pagerank`)
+- **Longest parallel group: 72 modules** that can run simultaneously in layer 1
+- **Max theoretical speedup: 27×** (82 modules / 3-layer depth)
+- **Top bottleneck: `omega_mem`** with 4 dependents; everything else is a leaf analytic
+
+This means the scoring engine is structurally nearly flat — almost all modules are independent leaf analytics. The 29ms median latency (p50) could theoretically drop to 3–5ms (critical path only) with parallel execution. The current implementation runs sequentially. This is a latency optimization opportunity, not a correctness issue.
+
+### 17.2 Two Redundant Component Pairs
+
+In the raw 10-dimensional component space, only two pairs exceed r > 0.7 correlation:
+
+| Pair | Correlation | Interpretation |
+|------|------------|----------------|
+| s_drift ↔ r_recall | +0.95 | Near-duplicates — algebraically coupled |
+| s_recovery ↔ r_belief | +0.74 | Belief tracks recovery capability |
+
+The near-perfect r = 0.95 between s_drift and r_recall reflects their construction: `r_recall = 0.6·s_freshness + 0.4·s_provenance` and `s_drift = 0.4·s_freshness + 0.6·s_interference`. They share the s_freshness component.
+
+**Most independent component: `s_relevance`** (mean |r| = 0.12). It adds genuinely orthogonal information to the scoring engine and should be preserved even if other components are merged.
+
+All significant anti-correlations (r < -0.3) involve `s_recovery`, consistent with its negative scoring weight (-0.10). Recovery opposes the risk-increasing axes.
+
+### 17.3 Errors Live on the Manifold, Not Off It
+
+PCA reconstruction analysis on 449 corpus cases:
+
+- Top 5 principal components capture **90.7%** of variance (in raw 10D component space; the earlier 97.9% figure from §2 used the extended 13-element feature vector including omega and assurance)
+- Mean reconstruction error for correct decisions: 0.80
+- Mean reconstruction error for error cases: 0.94
+- **Ratio: 1.18** — errors are only marginally harder to reconstruct
+
+**Conclusion: the 6.2% error cases are NOT off-manifold.** They live in the same 5-dimensional subspace as correct decisions. This means the errors are boundary ambiguity (cases near the decision hyperplanes), not missing features. The 5D representation is complete for the observed data.
+
+The per-component reconstruction error identifies which components carry the most top-5-orthogonal signal: s_freshness (0.44), s_propagation (0.39), r_encode (0.39). The components most reducible by PCA: s_recovery (0.10), r_belief (0.17).
+
+### 17.4 Latency Distribution: The Tail Is Entry-Count Bound
+
+Measured latency across 1,000 preflight calls:
+
+| Percentile | Latency |
+|------------|---------|
+| min | 15 ms |
+| p50 | 29 ms |
+| p75 | 56 ms |
+| p90 | 83 ms |
+| p95 | 91 ms |
+| p99 | 119 ms |
+| p99.9 | 131 ms |
+| max | 131 ms |
+| mean | 42 ms |
+
+Outlier analysis: correlation between latency and entry count is r = 0.48. **100% of tail outliers (> p99) had early_exit = True** — meaning even the fast path scales with entry count. The 2ms claim for the 5-composite scoring applies to the inner computation; the full pipeline including I/O, Redis, and detection layers has p50 = 29ms.
+
+The tail is driven by entry-count-proportional work, not by module coverage. Optimization target: batch the per-entry work in the early-exit path.
+
+### 17.5 κ_MEM Has a Dollar Value: Break-Even is Negative Everywhere
+
+The phase constant κ_MEM = 0.033 defines the percolation threshold of the signal correlation graph. At this threshold, BLOCK rate ≈ 4.6% (from the calibration curve at omega ≈ 33).
+
+Per-call ROI by domain × pricing tier:
+
+| Domain × Tier | ROI per call | Calls paid by 1 BLOCK |
+|---------------|-------------|----------------------|
+| medical × Lite | **15,410,000×** | 335M |
+| medical × Full | 154,100× | 3.35M |
+| legal × Lite | 6,164,000× | 134M |
+| legal × Full | 61,640× | 1.34M |
+| fintech × Lite | 3,082,000× | 67M |
+| fintech × Full | 30,820× | 670K |
+| general × Lite | 616,400× | 13.4M |
+| general × Full | 6,164× | 134K |
+| coding × Lite | 308,200× | 6.7M |
+| coding × Full | 3,082× | 67K |
+| customer_support × Lite | 156,400× | 3.4M |
+| customer_support × Full | **1,564×** | 34K |
+
+**Economic verdict: break-even is negative in every domain × tier combination.** Even the weakest profile (customer support on the Full tier) yields 1,564× ROI per call. Governance is profitable from call #1. There is no fleet size below which Sgraal is economically optional.
+
+This is the business interpretation of the phase constant: κ_MEM is not just a geometric property of the signal correlation graph — it is the point at which governance becomes mandatory in dollar terms. At κ_MEM = 0.033, every call of governance pays for itself in expected value.
+
+---
+
+## 18. Open Questions
 
 1. **Is the polytope universal?** Does an independent memory scoring system discover the same 5 dimensions?
 
@@ -841,7 +931,7 @@ This reflects full coverage of all 256 × 4 = 1,024 (state, action) pairs. In pr
 
 ---
 
-## 18. Conclusion
+## 19. Conclusion
 
 We built an 83-module scoring pipeline to answer a practical question: is this AI agent's memory reliable enough to act on? In doing so, we discovered that the answer lives in a 5-dimensional convex polytope with flat geometry and a measurable phase constant. The polytope has five named axes (Risk, Decay, Trust, Corruption, Belief), a temperature, an entropy, a free energy, a natural frequency, harmonics, and a sound.
 
@@ -921,6 +1011,10 @@ python3 scripts/research_batch_3.py
 # Compute business metrics
 python3 scripts/business_metrics_a.py
 python3 scripts/business_metrics_b.py
+
+# Compute structural findings (DAG, correlations, PCA, latency, break-even)
+python3 scripts/structural_findings_a.py
+python3 scripts/structural_findings_b.py
 ```
 
 ---
