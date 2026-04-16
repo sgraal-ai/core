@@ -1,0 +1,504 @@
+{
+  "data_source": "benchmark_corpus_449_cases",
+  "n_cases_collected": 449,
+  "n_cases_failed": 0,
+  "total_features_collected": 132,
+  "features_with_variance": 78,
+  "zero_variance_features_dropped": [
+    "mttr_analysis.mttr_estimate",
+    "mttr_analysis.mttr_p95",
+    "mttr_analysis.recovery_probability",
+    "mttr_analysis.weibull_k",
+    "mttr_analysis.weibull_lambda",
+    "mdp_recommendation.confidence",
+    "banach_contraction.convergence_steps",
+    "hotelling_t2.t2_statistic",
+    "hmm_regime.state_probability",
+    "hmm_regime.regime_duration",
+    "bocpd.p_changepoint",
+    "bocpd.current_run_length",
+    "consistency_analysis.h1_rank",
+    "consistency_analysis.consistency_score",
+    "spectral_analysis.cheeger_bound",
+    "policy_gradient.advantage",
+    "policy_gradient.temperature",
+    "policy_gradient.policy_entropy",
+    "info_thermodynamics.transfer_entropy",
+    "info_thermodynamics.landauer_bound",
+    "page_hinkley.ph_statistic",
+    "page_hinkley.change_magnitude",
+    "page_hinkley.running_mean",
+    "subjective_logic.fused_opinion",
+    "frechet_distance.fd_score",
+    "frechet_distance.mean_shift",
+    "copula_analysis.rho",
+    "mewma.control_limit",
+    "drift_details.alpha_divergence",
+    "hawkes_intensity.baseline_mu",
+    "koopman.eigenvalue",
+    "cox_hazard.hazard_score",
+    "arrhenius.thermal_rate",
+    "poisson_recall.lambda",
+    "roc_monitoring.auc",
+    "dirichlet_process.concentration",
+    "pctl_verification.probability",
+    "dual_process_auq.system1_confidence",
+    "dual_process_auq.system2_confidence",
+    "security_transfer_entropy.leakage_score",
+    "simulated_annealing.current_temperature",
+    "simulated_annealing.best_loss",
+    "frontdoor_effect.effect_estimate",
+    "expected_utility.EU",
+    "cvar_risk.var",
+    "cvar_risk.cvar",
+    "top.gsv",
+    "authority_scores.count",
+    "authority_scores.mean",
+    "persistent_homology.betti_0",
+    "persistent_homology.betti_1",
+    "sparse_merkle.ok",
+    "homology_torsion.detected",
+    "gumbel_softmax.entropy"
+  ],
+  "effective_dimensions_95pct": 23,
+  "effective_dimensions_99pct": 34,
+  "total_modules_synthetic_claim": 83,
+  "speedup_potential": "23/132 ~ 0.174x latency fraction if only top-23 PCs computed",
+  "top_eigenvalues": [
+    19.3425,
+    12.096777,
+    11.404275,
+    4.823531,
+    2.935888,
+    2.422001,
+    2.167264,
+    2.056109,
+    1.907222,
+    1.778385,
+    1.734119,
+    1.49582,
+    1.403698,
+    1.355489,
+    1.170116,
+    0.99702,
+    0.937398,
+    0.893447,
+    0.860573,
+    0.681759
+  ],
+  "cumulative_variance": [
+    0.247981,
+    0.403068,
+    0.549276,
+    0.611116,
+    0.648756,
+    0.679807,
+    0.707593,
+    0.733953,
+    0.758405,
+    0.781205,
+    0.803437,
+    0.822614,
+    0.84061,
+    0.857988,
+    0.87299,
+    0.885772,
+    0.89779,
+    0.909244,
+    0.920277,
+    0.929018
+  ],
+  "dominant_features_per_pc": [
+    {
+      "pc": 1,
+      "variance_explained": 0.24798076999552046,
+      "top_features": [
+        [
+          "drift_details.kl_divergence",
+          0.2152
+        ],
+        [
+          "info_thermodynamics.information_temperature",
+          0.2128
+        ],
+        [
+          "drift_details.jsd",
+          0.2125
+        ],
+        [
+          "particle_filter.state_estimate",
+          0.2105
+        ],
+        [
+          "lqr_control.optimal_control",
+          0.2103
+        ]
+      ]
+    },
+    {
+      "pc": 2,
+      "variance_explained": 0.15508688691114617,
+      "top_features": [
+        [
+          "free_energy.F",
+          0.2289
+        ],
+        [
+          "free_energy.elbo",
+          0.2289
+        ],
+        [
+          "free_energy.surprise",
+          0.2288
+        ],
+        [
+          "lqr_control.control_effort",
+          0.2233
+        ],
+        [
+          "free_energy.kl_divergence",
+          0.2192
+        ]
+      ]
+    },
+    {
+      "pc": 3,
+      "variance_explained": 0.14620865665974095,
+      "top_features": [
+        [
+          "owa_provenance.orness",
+          0.2439
+        ],
+        [
+          "rate_distortion.total_rate",
+          0.2437
+        ],
+        [
+          "mahalanobis_analysis.mean_distance",
+          0.2422
+        ],
+        [
+          "spectral_analysis.mixing_time_estimate",
+          0.242
+        ],
+        [
+          "top.attack_surface_score",
+          0.2242
+        ]
+      ]
+    },
+    {
+      "pc": 4,
+      "variance_explained": 0.061840137517049615,
+      "top_features": [
+        [
+          "free_energy.reconstruction",
+          0.2275
+        ],
+        [
+          "topological_entropy.entropy_estimate",
+          0.2266
+        ],
+        [
+          "lqr_control.control_effort",
+          0.2239
+        ],
+        [
+          "calibration.brier_score",
+          0.2177
+        ],
+        [
+          "component_breakdown.r_encode",
+          0.213
+        ]
+      ]
+    },
+    {
+      "pc": 5,
+      "variance_explained": 0.03763958511235335,
+      "top_features": [
+        [
+          "spectral_analysis.spectral_gap",
+          0.5482
+        ],
+        [
+          "spectral_analysis.fiedler_value",
+          0.5358
+        ],
+        [
+          "ricci_curvature.mean_curvature",
+          0.3305
+        ],
+        [
+          "mutual_information.mi_score",
+          0.2906
+        ],
+        [
+          "mutual_information.nmi_score",
+          0.1958
+        ]
+      ]
+    },
+    {
+      "pc": 6,
+      "variance_explained": 0.03105129576925303,
+      "top_features": [
+        [
+          "component_breakdown.s_freshness",
+          0.3778
+        ],
+        [
+          "extended_freshness.ensemble_freshness",
+          0.3463
+        ],
+        [
+          "mewma.T2_stat",
+          0.3302
+        ],
+        [
+          "unified_loss.L_v4",
+          0.3227
+        ],
+        [
+          "ornstein_uhlenbeck.current_deviation",
+          0.3065
+        ]
+      ]
+    },
+    {
+      "pc": 7,
+      "variance_explained": 0.027785434561661482,
+      "top_features": [
+        [
+          "top.naturalness_score",
+          0.3202
+        ],
+        [
+          "rate_distortion.compression_ratio",
+          0.2688
+        ],
+        [
+          "lyapunov_exponent.divergence_rate",
+          0.2296
+        ],
+        [
+          "top.collapse_ratio",
+          0.2279
+        ],
+        [
+          "lyapunov_exponent.lambda_estimate",
+          0.2198
+        ]
+      ]
+    },
+    {
+      "pc": 8,
+      "variance_explained": 0.026360368555249734,
+      "top_features": [
+        [
+          "unified_loss.L_v4",
+          0.4723
+        ],
+        [
+          "ornstein_uhlenbeck.current_deviation",
+          0.4722
+        ],
+        [
+          "lyapunov_exponent.divergence_rate",
+          0.233
+        ],
+        [
+          "lyapunov_exponent.lambda_estimate",
+          0.2321
+        ],
+        [
+          "component_breakdown.s_freshness",
+          0.2172
+        ]
+      ]
+    },
+    {
+      "pc": 9,
+      "variance_explained": 0.024451566936544045,
+      "top_features": [
+        [
+          "lyapunov_exponent.divergence_rate",
+          0.419
+        ],
+        [
+          "lyapunov_exponent.lambda_estimate",
+          0.4045
+        ],
+        [
+          "component_breakdown.s_provenance",
+          0.2802
+        ],
+        [
+          "provenance_entropy.mean_entropy",
+          0.2467
+        ],
+        [
+          "component_breakdown.s_interference",
+          0.236
+        ]
+      ]
+    },
+    {
+      "pc": 10,
+      "variance_explained": 0.022799801566996906,
+      "top_features": [
+        [
+          "levy_flight.extreme_event_probability",
+          0.4536
+        ],
+        [
+          "levy_flight.scale",
+          0.3993
+        ],
+        [
+          "particle_filter.uncertainty",
+          0.3656
+        ],
+        [
+          "particle_filter.effective_sample_size",
+          0.3055
+        ],
+        [
+          "lyapunov_exponent.divergence_rate",
+          0.2046
+        ]
+      ]
+    },
+    {
+      "pc": 11,
+      "variance_explained": 0.02223229792162489,
+      "top_features": [
+        [
+          "lyapunov_exponent.divergence_rate",
+          0.355
+        ],
+        [
+          "lyapunov_exponent.lambda_estimate",
+          0.3409
+        ],
+        [
+          "levy_flight.scale",
+          0.2491
+        ],
+        [
+          "top.naturalness_score",
+          0.2397
+        ],
+        [
+          "provenance_entropy.mean_entropy",
+          0.22
+        ]
+      ]
+    },
+    {
+      "pc": 12,
+      "variance_explained": 0.01917718120363878,
+      "top_features": [
+        [
+          "rmt_analysis.signal_ratio",
+          0.3611
+        ],
+        [
+          "top.naturalness_score",
+          0.3374
+        ],
+        [
+          "persistence_landscape.landscape_norm",
+          0.3334
+        ],
+        [
+          "ornstein_uhlenbeck.current_deviation",
+          0.2518
+        ],
+        [
+          "ricci_curvature.mean_curvature",
+          0.2464
+        ]
+      ]
+    },
+    {
+      "pc": 13,
+      "variance_explained": 0.01799613242910798,
+      "top_features": [
+        [
+          "particle_filter.effective_sample_size",
+          0.6154
+        ],
+        [
+          "particle_filter.uncertainty",
+          0.5761
+        ],
+        [
+          "levy_flight.extreme_event_probability",
+          0.2509
+        ],
+        [
+          "fisher_rao.condition_number",
+          0.2309
+        ],
+        [
+          "levy_flight.scale",
+          0.2068
+        ]
+      ]
+    },
+    {
+      "pc": 14,
+      "variance_explained": 0.01737805932623436,
+      "top_features": [
+        [
+          "mutual_information.mi_score",
+          0.397
+        ],
+        [
+          "mutual_information.nmi_score",
+          0.3928
+        ],
+        [
+          "dirichlet_process.n_clusters",
+          0.2689
+        ],
+        [
+          "mutual_information.information_loss",
+          0.2538
+        ],
+        [
+          "mahalanobis_analysis.covariance_condition",
+          0.2128
+        ]
+      ]
+    },
+    {
+      "pc": 15,
+      "variance_explained": 0.015001484465353095,
+      "top_features": [
+        [
+          "consolidation.mean_consolidation",
+          0.437
+        ],
+        [
+          "levy_flight.extreme_event_probability",
+          0.3605
+        ],
+        [
+          "jump_diffusion.diffusion_sigma",
+          0.3184
+        ],
+        [
+          "ctl_verification.verification_time_ms",
+          0.2631
+        ],
+        [
+          "free_energy.kl_divergence",
+          0.2422
+        ]
+      ]
+    }
+  ],
+  "interpretation": "Of 132 harvested numeric module fields (78 with nonzero variance), 23 principal components capture 95% of the variance and 34 capture 99%. This confirms the low intrinsic-dimension finding: although the preflight pipeline runs 83+ modules, the INFORMATION-carrying degrees of freedom are vastly smaller. The prior 10-component polytope study found ID=5; at the full module level the effective rank rises slightly (more modules add marginal directions) but remains O(10) rather than O(80), implying large redundancy across the scoring stack."
+}

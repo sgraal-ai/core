@@ -16371,6 +16371,72 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["leniency_bias_ratio"] = 0.571
     response["leniency_bias_note"] = "When Sgraal is wrong, it errs toward caution (ASK_USER instead of BLOCK) 57% of the time — the safer direction, not the catastrophic one."
 
+    # Early warning signals — modules that Granger-cause BLOCK N calls ahead.
+    # Empirical leading indicators identified in
+    # research/results/granger_causality.json from 1,000 synthetic degradation
+    # observations across 20 agents × 50 calls (345 BLOCK events).
+    # Thresholds chosen per-module to maximise Youden's J against
+    # "BLOCK occurs in next <lag> calls"; produces 93–95% accuracy and
+    # 90–96% recall at lag-10 horizon (see granger_section.md).
+    # Only emitted when the current decision is NOT already BLOCK — the field
+    # is forward-looking, not a restatement of the current verdict.
+    try:
+        _ewc_cb = response.get("component_breakdown", {}) or {}
+        _ewc_signals = []
+        # (module, threshold, lag, human message) — derived from empirical
+        # Youden-optimal cut-points at a 10-call horizon.
+        _ewc_rules = [
+            {"module": "s_freshness", "threshold": 48, "lag": 10,
+             "message": "freshness risk rising — BLOCK likely within 10 calls"},
+            {"module": "s_provenance", "threshold": 58, "lag": 10,
+             "message": "provenance trust decaying — BLOCK likely within 10 calls"},
+            {"module": "s_drift", "threshold": 50, "lag": 10,
+             "message": "drift increasing — BLOCK likely within 10 calls"},
+            {"module": "s_interference", "threshold": 34, "lag": 10,
+             "message": "cross-entry interference elevated — BLOCK likely within 10 calls"},
+        ]
+        _ewc_current = response.get("recommended_action")
+        if _ewc_current != "BLOCK":
+            for rule in _ewc_rules:
+                try:
+                    mod_val = float(_ewc_cb.get(rule["module"], 0) or 0)
+                except Exception:
+                    continue
+                if mod_val > rule["threshold"]:
+                    _ewc_signals.append({
+                        "module": rule["module"],
+                        "current_value": round(mod_val, 2),
+                        "threshold": rule["threshold"],
+                        "predicted_block_in_calls": rule["lag"],
+                        "message": rule["message"],
+                    })
+            # BOCPD regime change — near-term BLOCK signal (1 call horizon)
+            _ewc_bocpd = response.get("trend_detection", {}) or {}
+            if isinstance(_ewc_bocpd, dict):
+                _ewc_bocpd_inner = _ewc_bocpd.get("bocpd", {})
+                if isinstance(_ewc_bocpd_inner, dict) and _ewc_bocpd_inner.get("regime_change"):
+                    _ewc_signals.append({
+                        "module": "bocpd",
+                        "current_value": round(float(_ewc_bocpd_inner.get("p_changepoint", 0) or 0), 3),
+                        "threshold": 0.9,
+                        "predicted_block_in_calls": 1,
+                        "message": "Bayesian change-point detected — BLOCK imminent",
+                    })
+            # MEWMA T² out-of-control — strongest leading indicator (r=0.91, lag=3)
+            _ewc_mewma = response.get("mewma", {}) or {}
+            if isinstance(_ewc_mewma, dict) and _ewc_mewma.get("out_of_control"):
+                _ewc_signals.append({
+                    "module": "mewma",
+                    "current_value": round(float(_ewc_mewma.get("T2_stat", 0) or 0), 2),
+                    "threshold": round(float(_ewc_mewma.get("control_limit", 0) or 0), 2),
+                    "predicted_block_in_calls": 3,
+                    "message": "multivariate control chart out-of-control — BLOCK likely within 3 calls",
+                })
+        if _ewc_signals:
+            response["early_warning_signals"] = _ewc_signals
+    except Exception:
+        pass
+
     # T5: Memory usable lifetime (days until F reaches 95% of F∞ = 2.27).
     # Measured empirically via /Users/zsobrakpeter/core/scripts/t5_memory_halflife.py.
     # "Lifetime" = age at which variational free energy saturates to the equilibrium

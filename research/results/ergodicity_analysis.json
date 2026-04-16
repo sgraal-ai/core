@@ -1,0 +1,55 @@
+{
+  "data_source": "synthetic_personality_simulation",
+  "n_agents": 50,
+  "calls_per_agent": 30,
+  "n_total_observations": 1500,
+  "ensemble_mean": 29.3508,
+  "ensemble_std": 5.043,
+  "per_agent_time_averages": {
+    "mean": 29.3508,
+    "std": 18.4002,
+    "min": 6.1933,
+    "max": 55.99
+  },
+  "per_agent_time_stds": {
+    "mean": 6.8212,
+    "min": 2.1377,
+    "max": 11.9469
+  },
+  "class_breakdown": {
+    "low": {
+      "n_agents": 15,
+      "mean_time_avg": 7.387,
+      "std_time_avg": 0.458,
+      "min": 6.193,
+      "max": 8.213
+    },
+    "medium": {
+      "n_agents": 20,
+      "mean_time_avg": 27.225,
+      "std_time_avg": 0.932,
+      "min": 25.14,
+      "max": 28.817
+    },
+    "high": {
+      "n_agents": 15,
+      "mean_time_avg": 54.148,
+      "std_time_avg": 1.201,
+      "min": 51.877,
+      "max": 55.99
+    }
+  },
+  "ergodicity_tests": {
+    "ks_statistic": 0.3,
+    "ks_pvalue": 0.068436,
+    "variance_ratio": 13.3125,
+    "var_per_agent_time_avgs": 338.5663,
+    "var_ensemble_per_step": 25.4323,
+    "ergodic": false
+  },
+  "agents_above_mean_plus_10": 15,
+  "agents_below_mean_minus_10": 15,
+  "agents_within_10_of_mean": 20,
+  "recommendation": "per_agent_thresholds_recommended",
+  "interpretation": "Per-agent time averages diverge systematically from the ensemble mean (KS=0.300, variance ratio=13.31). 15 agents consistently score >10 points above ensemble mean and 15 score >10 points below. A single population-wide BLOCK threshold will be wrong for a significant fraction of agents. Per-agent calibrated thresholds (or class-level thresholds by personality) are required."
+}

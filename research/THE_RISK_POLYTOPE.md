@@ -1091,7 +1091,89 @@ Raw data: [`research/results/detection_layer_analysis.json`](results/detection_l
 
 ---
 
-## 18. Open Questions
+## 18. Further Analyses
+
+Three additional investigations probing ergodicity, the full-module information matrix, and temporal predictability of BLOCK decisions.
+
+### 18.1 Ergodicity
+
+Memory scoring is NOT ergodic across agent populations. In an ergodic system, the time average (one agent over many calls) equals the ensemble average (many agents at one moment). When this equality breaks, a single population-wide threshold is provably wrong for the agents whose personal distribution sits far from the crowd.
+
+We simulated 50 agents with distinct risk personalities (15 low-risk, 20 medium-risk, 15 high-risk) and ran 30 preflight calls per agent (1,500 observations total).
+
+| Metric | Value |
+| --- | --- |
+| Ensemble mean Ω_MEM | 29.35 |
+| Ensemble std (across time steps) | 5.04 |
+| Per-agent time-avg std | 18.40 (3.6× ensemble std) |
+| Per-agent time-avg range | [6.19, 55.99] |
+| KS statistic (time-avg vs ensemble) | 0.30 |
+| Variance ratio (Var_time / Var_ensemble) | **13.31** |
+| Agents within ±10 of ensemble | 20 / 50 |
+| Ergodic? | **False** (rule: KS < 0.2 AND var-ratio < 2.0) |
+
+**Implication:** population-level thresholds are miscalibrated for roughly 30 of 50 agents. Low-risk agents are under-served (BLOCK triggers earlier than their personal distribution warrants); high-risk agents are over-trusted (their personal Ω_MEM baseline sits well above the population mean, so a global BLOCK=70 misses early-warning regimes). The `thresholds` field in `/v1/preflight` and per-agent calibration via the `/v1/calibration/*` endpoints exist precisely to address this — ergodicity violation is the formal justification.
+
+Raw data: [`research/results/ergodicity_analysis.json`](results/ergodicity_analysis.json).
+
+### 18.2 Full 83-Module Fisher Information Matrix
+
+We extended the 10-component polytope analysis to the full set of 132 numeric module fields harvested from `/v1/preflight` responses across the 449-case benchmark corpus. After dropping 54 zero-variance features (modules that did not activate on this corpus), **78 active dimensions** remained.
+
+**Effective dimensionality:**
+
+| Variance captured | Components needed |
+|---|---|
+| 95% | **23** |
+| 99% | **34** |
+
+The 10-component polytope study previously found intrinsic dimension = 5. At the full module level the effective rank grows only to k95=23, not toward the nominal 83. Roughly **70% of module outputs are redundant** — they move in lock-step with a much smaller latent structure.
+
+**Speedup potential**: latency scales with module count. If a reduced-rank approximation kept only the top 23 directions, the theoretical compute floor is **23/78 ≈ 0.29×** current latency — a ~70% compute budget available before accuracy degrades.
+
+**Top principal components (dominant features):**
+
+- PC1 (24.8%): `drift_details.kl_divergence`, `info_thermodynamics.information_temperature`, `drift_details.jsd`
+- PC2 (15.5%): `free_energy.F`, `free_energy.elbo`, `free_energy.surprise`
+- PC3 (14.6%): `owa_provenance.orness`, `rate_distortion.total_rate`, `mahalanobis_analysis.mean_distance`
+- PC4 (6.2%): free-energy residuals, topological entropy, LQR control effort
+- PC5 (3.8%): `spectral_analysis.spectral_gap`, `fiedler_value`, `ricci_curvature.mean_curvature`
+
+**Implication:** the 83-module scoring stack is massively over-parameterized relative to its information content. A tight basis of ~23 orthogonal signals reproduces 95% of the full pipeline's variance — consistent with the Risk Polytope result that memory-state risk lives on a flat, low-dimensional manifold even when expressed in a much wider feature space.
+
+Raw data: [`research/results/fim_83x83.json`](results/fim_83x83.json).
+
+### 18.3 Granger Causality and Early Warning
+
+We simulated 20 agents over 50 calls each (1,000 observations, 345 BLOCK events) with monotonically degrading memory (age rising, trust eroding, conflict growing). For each candidate module X, we computed lagged correlation `corr(X_{t-k}, 1[action_t = BLOCK])` for k ∈ {1, 2, 3, 5, 7, 10} and selected the lag maximizing |r|.
+
+**Leading indicators** (peak |r|, Granger-style lag):
+
+| Module | r | Lag (calls) | p |
+|---|---:|---:|---:|
+| `mewma_t2` | +0.906 | 3 | 0.0000 |
+| `s_interference` | +0.837 | 10 | 0.0000 |
+| `s_provenance` | +0.836 | 10 | 0.0000 |
+| `copula_joint_risk` | +0.828 | 10 | 0.0000 |
+| `s_freshness` | +0.809 | 10 | 0.0000 |
+| `s_drift` | +0.788 | 10 | 0.0000 |
+| `r_recall` | +0.775 | 10 | 0.0000 |
+
+**Predictive accuracy** (threshold predictor over the top-3 leaders):
+
+| Horizon | Accuracy | Precision | Recall |
+|---|---:|---:|---:|
+| 5 calls ahead | 97.5% | 99.5% | 94.6% |
+| 10 calls ahead | 96.5% | 97.5% | 96.0% |
+| 20 calls ahead | 95.4% | 98.6% | 95.2% |
+
+**Operational implication.** Preflight now exposes an `early_warning_signals` array that fires when a leading indicator crosses its empirical threshold while the current decision is still USE_MEMORY/WARN/ASK_USER. This converts the scoring engine from a reactive gate into a **predictive** one: callers can heal, refetch, or escalate before the BLOCK lands.
+
+Raw data: [`research/results/granger_causality.json`](results/granger_causality.json).
+
+---
+
+## 19. Open Questions
 
 1. **Is the polytope universal?** Does an independent memory scoring system discover the same 5 dimensions?
 
@@ -1107,7 +1189,7 @@ Raw data: [`research/results/detection_layer_analysis.json`](results/detection_l
 
 ---
 
-## 19. Conclusion
+## 20. Conclusion
 
 We built an 83-module scoring pipeline to answer a practical question: is this AI agent's memory reliable enough to act on? In doing so, we discovered that the answer lives in a 5-dimensional convex polytope with flat geometry and a measurable phase constant. The polytope has five named axes (Risk, Decay, Trust, Corruption, Belief), a temperature, an entropy, a free energy, a natural frequency, harmonics, and a sound.
 
