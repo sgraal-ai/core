@@ -15975,6 +15975,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["days_until_block_ci_method"] = "already_blocked_no_time_remaining"
         response["days_until_block_n_models"] = 0
         response["days_until_block_contributing_models"] = []
+        response["days_until_block_model_dissent"] = False
+        response["days_until_block_no_block_signals"] = []
     elif not _is_dry_run and len(_te_history_cache) >= 3:
         # Each real model contributes (name, estimate, weight). BOCPD is handled
         # separately as a multiplicative adjustment, not a "fourth estimate" —
@@ -16020,9 +16022,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _bocpd_fired = False
         _td = response.get("trend_detection", {})
         _bocpd_data = _td.get("bocpd") if isinstance(_td, dict) else None
-        if _bocpd_data and _bocpd_data.get("p_changepoint", 0) > 0.7:
-            _bocpd_factor = 0.5
-            _bocpd_fired = True
+        # Issue K fix: a key can exist with None value — .get(..., 0) returns None then,
+        # and `None > 0.7` raises TypeError in Python 3. Coerce to float defensively.
+        if _bocpd_data:
+            try:
+                _p_changepoint = float(_bocpd_data.get("p_changepoint") or 0)
+            except (TypeError, ValueError):
+                _p_changepoint = 0.0
+            if _p_changepoint > 0.7:
+                _bocpd_factor = 0.5
+                _bocpd_fired = True
 
         if _dub_sources:
             _w_sum = sum(w for _, _, w in _dub_sources)
@@ -16061,34 +16070,52 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 # Dissent flag: when at least one real model predicts a block time AND
                 # at least one other model says "no block imminent", the point estimate
                 # is disputed. Callers can decide how to act on this.
-                if _dub_no_block_votes:
-                    response["days_until_block_no_block_signals"] = _dub_no_block_votes
-                    response["days_until_block_model_dissent"] = True
-                else:
-                    response["days_until_block_model_dissent"] = False
+                response["days_until_block_no_block_signals"] = _dub_no_block_votes if _dub_no_block_votes else []
+                response["days_until_block_model_dissent"] = bool(_dub_no_block_votes)
             else:
+                # Defensive: _dub_raw is None only if _w_sum <= 0, which is unreachable
+                # with current weights, but populate the full schema regardless.
                 response["days_until_block"] = None
                 response["days_until_block_confidence"] = None
                 response["days_until_block_ci"] = None
+                response["days_until_block_ci_method"] = "degenerate_weights"
+                response["days_until_block_n_models"] = len(_dub_sources)
+                response["days_until_block_contributing_models"] = [n for n, _, _ in _dub_sources]
+                response["days_until_block_no_block_signals"] = _dub_no_block_votes if _dub_no_block_votes else []
+                response["days_until_block_model_dissent"] = bool(_dub_no_block_votes)
         elif _dub_no_block_votes:
-            # Every model says "no block imminent" — emit a clean no_block signal
-            # rather than a bogus numeric estimate.
+            # No real estimates — only "no block imminent" votes. Emit a clean
+            # no_block signal rather than a bogus numeric estimate. Note: this
+            # is not "all models voted no-block" — it means the only models
+            # that fired voted no-block. Models that didn't fire are silent.
             response["days_until_block"] = None
             response["days_until_block_confidence"] = None
             response["days_until_block_ci"] = None
-            response["days_until_block_ci_method"] = "no_block_signal_from_all_models"
+            response["days_until_block_ci_method"] = "no_block_votes_only_no_real_estimates"
             response["days_until_block_n_models"] = 0
             response["days_until_block_contributing_models"] = []
             response["days_until_block_no_block_signals"] = _dub_no_block_votes
             response["days_until_block_model_dissent"] = False
         else:
+            # No sources, no sentinel votes — insufficient data.
             response["days_until_block"] = None
             response["days_until_block_confidence"] = None
             response["days_until_block_ci"] = None
+            response["days_until_block_ci_method"] = "insufficient_data"
+            response["days_until_block_n_models"] = 0
+            response["days_until_block_contributing_models"] = []
+            response["days_until_block_no_block_signals"] = []
+            response["days_until_block_model_dissent"] = False
     else:
+        # dry_run, or history < 3 calls — no trend models can fire
         response["days_until_block"] = None
         response["days_until_block_confidence"] = None
         response["days_until_block_ci"] = None
+        response["days_until_block_ci_method"] = "dry_run_or_insufficient_history"
+        response["days_until_block_n_models"] = 0
+        response["days_until_block_contributing_models"] = []
+        response["days_until_block_no_block_signals"] = []
+        response["days_until_block_model_dissent"] = False
 
     # -----------------------------------------------------------------------
     # NEW FIELD 2: confidence_calibration — overconfident / underconfident / calibrated
@@ -16248,13 +16275,42 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _phi_rp["roi_percentile"] = 100.0
     _top_roi_entry = _rp_list[0]["entry_id"] if _rp_list else None
 
-    # #458: repair_plan_summary — top-rank guidance in human language
+    # #458: repair_plan_summary — top-rank guidance in human language.
+    # Issue M fix: distinguish real heal actions from warnings/monitors. The
+    # Bug E fix made warnings rank low, but if every plan item is a notification
+    # (nothing actionable), calling the top one "heal" is semantically wrong.
     if _rp_list:
         _top = _rp_list[0]
         _top_action = _top.get("action", "REFETCH")
         _top_eid = _top.get("entry_id", "?")
         _top_improvement = _top.get("projected_improvement", 0)
-        if _top_improvement and _top_improvement > 0:
+
+        def _is_notification(action: str) -> bool:
+            return action == "MONITOR" or "WARNING" in action
+
+        # Find the top REAL heal action (if any), separately from the top overall item
+        _top_real_heal = next(
+            (item for item in _rp_list if not _is_notification(item.get("action", ""))),
+            None,
+        )
+
+        if _is_notification(_top_action) and _top_real_heal is None:
+            # Every item is a warning/monitor. No prioritized heal to call out.
+            response["repair_plan_summary"] = (
+                f"Top repair_plan item is a notification ({_top_action}), not a heal — "
+                f"no prioritized heal action available."
+            )
+        elif _is_notification(_top_action) and _top_real_heal is not None:
+            # Top-ranked is a notification but a real heal exists further down.
+            # (Shouldn't happen after Bug E fix, but defensive.)
+            _rh_action = _top_real_heal.get("action", "REFETCH")
+            _rh_eid = _top_real_heal.get("entry_id", "?")
+            _rh_rank = _top_real_heal.get("rank", "?")
+            response["repair_plan_summary"] = (
+                f"Top-ranked item is a {_top_action} notification; "
+                f"the highest-ROI heal is rank {_rh_rank}: {_rh_action} on entry {_rh_eid}."
+            )
+        elif _top_improvement and _top_improvement > 0:
             response["repair_plan_summary"] = (
                 f"Heal entry {_top_eid} first: {_top_action} reduces omega by "
                 f"~{round(float(_top_improvement), 1)} points (rank 1 of {_rp_count}, highest ROI)."
@@ -16944,6 +17000,23 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     if _plugin_results:
         response["plugin_results"] = [pr.to_dict() for pr in _plugin_results]
+
+    # Issue I fix: reconcile days_until_block with the FINAL recommended_action.
+    # The days_until_block block runs mid-way through preflight, before per-type
+    # threshold overrides, attack-surface overrides, plugin on_omega_computed, etc.
+    # If any of those flipped the decision to BLOCK after days_until_block was
+    # computed as a positive number, override to the already-blocked semantics.
+    if response.get("recommended_action") == "BLOCK":
+        _dub_now = response.get("days_until_block")
+        if _dub_now is None or (isinstance(_dub_now, (int, float)) and _dub_now > 0):
+            response["days_until_block"] = 0.0
+            response["days_until_block_confidence"] = 1.0
+            response["days_until_block_ci"] = {"low": 0.0, "high": 0.0}
+            response["days_until_block_ci_method"] = "already_blocked_by_override"
+            response["days_until_block_n_models"] = 0
+            response["days_until_block_contributing_models"] = []
+            response["days_until_block_model_dissent"] = False
+            response["days_until_block_no_block_signals"] = []
 
     return response
 

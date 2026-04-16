@@ -237,6 +237,61 @@ class TestRepairPlanRanking:
         if len(rp) > 1:
             assert rp[0]["roi_percentile"] == 100.0
 
+    def test_all_days_until_block_fields_always_present(self):
+        """Issue G fix: the full field schema must be present in every code path.
+        Run a dry-run call (which takes the 'insufficient history' else branch)
+        and verify all 7 days_until_block_* fields are populated."""
+        r = client.post("/v1/preflight", headers=AUTH, json={
+            "memory_state": _HEALTHY_SINGLE,
+            "action_type": "reversible",
+            "domain": "general",
+            "dry_run": True,
+        })
+        assert r.status_code == 200
+        d = r.json()
+        required = {
+            "days_until_block",
+            "days_until_block_confidence",
+            "days_until_block_ci",
+            "days_until_block_ci_method",
+            "days_until_block_n_models",
+            "days_until_block_contributing_models",
+            "days_until_block_no_block_signals",
+            "days_until_block_model_dissent",
+        }
+        missing = required - set(d.keys())
+        assert not missing, f"missing schema fields: {missing}"
+
+    def test_days_until_block_reconciled_with_final_action(self):
+        """Issue I fix: when recommended_action is BLOCK (by any override path),
+        days_until_block must be 0.0, not a positive future time."""
+        # Trigger BLOCK via per-type thresholds on an identity memory (threshold=13).
+        # The raw omega might be around ~15, well below the global 70 threshold,
+        # but per-type overrides force BLOCK. days_until_block must reconcile.
+        r = client.post("/v1/preflight", headers=AUTH, json={
+            "memory_state": [{
+                "id": "m1", "content": "stale identity",
+                "type": "identity", "timestamp_age_days": 50,
+                "source_trust": 0.7, "source_conflict": 0.3, "downstream_count": 5,
+            }],
+            "action_type": "reversible",
+            "domain": "general",
+            "per_type_thresholds": True,
+        })
+        assert r.status_code == 200
+        d = r.json()
+        if d.get("recommended_action") == "BLOCK":
+            # Must NOT report a positive future time when the agent is currently BLOCKed
+            assert d["days_until_block"] == 0.0, (
+                f"days_until_block={d['days_until_block']} "
+                f"is inconsistent with recommended_action=BLOCK"
+            )
+            # Method should indicate the already-blocked override
+            assert d.get("days_until_block_ci_method") in (
+                "already_blocked_no_time_remaining",
+                "already_blocked_by_override",
+            )
+
     def test_warning_actions_not_ranked_above_real_heals(self):
         """Bug E fix: warnings/monitor actions (SLA_WARNING, BANACH_WARNING,
         CHAOS_WARNING, MONITOR) must NOT outrank actual heal actions just
