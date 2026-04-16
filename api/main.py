@@ -5563,6 +5563,11 @@ class ConfigThresholdsRequest(BaseModel):
     block: float
 
 
+# In-memory cache so the roundtrip works without Redis (test env) and reads are
+# fast in production. Redis is used as the persistence layer on top.
+_config_thresholds_cache: dict[str, dict] = {}
+
+
 @app.post("/v1/config/thresholds")
 def config_set_thresholds(req: ConfigThresholdsRequest, key_record: dict = Depends(verify_api_key)):
     """Persist custom decision thresholds per domain (no TTL)."""
@@ -5582,7 +5587,9 @@ def config_set_thresholds(req: ConfigThresholdsRequest, key_record: dict = Depen
 
     kh = _safe_key_hash(key_record)
     profile = {"warn": req.warn, "ask_user": req.ask_user, "block": req.block, "domain": req.domain}
-    # Permanent: no TTL (ttl=0 means no expiry in our Redis wrapper)
+    cache_key = f"{kh}:{req.domain}"
+    # Write-through: in-memory first (always works), then Redis (best-effort persistence)
+    _config_thresholds_cache[cache_key] = profile
     redis_set(f"config_thresholds:{kh}:{req.domain}", profile, ttl=0)
     return {"updated": True, "domain": req.domain, "thresholds": {"warn": req.warn, "ask_user": req.ask_user, "block": req.block}}
 
@@ -5592,7 +5599,13 @@ def config_get_thresholds(domain: str = "general", key_record: dict = Depends(ve
     """Retrieve persisted thresholds for a domain. Returns defaults if none set."""
     _check_rate_limit(key_record, allow_demo=True)
     kh = _safe_key_hash(key_record)
-    stored = redis_get(f"config_thresholds:{kh}:{domain}")
+    cache_key = f"{kh}:{domain}"
+    # Read-through: in-memory cache first, fall back to Redis
+    stored = _config_thresholds_cache.get(cache_key)
+    if not isinstance(stored, dict):
+        stored = redis_get(f"config_thresholds:{kh}:{domain}")
+        if isinstance(stored, dict):
+            _config_thresholds_cache[cache_key] = stored  # hydrate cache
     if isinstance(stored, dict):
         return {
             "domain": domain,

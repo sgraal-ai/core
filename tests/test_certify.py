@@ -102,8 +102,34 @@ class TestCertify:
         assert r1.status_code == 200
         cert = r1.json()["credential"]
 
-        # Tamper: bump omega
-        cert["credentialSubject"]["omega"] = 0.0
+        # Tamper: change agent_id (guaranteed to differ from "agent_d" used at issue)
+        original_agent = cert["credentialSubject"]["agent_id"]
+        cert["credentialSubject"]["agent_id"] = "attacker_impersonating"
+        assert cert["credentialSubject"]["agent_id"] != original_agent
+
+        r2 = client.post(
+            "/v1/certify/verify",
+            headers=AUTH,
+            json={"certificate": cert},
+        )
+        assert r2.status_code == 200
+        d = r2.json()
+        assert d["valid"] is False
+        assert "HMAC" in d["reason"] or "tampered" in d["reason"].lower()
+
+    def test_verify_tampered_omega_rejected(self):
+        r1 = client.post(
+            "/v1/certify",
+            headers=AUTH,
+            json={"agent_id": "agent_d2", "memory_state": _HEALTHY, "scope": "preflight"},
+        )
+        assert r1.status_code == 200
+        cert = r1.json()["credential"]
+
+        # Tamper: bump omega to a clearly different value (original healthy memory ≈ 0)
+        original_omega = cert["credentialSubject"]["omega"]
+        cert["credentialSubject"]["omega"] = original_omega + 50.0
+        assert cert["credentialSubject"]["omega"] != original_omega
 
         r2 = client.post(
             "/v1/certify/verify",
