@@ -8,11 +8,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from fastapi.testclient import TestClient
-from api.main import app
+from api.main import app, _safe_key_hash, API_KEYS
 from plugins import SgraalPlugin, registry
 
 client = TestClient(app)
 AUTH = {"Authorization": "Bearer sg_test_key_001"}
+
+# Compute the same tenant key the API uses for sg_test_key_001, so
+# test-helper registry.register(..., tenant=TEST_TENANT) aligns with the
+# tenant scope preflight will look up at request time.
+_TEST_CUSTOMER_ID = API_KEYS.get("sg_test_key_001")
+TEST_TENANT = _safe_key_hash({"key_hash": "sg_test_key_001", "customer_id": _TEST_CUSTOMER_ID})
 
 _HEALTHY_MEM = [{
     "id": "m1",
@@ -27,14 +33,14 @@ _HEALTHY_MEM = [{
 
 @pytest.fixture(autouse=True)
 def deactivate_examples():
-    """Ensure bundled example plugins are inactive for each test."""
-    registry.deactivate("custom_freshness")
-    registry.deactivate("domain_blocker")
+    """Ensure bundled example plugins are inactive for this tenant before each test."""
+    registry.deactivate("custom_freshness", tenant=TEST_TENANT)
+    registry.deactivate("domain_blocker", tenant=TEST_TENANT)
     yield
-    registry.deactivate("custom_freshness")
-    registry.deactivate("domain_blocker")
-    # Remove any test-only plugins
-    for name in list(p["name"] for p in registry.list_plugins()):
+    registry.deactivate("custom_freshness", tenant=TEST_TENANT)
+    registry.deactivate("domain_blocker", tenant=TEST_TENANT)
+    # Remove any test-only plugins (global uninstall — these aren't shared code)
+    for name in list(p["name"] for p in registry.list_plugins(tenant=TEST_TENANT)):
         if name.startswith("test_"):
             registry.unregister(name)
 
@@ -95,7 +101,7 @@ class TestPluginSystem:
             def on_component_score(self, component_name, score, memory_state):
                 raise RuntimeError("intentional failure for test")
 
-        registry.register(BrokenPlugin(), activate=True)
+        registry.register(BrokenPlugin(), activate=True, tenant=TEST_TENANT)
 
         r = client.post("/v1/preflight", headers=AUTH, json={
             "memory_state": _HEALTHY_MEM,
@@ -120,7 +126,7 @@ class TestPluginSystem:
             def on_preflight_start(self, memory_state, context):
                 time.sleep(0.025)  # 25ms — exceeds 10ms budget
 
-        registry.register(SlowPlugin(), activate=True)
+        registry.register(SlowPlugin(), activate=True, tenant=TEST_TENANT)
 
         r = client.post("/v1/preflight", headers=AUTH, json={
             "memory_state": _HEALTHY_MEM,
@@ -142,7 +148,7 @@ class TestPluginSystem:
             name = "test_temp_plugin"
             version = "0.0.0"
 
-        registry.register(TemporaryPlugin(), activate=False)
+        registry.register(TemporaryPlugin(), activate=False, tenant=TEST_TENANT)
 
         # GET confirms it's installed
         r = client.get("/v1/plugins/test_temp_plugin", headers=AUTH)
@@ -175,6 +181,49 @@ class TestPluginSystem:
         r = client.post("/v1/plugins/activate", headers=AUTH, json={"name": "does_not_exist"})
         assert r.status_code == 404
         assert "not installed" in r.json()["detail"].lower()
+
+    def test_activation_is_per_tenant_no_cross_tenant_leak(self):
+        """Issue Q fix: activating a plugin for tenant A must NOT affect
+        tenant B's preflight calls. Two different API keys → two different
+        tenant scopes → independent active sets.
+        """
+        # Tenant A (sg_test_key_001) activates domain_blocker
+        a_auth = {"Authorization": "Bearer sg_test_key_001"}
+        r = client.post("/v1/plugins/activate", headers=a_auth, json={"name": "domain_blocker"})
+        assert r.status_code == 200
+        a_scope = r.json()["tenant_scope"]
+
+        # Tenant B uses a different API key. sg_test_key_002 is pre-registered
+        # in API_KEYS for tests; pick any other test key.
+        other_keys = [k for k in API_KEYS.keys() if k != "sg_test_key_001"]
+        if not other_keys:
+            pytest.skip("No second test key available to prove tenant isolation")
+        b_key = other_keys[0]
+        b_auth = {"Authorization": f"Bearer {b_key}"}
+
+        # From tenant B's POV, domain_blocker must NOT be active
+        r_list_b = client.get("/v1/plugins", headers=b_auth)
+        assert r_list_b.status_code == 200
+        b_plugins = {p["name"]: p for p in r_list_b.json()["plugins"]}
+        assert b_plugins["domain_blocker"]["active"] is False, (
+            "Tenant A's activation leaked into tenant B's view"
+        )
+        b_scope = r_list_b.json()["tenant_scope"]
+        assert a_scope != b_scope, "Two different API keys must produce different tenant scopes"
+
+        # Tenant B preflights medical domain — domain_blocker must NOT force BLOCK
+        r_pf_b = client.post("/v1/preflight", headers=b_auth, json={
+            "memory_state": _HEALTHY_MEM,
+            "action_type": "reversible",
+            "domain": "medical",
+        })
+        # Tenant A's plugin must not have affected tenant B's decision
+        assert r_pf_b.json()["recommended_action"] != "BLOCK", (
+            "Tenant A's domain_blocker leaked into tenant B's preflight — BLOCK on healthy medical memory"
+        )
+
+        # Cleanup: deactivate for tenant A
+        client.post("/v1/plugins/deactivate", headers=a_auth, json={"name": "domain_blocker"})
 
     def test_domain_blocker_plugin_overrides_decision(self):
         """Integration test: the bundled domain_blocker plugin forces BLOCK for 'medical'."""

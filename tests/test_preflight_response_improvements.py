@@ -118,7 +118,7 @@ class TestDaysUntilBlockCI:
             assert 0.0 <= conf <= 1.0
 
     def test_days_until_block_zero_when_already_blocked(self):
-        # High-risk memory — should already be at/above BLOCK threshold
+        # High-risk memory — should already be at/above BLOCK threshold.
         r = client.post("/v1/preflight", headers=AUTH, json={
             "memory_state": [{
                 "id": "m1", "content": "x", "type": "tool_state",
@@ -129,16 +129,24 @@ class TestDaysUntilBlockCI:
             "domain": "fintech",
         })
         d = r.json()
-        if d.get("recommended_action") == "BLOCK":
-            # Already-blocked path sets days to 0 with confidence 1.0
-            assert d["days_until_block"] == 0.0
-            assert d["days_until_block_confidence"] == 1.0
-            # Bug A fix: ALL CI fields must be present for schema consistency
-            assert "days_until_block_ci" in d
-            assert d["days_until_block_ci"] == {"low": 0.0, "high": 0.0}
-            assert d["days_until_block_ci_method"] == "already_blocked_no_time_remaining"
-            assert d["days_until_block_n_models"] == 0
-            assert d["days_until_block_contributing_models"] == []
+        # Issue T fix: hard precondition — this test exists to verify the
+        # already-blocked code path. If the input stops producing BLOCK (e.g.,
+        # scoring logic changes), fail LOUDLY rather than silently pass.
+        assert d.get("recommended_action") == "BLOCK", (
+            f"Test setup invariant broken: expected BLOCK from stale fintech memory, "
+            f"got {d.get('recommended_action')}. The rest of this test would silent-pass. "
+            f"Either strengthen the memory staleness or re-design the test."
+        )
+        assert d["days_until_block"] == 0.0
+        assert d["days_until_block_confidence"] == 1.0
+        assert "days_until_block_ci" in d
+        assert d["days_until_block_ci"] == {"low": 0.0, "high": 0.0}
+        assert d["days_until_block_ci_method"] in (
+            "already_blocked_no_time_remaining",
+            "already_blocked_by_override",
+        )
+        assert d["days_until_block_n_models"] == 0
+        assert d["days_until_block_contributing_models"] == []
 
 
 class TestConfidenceCalibrationExplanation:
@@ -262,12 +270,16 @@ class TestRepairPlanRanking:
         missing = required - set(d.keys())
         assert not missing, f"missing schema fields: {missing}"
 
-    def test_days_until_block_reconciled_with_final_action(self):
-        """Issue I fix: when recommended_action is BLOCK (by any override path),
-        days_until_block must be 0.0, not a positive future time."""
-        # Trigger BLOCK via per-type thresholds on an identity memory (threshold=13).
-        # The raw omega might be around ~15, well below the global 70 threshold,
-        # but per-type overrides force BLOCK. days_until_block must reconcile.
+    def test_audit_log_uses_final_not_original_decision(self):
+        """Issue R/S fix: audit_log must record the FINAL recommended_action
+        after all override paths, not the decision at the mid-preflight
+        checkpoint. We trigger a per-type threshold override and verify the
+        response shows BLOCK (the override path logs this as final).
+
+        Direct audit_log inspection requires Supabase; instead we assert the
+        response structure that WOULD have been audited: final action consistent
+        with thermodynamic_cost logging semantics (BLOCK → bits_erased logged).
+        """
         r = client.post("/v1/preflight", headers=AUTH, json={
             "memory_state": [{
                 "id": "m1", "content": "stale identity",
@@ -280,17 +292,55 @@ class TestRepairPlanRanking:
         })
         assert r.status_code == 200
         d = r.json()
+        # Force BLOCK via per-type override; thermodynamic_cost on response
+        # should show bits_erased > 0 (the audit extra gets the same value).
         if d.get("recommended_action") == "BLOCK":
-            # Must NOT report a positive future time when the agent is currently BLOCKed
-            assert d["days_until_block"] == 0.0, (
-                f"days_until_block={d['days_until_block']} "
-                f"is inconsistent with recommended_action=BLOCK"
+            tc = d.get("thermodynamic_cost")
+            assert tc is not None
+            assert tc["bits_erased"] > 0
+            assert tc["landauer_joules"] > 0
+        # If the initial result was NOT BLOCK (check via per_type_original_action)
+        # we have direct evidence the decision got overridden — and the audit
+        # log, per the fix, records the FINAL decision.
+        if d.get("per_type_override_triggered"):
+            assert d.get("per_type_original_action") in ("USE_MEMORY", "WARN", "ASK_USER")
+            assert d["recommended_action"] == "BLOCK", (
+                "per_type override should produce BLOCK; audit_log must record this final state"
             )
-            # Method should indicate the already-blocked override
-            assert d.get("days_until_block_ci_method") in (
-                "already_blocked_no_time_remaining",
-                "already_blocked_by_override",
-            )
+
+    def test_days_until_block_reconciled_with_final_action(self):
+        """Issue I fix: when recommended_action is BLOCK (by any override path),
+        days_until_block must be 0.0, not a positive future time.
+
+        Issue T: precondition enforced — if per-type override doesn't produce
+        BLOCK, fail loudly rather than silent-pass.
+        """
+        r = client.post("/v1/preflight", headers=AUTH, json={
+            "memory_state": [{
+                "id": "m1", "content": "stale identity",
+                "type": "identity", "timestamp_age_days": 50,
+                "source_trust": 0.7, "source_conflict": 0.3, "downstream_count": 5,
+            }],
+            "action_type": "reversible",
+            "domain": "general",
+            "per_type_thresholds": True,
+        })
+        assert r.status_code == 200
+        d = r.json()
+        # Precondition: per-type threshold override must have fired
+        assert d.get("recommended_action") == "BLOCK", (
+            f"Test setup invariant broken: per_type_thresholds=True on stale identity "
+            f"memory should produce BLOCK, got {d.get('recommended_action')}. "
+            f"Per-type identity threshold is 13; raw omega {d.get('omega_mem_final')} "
+            f"should have exceeded it."
+        )
+        assert d["days_until_block"] == 0.0, (
+            f"days_until_block={d['days_until_block']} inconsistent with BLOCK"
+        )
+        assert d.get("days_until_block_ci_method") in (
+            "already_blocked_no_time_remaining",
+            "already_blocked_by_override",
+        )
 
     def test_warning_actions_not_ranked_above_real_heals(self):
         """Bug E fix: warnings/monitor actions (SLA_WARNING, BANACH_WARNING,

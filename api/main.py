@@ -681,6 +681,10 @@ _validate_required_secrets()
 # In-memory API key store: api_key -> stripe_customer_id
 API_KEYS: dict[str, str] = {
     "sg_test_key_001": "cus_test_001",
+    # Second test key exists purely to enable multi-tenant isolation tests
+    # (e.g., tests/test_plugins.py::test_activation_is_per_tenant_no_cross_tenant_leak).
+    # Not used in any production code path.
+    "sg_test_key_002": "cus_test_002",
 }
 
 bearer_scheme = HTTPBearer()
@@ -1521,50 +1525,60 @@ class PluginActivateRequest(BaseModel):
 
 @app.get("/v1/plugins")
 def plugins_list(key_record: dict = Depends(verify_api_key)):
-    """List all installed plugins with their activation state."""
+    """List all installed plugins with this tenant's activation state.
+    Activation is PER-TENANT — the active flag shown here reflects only the
+    caller's activations, not other tenants'."""
     _check_rate_limit(key_record, allow_demo=True)
     if _plugin_registry is None:
         return {"plugins": [], "error": "plugin_system_unavailable"}
-    return {"plugins": _plugin_registry.list_plugins()}
+    _tenant = _safe_key_hash(key_record)
+    return {"plugins": _plugin_registry.list_plugins(tenant=_tenant), "tenant_scope": _tenant}
 
 
 @app.get("/v1/plugins/{name}")
 def plugins_get(name: str, key_record: dict = Depends(verify_api_key)):
-    """Get details for a single plugin by name."""
+    """Get details for a single plugin by name, with this tenant's active state."""
     _check_rate_limit(key_record, allow_demo=True)
     if _plugin_registry is None:
         raise HTTPException(status_code=503, detail="Plugin system unavailable")
     p = _plugin_registry.get_plugin(name)
     if p is None:
         raise HTTPException(status_code=404, detail=f"Plugin '{name}' is not installed")
-    return {**p.describe(), "active": _plugin_registry.is_active(name)}
+    _tenant = _safe_key_hash(key_record)
+    return {**p.describe(), "active": _plugin_registry.is_active(name, tenant=_tenant), "tenant_scope": _tenant}
 
 
 @app.post("/v1/plugins/activate")
 def plugins_activate(req: PluginActivateRequest, key_record: dict = Depends(verify_api_key)):
-    """Activate a pre-installed plugin. Plugin code is NOT accepted here —
-    only activation of plugins already loaded via filesystem or packages."""
+    """Activate a pre-installed plugin FOR THIS TENANT ONLY.
+
+    Other tenants are not affected — each tenant has its own active plugin set.
+    Plugin code is NOT accepted here; only activation of plugins already
+    loaded via filesystem or packages at server startup."""
     _check_rate_limit(key_record)
     if _plugin_registry is None:
         raise HTTPException(status_code=503, detail="Plugin system unavailable")
-    if not _plugin_registry.activate(req.name):
+    _tenant = _safe_key_hash(key_record)
+    if not _plugin_registry.activate(req.name, tenant=_tenant):
         raise HTTPException(
             status_code=404,
             detail=f"Plugin '{req.name}' is not installed. Only pre-installed plugins can be activated. "
                    "To install a plugin, deploy it via CI/CD (baked into the container image or pip-installed) "
                    "and set SGRAAL_PLUGIN_DIR to its directory.",
         )
-    return {"activated": True, "name": req.name}
+    return {"activated": True, "name": req.name, "tenant_scope": _tenant}
 
 
 @app.post("/v1/plugins/deactivate")
 def plugins_deactivate(req: PluginActivateRequest, key_record: dict = Depends(verify_api_key)):
-    """Deactivate an active plugin. The plugin remains installed."""
+    """Deactivate a plugin FOR THIS TENANT. The plugin remains installed and
+    may still be active for OTHER tenants — deactivation is per-tenant."""
     _check_rate_limit(key_record)
     if _plugin_registry is None:
         raise HTTPException(status_code=503, detail="Plugin system unavailable")
-    was_active = _plugin_registry.deactivate(req.name)
-    return {"deactivated": was_active, "name": req.name}
+    _tenant = _safe_key_hash(key_record)
+    was_active = _plugin_registry.deactivate(req.name, tenant=_tenant)
+    return {"deactivated": was_active, "name": req.name, "tenant_scope": _tenant}
 
 
 @app.delete("/v1/plugins/{name}")
@@ -12221,14 +12235,17 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
     # --- Plugin hook: on_preflight_start ---------------------------------
+    # Plugins are TENANT-SCOPED: only plugins this tenant activated will run.
     _plugin_results: list = []
+    _pf_tenant = _safe_key_hash(key_record)
     try:
-        if _plugin_registry is not None and _plugin_registry.active_plugins():
+        if _plugin_registry is not None and _plugin_registry.active_plugins(tenant=_pf_tenant):
             _plugin_registry.run_hook(
                 "on_preflight_start",
                 [e.model_dump() if hasattr(e, "model_dump") else dict(e.__dict__) for e in req.memory_state],
                 {"domain": req.domain, "action_type": req.action_type, "agent_id": req.agent_id},
                 collect_results=_plugin_results,
+                tenant=_pf_tenant,
             )
     except Exception as _pe:
         logger.debug("Plugin on_preflight_start failed: %s", _pe)
@@ -14875,16 +14892,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass  # graceful degradation
 
-    # FIX 9: dry_run skips audit log and webhooks
+    # FIX 9: dry_run skips audit log and webhooks.
+    # Issue R/S fix: audit_log is now deferred to the VERY END of preflight
+    # (right before `return response`), so it captures the FINAL
+    # recommended_action after all overrides (per-type thresholds, plugin
+    # hooks, detection-layer overrides, Issue I reconciliation). See below.
     _is_dry_run = req.dry_run or key_record.get("demo", False)
-    if not _is_dry_run:
-        # Audit log with thermodynamic cost on BLOCK (Landauer bound per call)
-        _audit_extra: dict = {"agent_id": req.agent_id, "domain": req.domain, "action_type": req.action_type}
-        if result.recommended_action == "BLOCK":
-            _td_bits = len(req.memory_state) * 2304
-            _audit_extra["bits_erased"] = _td_bits
-            _audit_extra["landauer_joules"] = _td_bits * 2.87e-21
-        _audit_log("preflight", request_id, key_record, result.recommended_action, omega_out, _audit_extra)
 
     # Webhook dispatch (skip in dry_run)
     entry_ids = [e.id for e in entries]
@@ -16945,8 +16958,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             pass
 
     # --- Plugin hooks: on_component_score / on_omega_computed / on_preflight_complete ---
+    # Tenant-scoped: only plugins this tenant activated will run.
     try:
-        if _plugin_registry is not None and _plugin_registry.active_plugins():
+        if _plugin_registry is not None and _plugin_registry.active_plugins(tenant=_pf_tenant):
             _mem_for_plugin = [e.model_dump() if hasattr(e, "model_dump") else dict(e.__dict__) for e in req.memory_state]
 
             # on_component_score — per component, update component_breakdown
@@ -16966,6 +16980,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         "on_component_score",
                         _comp_name, _old_score, _mem_for_plugin,
                         collect_results=_plugin_results,
+                        tenant=_pf_tenant,
                     )
                     if isinstance(_new_score, (int, float)):
                         _cb[_comp_name] = round(float(_new_score), 2)
@@ -16978,6 +16993,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "on_omega_computed",
                 _current_omega, _current_decision, _ctx,
                 collect_results=_plugin_results,
+                tenant=_pf_tenant,
             )
             if isinstance(_hook_out, tuple) and len(_hook_out) == 2:
                 _new_omega, _new_decision = _hook_out
@@ -16992,6 +17008,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "on_preflight_complete",
                 response,
                 collect_results=_plugin_results,
+                tenant=_pf_tenant,
             )
             if isinstance(_final, dict):
                 response = _final
@@ -17017,6 +17034,33 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["days_until_block_contributing_models"] = []
             response["days_until_block_model_dissent"] = False
             response["days_until_block_no_block_signals"] = []
+
+    # Issue R/S fix: audit_log the FINAL decision, not the pre-override one.
+    # Runs at the very end of preflight so every override path (per-type
+    # thresholds, plugin hooks, detection layers, Issue I reconciliation)
+    # has already had its say. thermodynamic_cost (bits_erased + landauer_joules)
+    # is logged to extra when the final action is BLOCK.
+    if not _is_dry_run:
+        _final_action = response.get("recommended_action", result.recommended_action)
+        _final_omega = response.get("omega_mem_final", omega_out)
+        _audit_extra: dict = {
+            "agent_id": req.agent_id,
+            "domain": req.domain,
+            "action_type": req.action_type,
+        }
+        if _final_action == "BLOCK":
+            _td_bits = len(req.memory_state) * 2304
+            _audit_extra["bits_erased"] = _td_bits
+            _audit_extra["landauer_joules"] = _td_bits * 2.87e-21
+        # Capture which override path (if any) changed the decision from its
+        # original value, for forensic analysis.
+        if _final_action != result.recommended_action:
+            _audit_extra["original_decision"] = result.recommended_action
+            _audit_extra["decision_overridden"] = True
+        try:
+            _audit_log("preflight", request_id, key_record, _final_action, _final_omega, _audit_extra)
+        except Exception as _ae:
+            logger.debug("Deferred audit_log failed: %s", _ae)
 
     return response
 
