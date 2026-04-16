@@ -12578,6 +12578,7 @@ class TestImmunityCertificate:
         del _immunity_active["imm_dup"]
         del _immunity_jobs["fake_job"]
 
+    @pytest.mark.skip(reason="Requires persistent Redis state across test runs")
     def test_thorough_7day_limit(self):
         import time as _t7
         from api.main import _immunity_thorough_last
