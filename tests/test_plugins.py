@@ -6,6 +6,8 @@ import time
 os.environ["SGRAAL_SKIP_DNS_CHECK"] = "1"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import hashlib
+
 import pytest
 from fastapi.testclient import TestClient
 from api.main import app, _safe_key_hash, API_KEYS
@@ -14,11 +16,22 @@ from plugins import SgraalPlugin, registry
 client = TestClient(app)
 AUTH = {"Authorization": "Bearer sg_test_key_001"}
 
-# Compute the same tenant key the API uses for sg_test_key_001, so
-# test-helper registry.register(..., tenant=TEST_TENANT) aligns with the
-# tenant scope preflight will look up at request time.
-_TEST_CUSTOMER_ID = API_KEYS.get("sg_test_key_001")
-TEST_TENANT = _safe_key_hash({"key_hash": "sg_test_key_001", "customer_id": _TEST_CUSTOMER_ID})
+
+def _tenant_for_test_key(api_key: str) -> str:
+    """Reproduce the tenant key that verify_api_key + _safe_key_hash produce
+    for a test key. MUST match exactly, or plugins activated with this tenant
+    won't run on preflight calls authenticated by that key.
+
+    Pipeline (from api/main.py ~line 716 + _safe_key_hash):
+      1. verify_api_key: key_hash = sha256(api_key).hexdigest()
+      2. _safe_key_hash(key_record): returns key_record["key_hash"] directly
+         (since it's non-empty and not "default").
+    So the effective tenant is sha256(api_key).hexdigest().
+    """
+    return hashlib.sha256(api_key.encode()).hexdigest()
+
+
+TEST_TENANT = _tenant_for_test_key("sg_test_key_001")
 
 _HEALTHY_MEM = [{
     "id": "m1",
