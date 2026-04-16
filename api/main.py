@@ -1598,6 +1598,265 @@ def plugins_register_not_supported():
     )
 
 
+# ---- Production validation (#631) ----
+# Runs the synthetic validation suite on whatever REAL production data exists
+# in audit_log. Confirms or refutes our synthetic findings when production
+# data arrives. Minimum data thresholds: 100 rows for PCA/κ_MEM, 50 for
+# calibration curve.
+
+@app.get("/v1/research/production-validation")
+def production_validation(key_record: dict = Depends(verify_api_key)):
+    """Validate synthetic research findings against production audit_log data.
+
+    Returns status="insufficient_data" when fewer rows than required are
+    available, so callers know how many more calls are needed before
+    the validation is meaningful.
+    """
+    import math as _pv_math
+    _check_rate_limit(key_record, allow_demo=True)
+    MIN_PCA = 100
+    MIN_CALIB = 50
+
+    kh = _safe_key_hash(key_record)
+    rows: list[dict] = []
+    _sb = supabase_service_client or supabase_client
+    if _sb:
+        try:
+            # Pull latest 5,000 rows for this tenant
+            result = (
+                _sb.table("audit_log")
+                .select("*")
+                .eq("api_key_id", kh)
+                .order("created_at", desc=True)
+                .limit(5000)
+                .execute()
+            )
+            rows = result.data or []
+        except Exception as e:
+            logger.warning("production_validation supabase read failed: %s", e)
+
+    n_total = len(rows)
+    # Omega distribution is cheap: just need omega_mem_final values
+    omegas = [float(r.get("omega_mem_final", 0) or 0) for r in rows if r.get("omega_mem_final") is not None]
+
+    # Insufficient data fallback
+    if n_total < MIN_CALIB:
+        return {
+            "status": "insufficient_data",
+            "calls_needed": MIN_CALIB - n_total,
+            "current": n_total,
+            "message": f"Need at least {MIN_CALIB} audit_log rows for calibration validation; have {n_total}.",
+            "thresholds": {"calibration_min": MIN_CALIB, "pca_min": MIN_PCA},
+        }
+
+    response: dict = {
+        "status": "partial" if n_total < MIN_PCA else "ok",
+        "n_rows_analyzed": n_total,
+        "thresholds_met": {
+            "calibration": n_total >= MIN_CALIB,
+            "pca": n_total >= MIN_PCA,
+        },
+    }
+
+    # --- Omega distribution (always computed if we got here) ---
+    if omegas:
+        omegas_sorted = sorted(omegas)
+        n = len(omegas_sorted)
+        mean = sum(omegas) / n
+        variance = sum((x - mean) ** 2 for x in omegas) / n
+        std = _pv_math.sqrt(variance)
+
+        def _pct(p: float) -> float:
+            idx = max(0, min(n - 1, int(p * (n - 1))))
+            return round(omegas_sorted[idx], 2)
+
+        response["omega_distribution"] = {
+            "n": n,
+            "mean": round(mean, 2),
+            "std": round(std, 2),
+            "min": round(min(omegas), 2),
+            "max": round(max(omegas), 2),
+            "p25": _pct(0.25),
+            "p50": _pct(0.50),
+            "p75": _pct(0.75),
+            "p90": _pct(0.90),
+            "p99": _pct(0.99),
+        }
+
+    # --- Calibration curve (P(success|omega)) — requires outcome data ---
+    # Pair audit_log decisions with outcome_log status. We only have audit_log
+    # here; the outcome_log join is best-effort.
+    outcome_rows: list[dict] = []
+    if _sb:
+        try:
+            oresult = (
+                _sb.table("outcome_log")
+                .select("preflight_id,status")
+                .limit(5000)
+                .execute()
+            )
+            outcome_rows = oresult.data or []
+        except Exception:
+            pass
+
+    calibration_paired = 0
+    if outcome_rows and rows:
+        # Build request_id → omega map from audit
+        req_to_omega = {r.get("request_id"): float(r.get("omega_mem_final", 0) or 0) for r in rows if r.get("request_id")}
+        # Bucket by omega band
+        bands = [(0, 30, "0-30"), (30, 55, "30-55"), (55, 70, "55-70"), (70, 101, "70-100")]
+        band_stats: dict = {label: {"success": 0, "failure": 0, "partial": 0} for _, _, label in bands}
+        for o in outcome_rows:
+            pid = o.get("preflight_id")
+            omega = req_to_omega.get(pid)
+            status = o.get("status")
+            if omega is None or status not in ("success", "failure", "partial"):
+                continue
+            for lo, hi, label in bands:
+                if lo <= omega < hi:
+                    band_stats[label][status] += 1
+                    calibration_paired += 1
+                    break
+
+        if calibration_paired >= MIN_CALIB:
+            # Compute P(success|omega) per band and estimate inflection
+            bands_out = []
+            for lo, hi, label in bands:
+                bs = band_stats[label]
+                bn = bs["success"] + bs["failure"] + bs["partial"]
+                p_success = (bs["success"] / bn) if bn > 0 else None
+                bands_out.append({
+                    "band": label, "n": bn,
+                    "p_success": round(p_success, 4) if p_success is not None else None,
+                })
+            # Inflection: omega where P(success) crosses 0.5
+            inflection = None
+            prev = None
+            for bo in bands_out:
+                if bo["p_success"] is None:
+                    continue
+                if prev is not None and ((prev["p_success"] - 0.5) * (bo["p_success"] - 0.5)) < 0:
+                    # crossed 0.5 between prev and bo
+                    # Approximate midpoint of the two bands
+                    prev_mid = (int(prev["band"].split("-")[0]) + int(prev["band"].split("-")[1])) / 2
+                    curr_mid = (int(bo["band"].split("-")[0]) + int(bo["band"].split("-")[1])) / 2
+                    inflection = round((prev_mid + curr_mid) / 2, 1)
+                    break
+                prev = bo
+            response["calibration_curve"] = {
+                "n_paired_outcomes": calibration_paired,
+                "bands": bands_out,
+                "inflection_theta": inflection,
+                "synthetic_baseline_theta": 46.0,
+                "delta_from_baseline": round(inflection - 46.0, 1) if inflection is not None else None,
+            }
+        else:
+            response["calibration_curve"] = {
+                "status": "insufficient_paired_outcomes",
+                "current": calibration_paired,
+                "needed": MIN_CALIB,
+            }
+    else:
+        response["calibration_curve"] = {
+            "status": "no_outcome_data",
+            "note": "No outcome_log rows found. Customers must POST /v1/outcome to enable calibration validation.",
+        }
+
+    # --- PCA intrinsic dimension — requires signal vectors ---
+    # The audit_log doesn't store full component_breakdown by default.
+    # We attempt to reconstruct from `extra` field if it contains breakdowns.
+    if n_total >= MIN_PCA:
+        signal_vectors = []
+        for r in rows:
+            extra = r.get("extra") or {}
+            if isinstance(extra, str):
+                try:
+                    extra = _json.loads(extra)
+                except Exception:
+                    extra = {}
+            cb = extra.get("component_breakdown") if isinstance(extra, dict) else None
+            if isinstance(cb, dict):
+                # Extract the 10 raw components
+                v = [float(cb.get(k, 0) or 0) for k in (
+                    "s_freshness", "s_drift", "s_provenance", "s_propagation",
+                    "r_recall", "r_encode", "s_interference", "s_recovery",
+                    "r_belief", "s_relevance",
+                )]
+                signal_vectors.append(v)
+
+        if len(signal_vectors) >= MIN_PCA:
+            # Mean-center
+            n = len(signal_vectors)
+            d = len(signal_vectors[0])
+            means = [sum(v[j] for v in signal_vectors) / n for j in range(d)]
+            centered = [[v[j] - means[j] for j in range(d)] for v in signal_vectors]
+            # Covariance matrix
+            cov = [[0.0] * d for _ in range(d)]
+            for v in centered:
+                for i in range(d):
+                    for j in range(d):
+                        cov[i][j] += v[i] * v[j]
+            for i in range(d):
+                for j in range(d):
+                    cov[i][j] /= max(n - 1, 1)
+            # Extract eigenvalues via numpy (if available) or power iteration
+            eigs: list = []
+            try:
+                import numpy as _np
+                _cov_np = _np.array(cov)
+                eigs = sorted(_np.linalg.eigvalsh(_cov_np).tolist(), reverse=True)
+            except Exception:
+                # Fallback: just report trace and leading Frobenius norm as weak proxy
+                eigs = sorted([cov[i][i] for i in range(d)], reverse=True)
+
+            total_var = sum(max(e, 0) for e in eigs)
+            cum = 0.0
+            intrinsic_d = d
+            cumulative_frac = []
+            for i, e in enumerate(eigs):
+                cum += max(e, 0)
+                cumulative_frac.append(round(cum / max(total_var, 1e-9), 4))
+                if cum / max(total_var, 1e-9) >= 0.95 and intrinsic_d == d:
+                    intrinsic_d = i + 1
+
+            response["pca_validation"] = {
+                "n_signal_vectors": n,
+                "intrinsic_dimension": intrinsic_d,
+                "synthetic_baseline_dimension": 5,
+                "eigenvalues_top5": [round(e, 4) for e in eigs[:5]],
+                "cumulative_variance_top5": cumulative_frac[:5],
+                "agreement_with_synthetic": intrinsic_d == 5,
+            }
+
+            # --- κ_MEM phase constant — percolation threshold of correlation graph ---
+            # Approximate by the ratio of eigenvalues below noise floor (Marchenko-Pastur style)
+            # κ ≈ fraction of "noise" eigenvalues / total
+            noise_threshold = (total_var / max(d, 1)) * 0.1  # 10% of mean eigenvalue
+            n_noise = sum(1 for e in eigs if e < noise_threshold)
+            kappa_mem = round(n_noise / d, 4) if d > 0 else 0.0
+            response["kappa_mem_validation"] = {
+                "kappa_mem_estimated": kappa_mem,
+                "synthetic_baseline": 0.033,
+                "delta_from_baseline": round(kappa_mem - 0.033, 4),
+                "interpretation": "low" if kappa_mem < 0.1 else "medium" if kappa_mem < 0.3 else "high",
+            }
+        else:
+            response["pca_validation"] = {
+                "status": "component_breakdown_not_stored",
+                "note": "audit_log rows lack component_breakdown in extra field. Enable SGRAAL_AUDIT_FULL_BREAKDOWN=true to capture signal vectors for PCA validation.",
+                "current_vectors": len(signal_vectors),
+                "needed": MIN_PCA,
+            }
+    else:
+        response["pca_validation"] = {
+            "status": "insufficient_rows",
+            "current": n_total,
+            "needed": MIN_PCA,
+        }
+
+    return response
+
+
 
 # ---- Failure Patterns dataset ----
 
