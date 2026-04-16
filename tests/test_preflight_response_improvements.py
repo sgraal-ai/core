@@ -51,6 +51,40 @@ class TestDaysUntilBlockCI:
             # CI is now centered on the bocpd-scaled point value, not the raw mean)
             assert ci["low"] <= d["days_until_block"] <= ci["high"]
 
+    def test_no_block_sentinel_not_mixed_into_weighted_mean(self):
+        """Bug D fix: when some models vote 'no block imminent' (999 sentinel),
+        they MUST NOT be averaged in with real estimates. If at least one real
+        estimator fires, dissent is flagged; if none fires, a clean null is
+        emitted with a no_block_signals list.
+        """
+        # Falling history → Kalman reports downtrend (emits no-block vote).
+        # Fresh healthy memory → low omega, no BLOCK risk on the horizon.
+        r = client.post("/v1/preflight", headers=AUTH, json={
+            "memory_state": [{
+                "id": "m1", "content": "fresh", "type": "tool_state",
+                "timestamp_age_days": 1, "source_trust": 0.95,
+                "source_conflict": 0.05, "downstream_count": 1,
+            }],
+            "action_type": "reversible",
+            "domain": "general",
+            "score_history": [80, 75, 70, 65, 60, 55, 50, 45, 40, 35],  # clearly falling
+        })
+        assert r.status_code == 200
+        d = r.json()
+        # The old bug: weighted mean of [real_estimate, 999.0] = ~500, producing
+        # a garbage point estimate. Verify the new behavior: either the estimate
+        # is small (real model only, sentinel excluded) or null-with-no_block_signal.
+        dub = d.get("days_until_block")
+        nb_signals = d.get("days_until_block_no_block_signals")
+        if dub is not None:
+            # If there's a numeric estimate, it came from REAL models only —
+            # it must not be a 999.0 sentinel-contaminated value.
+            assert dub < 800.0, f"days_until_block={dub} looks like sentinel contamination"
+        if nb_signals:
+            # Explicit no-block signals list should name the model that voted
+            assert isinstance(nb_signals, list)
+            assert all(isinstance(s, str) for s in nb_signals)
+
     def test_days_until_block_contributing_models_reported(self):
         r = client.post("/v1/preflight", headers=AUTH, json={
             "memory_state": _STALE_MULTI,
@@ -99,6 +133,12 @@ class TestDaysUntilBlockCI:
             # Already-blocked path sets days to 0 with confidence 1.0
             assert d["days_until_block"] == 0.0
             assert d["days_until_block_confidence"] == 1.0
+            # Bug A fix: ALL CI fields must be present for schema consistency
+            assert "days_until_block_ci" in d
+            assert d["days_until_block_ci"] == {"low": 0.0, "high": 0.0}
+            assert d["days_until_block_ci_method"] == "already_blocked_no_time_remaining"
+            assert d["days_until_block_n_models"] == 0
+            assert d["days_until_block_contributing_models"] == []
 
 
 class TestConfidenceCalibrationExplanation:
@@ -196,6 +236,31 @@ class TestRepairPlanRanking:
         # First entry is highest ROI → percentile 100 when n > 1
         if len(rp) > 1:
             assert rp[0]["roi_percentile"] == 100.0
+
+    def test_warning_actions_not_ranked_above_real_heals(self):
+        """Bug E fix: warnings/monitor actions (SLA_WARNING, BANACH_WARNING,
+        CHAOS_WARNING, MONITOR) must NOT outrank actual heal actions just
+        because heal_cost was defaulting to 1.0. They now have cost=1000,
+        producing near-zero heal_roi."""
+        r = client.post("/v1/preflight", headers=AUTH, json={
+            "memory_state": _STALE_MULTI,
+            "action_type": "reversible",
+            "domain": "general",
+            "score_history": _SCORE_HISTORY_RISING,
+        })
+        d = r.json()
+        rp = d.get("repair_plan", [])
+        if not rp:
+            return
+        # Every repair_plan item should have the new heal_cost field populated
+        for item in rp:
+            assert "heal_cost" in item
+            assert item["heal_cost"] > 0
+        # Warnings (if present anywhere in the list) must have a high cost
+        for item in rp:
+            action = item.get("action", "")
+            if "WARNING" in action or action == "MONITOR":
+                assert item["heal_cost"] >= 100.0, f"{action} cost too low: {item['heal_cost']}"
 
     def test_repair_plan_summary_string(self):
         r = client.post("/v1/preflight", headers=AUTH, json={

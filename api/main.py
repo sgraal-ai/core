@@ -15968,13 +15968,25 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # -----------------------------------------------------------------------
     _block_threshold = req.thresholds.get("block", 70) if req.thresholds else 70
     if omega_out >= _block_threshold:
+        # Already-blocked path: populate ALL days_until_block_* fields for schema consistency
         response["days_until_block"] = 0.0
         response["days_until_block_confidence"] = 1.0
+        response["days_until_block_ci"] = {"low": 0.0, "high": 0.0}
+        response["days_until_block_ci_method"] = "already_blocked_no_time_remaining"
+        response["days_until_block_n_models"] = 0
+        response["days_until_block_contributing_models"] = []
     elif not _is_dry_run and len(_te_history_cache) >= 3:
         # Each real model contributes (name, estimate, weight). BOCPD is handled
         # separately as a multiplicative adjustment, not a "fourth estimate" —
         # so it does NOT pollute the cross-model statistics used for the CI.
-        _dub_sources: list[tuple[str, float, float]] = []
+        #
+        # Models with a "no block imminent" signal (mean-reverting OU, downtrend
+        # Kalman) emit a SENTINEL instead of a numeric estimate. Sentinels are
+        # tracked separately (_dub_no_block_votes) and are NEVER mixed into the
+        # weighted mean — mixing a 999.0 with a real 10-day estimate produces
+        # 504, a meaningless middle-ground representing neither model.
+        _dub_sources: list[tuple[str, float, float]] = []          # real time-to-block estimates
+        _dub_no_block_votes: list[str] = []                         # names of models saying "no block imminent"
 
         # OU estimate
         _ou_data = response.get("ornstein_uhlenbeck")
@@ -15985,7 +15997,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _ou_days = _ou_hl * (_block_threshold - omega_out) / max(_ou_eq - omega_out, 0.01)
                 _dub_sources.append(("OU", max(0.0, _ou_days), 0.3))
             elif _ou_data.get("mean_reverting") and _ou_eq < _block_threshold:
-                _dub_sources.append(("OU", 999.0, 0.3))  # mean-reverting away from block
+                _dub_no_block_votes.append("OU(mean_reverting)")
 
         # Cox estimate: find t where P(survive) = 0.5
         _cox_data = response.get("cox_hazard")
@@ -16001,11 +16013,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _kalman_days = (_block_threshold - omega_out) / _slope
                 _dub_sources.append(("Kalman", max(0.0, min(999.0, _kalman_days)), 0.3))
             elif _slope <= 0:
-                _dub_sources.append(("Kalman", 999.0, 0.3))  # trending down, no block imminent
+                _dub_no_block_votes.append("Kalman(downtrend)")
 
         # BOCPD adjustment: multiplicative shrink if regime change imminent.
-        # BOCPD is NOT a time-to-block estimator — it's a regime-change detector.
-        # It adjusts the other models' estimates but is not part of the CI.
         _bocpd_factor = 1.0
         _bocpd_fired = False
         _td = response.get("trend_detection", {})
@@ -16023,19 +16033,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _contributing = [n for n, _, _ in _dub_sources]
                 if _bocpd_fired:
                     _contributing.append("BOCPD(shrink×0.5)")
-                # Confidence + 95% CI from cross-model spread of the ACTUAL estimates
-                # (no sentinel pollution). CI is centered on the reported point value
-                # so it always contains _dub_final.
+                # CI from cross-model spread of REAL estimates (sentinel-free).
+                # CI is centered on the reported point estimate so it always contains _dub_final.
                 if len(_dub_sources) >= 2:
                     _real_estimates = [e * _bocpd_factor for _, e, _ in _dub_sources]
                     _dub_mean = sum(_real_estimates) / len(_real_estimates)
                     _dub_var = sum((e - _dub_mean) ** 2 for e in _real_estimates) / len(_real_estimates)
                     _dub_std = math.sqrt(max(_dub_var, 0.0))
-                    # Center CI on the reported point estimate (weighted mean ×
-                    # bocpd_factor), half-width = 1.96·std of scaled real estimates.
                     _dub_ci_low = round(max(0.0, min(999.0, _dub_final - 1.96 * _dub_std)), 1)
                     _dub_ci_high = round(max(0.0, min(999.0, _dub_final + 1.96 * _dub_std)), 1)
-                    # confidence = 1 - std/mean of scaled real estimates, clamped [0,1]
                     _dub_conf = round(max(0.0, min(1.0, 1.0 - _dub_std / max(_dub_mean, 1.0))), 2)
                     response["days_until_block_ci"] = {"low": _dub_ci_low, "high": _dub_ci_high}
                     response["days_until_block_ci_method"] = (
@@ -16045,17 +16051,36 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     response["days_until_block_n_models"] = len(_dub_sources)
                     response["days_until_block_contributing_models"] = _contributing
                 else:
-                    _dub_conf = 0.3
+                    _dub_conf = None  # cannot compute cross-model spread with 1 estimate
                     response["days_until_block_ci"] = {"low": _dub_final, "high": _dub_final}
                     response["days_until_block_ci_method"] = "single_model_no_spread"
                     response["days_until_block_n_models"] = 1
                     response["days_until_block_contributing_models"] = _contributing
                 response["days_until_block"] = _dub_final
                 response["days_until_block_confidence"] = _dub_conf
+                # Dissent flag: when at least one real model predicts a block time AND
+                # at least one other model says "no block imminent", the point estimate
+                # is disputed. Callers can decide how to act on this.
+                if _dub_no_block_votes:
+                    response["days_until_block_no_block_signals"] = _dub_no_block_votes
+                    response["days_until_block_model_dissent"] = True
+                else:
+                    response["days_until_block_model_dissent"] = False
             else:
                 response["days_until_block"] = None
                 response["days_until_block_confidence"] = None
                 response["days_until_block_ci"] = None
+        elif _dub_no_block_votes:
+            # Every model says "no block imminent" — emit a clean no_block signal
+            # rather than a bogus numeric estimate.
+            response["days_until_block"] = None
+            response["days_until_block_confidence"] = None
+            response["days_until_block_ci"] = None
+            response["days_until_block_ci_method"] = "no_block_signal_from_all_models"
+            response["days_until_block_n_models"] = 0
+            response["days_until_block_contributing_models"] = []
+            response["days_until_block_no_block_signals"] = _dub_no_block_votes
+            response["days_until_block_model_dissent"] = False
         else:
             response["days_until_block"] = None
             response["days_until_block_confidence"] = None
@@ -16169,12 +16194,43 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["signal_vector_logged"] = _sv_logged
 
     # NEW: heal_roi — ROI per repair plan entry (voi_score / healing_cost)
-    _heal_cost_map = {"REFETCH": 1, "VERIFY_WITH_SOURCE": 2, "VERIFY": 2, "REBUILD_WORKING_SET": 5, "DELETE": 0.5, "WAIT": 0.1}
+    # Cost = abstract "effort units" per action. Low cost = cheap action; high
+    # cost = expensive / drastic. Notifications (WARNING, MONITOR) have near-zero
+    # cost since they are not heal actions — inflating their heal_roi incorrectly
+    # would push them to the top of the priority list.
+    _heal_cost_map = {
+        # Healing actions (actually modify memory state)
+        "REFETCH": 1.0,
+        "VERIFY_WITH_SOURCE": 2.0,
+        "VERIFY": 2.0,
+        "REBUILD_WORKING_SET": 5.0,
+        "DELETE": 0.5,
+        "WAIT": 0.1,
+        # MDP-recommended healing intensities
+        "SOFT_HEAL": 1.5,
+        "FULL_HEAL": 3.0,
+        "EMERGENCY_HEAL": 10.0,
+        "MANUAL_HEAL": 8.0,
+        # Notifications and warnings — NOT heal actions.
+        # Given a very high cost so their heal_roi is ~0 (ranked at the bottom).
+        # They should never dominate the prioritization.
+        "SLA_WARNING": 1000.0,
+        "BANACH_WARNING": 1000.0,
+        "CHAOS_WARNING": 1000.0,
+        "MONITOR": 1000.0,
+    }
     _voi_by_entry = {ir.entry_id: ir.voi_score for ir in importance_results}
     for _rp_item in response.get("repair_plan", []):
         _eid_raw = _rp_item.get("entry_id", "")
         _voi = _voi_by_entry.get(_eid_raw, 0.0)
-        _cost = _heal_cost_map.get(_rp_item.get("action", ""), 1.0)
+        _action = _rp_item.get("action", "")
+        # Missing action or unknown action with "WARNING"/"MONITOR" name →
+        # treat as notification (cost=1000). Otherwise default to 1.0 (healing).
+        if _action not in _heal_cost_map:
+            _cost = 1000.0 if ("WARNING" in _action or "MONITOR" in _action) else 1.0
+        else:
+            _cost = _heal_cost_map[_action]
+        _rp_item["heal_cost"] = _cost
         _rp_item["heal_roi"] = round(_voi / max(_cost, 0.01), 2)
     _rp_list = response.get("repair_plan", [])
     _rp_list.sort(key=lambda x: x.get("heal_roi", 0), reverse=True)
