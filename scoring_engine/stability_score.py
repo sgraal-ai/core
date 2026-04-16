@@ -42,6 +42,33 @@ def compute_r_total(
     return round(min(r, 5.0), 4)
 
 
+# Per-axis polytope temperatures (from research/results/ten_findings_batch1.json §15.3)
+# Normalized to sum=1: PC1=0.574 (Trust), PC2=0.239 (Decay), PC3=0.132 (Trust-residual),
+# PC4=0.055 (Drift), PC5=0.000 (Belief-frozen).
+#
+# Each stability component is mapped to its dominant polytope axis so weighting by
+# axis temperature transfers to the multi-component stability formula. Components
+# not clearly on one axis get the average weight.
+_AXIS_WEIGHTS = {
+    # Trust-axis (PC1) — dominant
+    "delta_alpha": 0.574,        # provenance trust drift
+    "p_transition": 0.574,       # HMM Trust state transitions
+    # Decay-axis (PC2)
+    "omega_drift": 0.239,        # freshness drift
+    "omega_0": 0.239,            # baseline omega
+    # Trust-residual (PC3)
+    "lambda_2": 0.132,           # graph connectivity
+    "hurst": 0.132,              # temporal persistence
+    # Drift-axis (PC4)
+    "h1_rank": 0.055,            # sheaf inconsistency
+    "tau_mix": 0.055,            # mixing time
+    # Belief-axis (PC5, frozen) — use small epsilon to avoid zero total
+    "d_geo_causal": 0.001,
+    "lyapunov_lambda": 0.001,
+    "colimit_state": 0.001,
+}
+
+
 def compute_stability_score(
     delta_alpha: float = 0.0,
     p_transition: float = 0.0,
@@ -54,10 +81,16 @@ def compute_stability_score(
     d_geo_causal: float = 0.0,
     lyapunov_lambda: Optional[float] = None,
     colimit_state: Optional[float] = None,
+    use_temperature_weights: bool = False,
 ) -> StabilityResult:
     """StabilityScore 9 or 10-component formula.
 
-    StabilityScore = (1/N) · Σₖ (1 - Componentₖ/Componentₖ_max)
+    Default (equal weights): StabilityScore = (1/N) · Σₖ (1 - Componentₖ/Componentₖ_max)
+
+    With use_temperature_weights=True: weight each component by its polytope axis
+    temperature (PC1=0.574, PC2=0.239, PC3=0.132, PC4=0.055, PC5≈0). Research
+    (§15.3) showed axis temperatures span 10.4× — equal weighting over-weights
+    the frozen Belief axis and under-weights the dominant Trust axis.
 
     9 components (base):
         delta_alpha: 2.0, p_transition: 1.0, omega_drift: 1.0,
@@ -109,12 +142,23 @@ def compute_stability_score(
         maxes["colimit_state"] = 1.0
         n_components += 1
 
-    total = 0.0
-    for key, val in raw.items():
-        capped = min(val, maxes[key])
-        total += 1.0 - capped / maxes[key]
-
-    score = round(total / n_components, 4)
+    if use_temperature_weights:
+        # Weighted sum — each component's (1 - cap/max) contribution is scaled by axis temperature
+        total_weight = sum(_AXIS_WEIGHTS.get(k, 0.0) for k in raw.keys())
+        if total_weight <= 0:
+            total_weight = 1.0
+        total = 0.0
+        for key, val in raw.items():
+            capped = min(val, maxes[key])
+            w = _AXIS_WEIGHTS.get(key, 0.0) / total_weight
+            total += w * (1.0 - capped / maxes[key])
+        score = round(total, 4)
+    else:
+        total = 0.0
+        for key, val in raw.items():
+            capped = min(val, maxes[key])
+            total += 1.0 - capped / maxes[key]
+        score = round(total / n_components, 4)
     score = max(0.0, min(1.0, score))
 
     if score > 0.7:

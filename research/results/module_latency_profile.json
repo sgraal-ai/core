@@ -1,0 +1,231 @@
+{
+  "n_samples": 100,
+  "end_to_end_preflight_ms": 17.683,
+  "modules_profiled": 20,
+  "modules_errored": 0,
+  "sum_profiled_ms": 66.237,
+  "profiled_vs_e2e_ratio": 3.746,
+  "top_10_slowest": [
+    {
+      "module": "hmm.compute_hmm_regime",
+      "mean_us": 55592.265,
+      "pct_of_profiled_total": 83.93
+    },
+    {
+      "module": "bocpd.compute_bocpd",
+      "mean_us": 4915.528,
+      "pct_of_profiled_total": 7.42
+    },
+    {
+      "module": "mdp.compute_mdp",
+      "mean_us": 1736.188,
+      "pct_of_profiled_total": 2.62
+    },
+    {
+      "module": "frechet.compute_frechet",
+      "mean_us": 924.318,
+      "pct_of_profiled_total": 1.4
+    },
+    {
+      "module": "drift_detector.compute_drift_metrics",
+      "mean_us": 816.262,
+      "pct_of_profiled_total": 1.23
+    },
+    {
+      "module": "rmt.compute_rmt",
+      "mean_us": 813.156,
+      "pct_of_profiled_total": 1.23
+    },
+    {
+      "module": "mttr.compute_mttr",
+      "mean_us": 507.359,
+      "pct_of_profiled_total": 0.77
+    },
+    {
+      "module": "sinkhorn.sinkhorn_distance",
+      "mean_us": 463.567,
+      "pct_of_profiled_total": 0.7
+    },
+    {
+      "module": "mahalanobis.compute_mahalanobis",
+      "mean_us": 179.06,
+      "pct_of_profiled_total": 0.27
+    },
+    {
+      "module": "particle_filter.compute_particle_filter",
+      "mean_us": 101.135,
+      "pct_of_profiled_total": 0.15
+    }
+  ],
+  "all_modules_sorted": [
+    {
+      "module": "hmm.compute_hmm_regime",
+      "mean_us": 55592.265,
+      "median_us": 55169.927,
+      "min_us": 53564.68,
+      "total_wall_ms": 5559.29,
+      "pct_of_profiled_total": 83.93
+    },
+    {
+      "module": "bocpd.compute_bocpd",
+      "mean_us": 4915.528,
+      "median_us": 4840.072,
+      "min_us": 4670.114,
+      "total_wall_ms": 491.594,
+      "pct_of_profiled_total": 7.42
+    },
+    {
+      "module": "mdp.compute_mdp",
+      "mean_us": 1736.188,
+      "median_us": 1682.566,
+      "min_us": 1596.548,
+      "total_wall_ms": 173.648,
+      "pct_of_profiled_total": 2.62
+    },
+    {
+      "module": "frechet.compute_frechet",
+      "mean_us": 924.318,
+      "median_us": 874.806,
+      "min_us": 867.846,
+      "total_wall_ms": 92.46,
+      "pct_of_profiled_total": 1.4
+    },
+    {
+      "module": "drift_detector.compute_drift_metrics",
+      "mean_us": 816.262,
+      "median_us": 759.44,
+      "min_us": 754.881,
+      "total_wall_ms": 81.656,
+      "pct_of_profiled_total": 1.23
+    },
+    {
+      "module": "rmt.compute_rmt",
+      "mean_us": 813.156,
+      "median_us": 745.575,
+      "min_us": 730.125,
+      "total_wall_ms": 81.345,
+      "pct_of_profiled_total": 1.23
+    },
+    {
+      "module": "mttr.compute_mttr",
+      "mean_us": 507.359,
+      "median_us": 485.794,
+      "min_us": 474.625,
+      "total_wall_ms": 50.761,
+      "pct_of_profiled_total": 0.77
+    },
+    {
+      "module": "sinkhorn.sinkhorn_distance",
+      "mean_us": 463.567,
+      "median_us": 435.517,
+      "min_us": 432.326,
+      "total_wall_ms": 46.382,
+      "pct_of_profiled_total": 0.7
+    },
+    {
+      "module": "mahalanobis.compute_mahalanobis",
+      "mean_us": 179.06,
+      "median_us": 154.391,
+      "min_us": 152.996,
+      "total_wall_ms": 17.933,
+      "pct_of_profiled_total": 0.27
+    },
+    {
+      "module": "particle_filter.compute_particle_filter",
+      "mean_us": 101.135,
+      "median_us": 95.978,
+      "min_us": 94.508,
+      "total_wall_ms": 10.137,
+      "pct_of_profiled_total": 0.15
+    },
+    {
+      "module": "omega_mem.compute",
+      "mean_us": 47.585,
+      "median_us": 46.373,
+      "min_us": 43.357,
+      "total_wall_ms": 4.791,
+      "pct_of_profiled_total": 0.07
+    },
+    {
+      "module": "sheaf_cohomology.compute_sheaf_consistency",
+      "mean_us": 40.114,
+      "median_us": 33.406,
+      "min_us": 31.805,
+      "total_wall_ms": 4.034,
+      "pct_of_profiled_total": 0.06
+    },
+    {
+      "module": "pagerank.compute_pagerank",
+      "mean_us": 36.899,
+      "median_us": 33.649,
+      "min_us": 33.267,
+      "total_wall_ms": 3.714,
+      "pct_of_profiled_total": 0.06
+    },
+    {
+      "module": "kalman_forecast.KalmanForecaster.fit+predict",
+      "mean_us": 20.254,
+      "median_us": 17.074,
+      "min_us": 16.885,
+      "total_wall_ms": 2.048,
+      "pct_of_profiled_total": 0.03
+    },
+    {
+      "module": "lyapunov_exponent.compute_lyapunov_exponent",
+      "mean_us": 13.743,
+      "median_us": 13.591,
+      "min_us": 13.149,
+      "total_wall_ms": 1.397,
+      "pct_of_profiled_total": 0.02
+    },
+    {
+      "module": "banach.compute_banach",
+      "mean_us": 10.557,
+      "median_us": 10.364,
+      "min_us": 10.284,
+      "total_wall_ms": 1.078,
+      "pct_of_profiled_total": 0.02
+    },
+    {
+      "module": "free_energy.compute_free_energy",
+      "mean_us": 6.925,
+      "median_us": 6.446,
+      "min_us": 6.36,
+      "total_wall_ms": 0.714,
+      "pct_of_profiled_total": 0.01
+    },
+    {
+      "module": "copula.compute_copula",
+      "mean_us": 6.735,
+      "median_us": 6.695,
+      "min_us": 6.593,
+      "total_wall_ms": 0.703,
+      "pct_of_profiled_total": 0.01
+    },
+    {
+      "module": "hotelling_t2.compute_hotelling_t2",
+      "mean_us": 3.03,
+      "median_us": 3.006,
+      "min_us": 2.94,
+      "total_wall_ms": 0.322,
+      "pct_of_profiled_total": 0.0
+    },
+    {
+      "module": "lyapunov.compute_lyapunov",
+      "mean_us": 2.424,
+      "median_us": 2.412,
+      "min_us": 2.336,
+      "total_wall_ms": 0.264,
+      "pct_of_profiled_total": 0.0
+    }
+  ],
+  "errored_modules": [],
+  "interpretation": "End-to-end preflight: 17.68 ms. Sum of profiled module means: 66.24 ms (374.6% of E2E budget). Heaviest module: hmm.compute_hmm_regime. Top-3 modules account for 94.0% of profiled time.",
+  "optimization_targets": [
+    "hmm.compute_hmm_regime",
+    "bocpd.compute_bocpd",
+    "mdp.compute_mdp",
+    "frechet.compute_frechet",
+    "drift_detector.compute_drift_metrics"
+  ]
+}

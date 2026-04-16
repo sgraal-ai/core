@@ -1,0 +1,27 @@
+{
+  "data_source": "omega_outcome_results.json (n=120)",
+  "method_A_summary_stats": {
+    "theta": 53.7,
+    "k": 0.1641
+  },
+  "method_B_synthetic_lsq": {
+    "theta": 50.053,
+    "k": 0.182,
+    "R_squared": 0.9997
+  },
+  "estimated_values": {
+    "theta": 46,
+    "k": 0.15
+  },
+  "fitted_values_recommended": {
+    "theta": 50.053,
+    "k": 0.182
+  },
+  "recommended_method": "B",
+  "delta_from_estimate": {
+    "theta": 4.053,
+    "k": 0.032
+  },
+  "significant_update_needed": false,
+  "impact_on_expected_savings": "P(failure|omega=70) shifts from 0.9734 to 0.9742 (+0.1%); P(failure|omega=50) shifts from 0.6457 to 0.4976 (-22.9%). Expected savings scale linearly with p_failure, so realized savings per BLOCK call change by roughly the same percentages."
+}

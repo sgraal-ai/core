@@ -1,0 +1,46 @@
+{
+  "n_corpus_cases": 854,
+  "corpora_analyzed": [
+    "R10",
+    "R5",
+    "R6",
+    "R7",
+    "R8",
+    "load_benchmark_corpus"
+  ],
+  "n_fleets": 47,
+  "n_inter_arrival_samples": 807,
+  "per_domain_arrival_rate": {
+    "coding": 3.7333,
+    "general": 4.0588,
+    "legal": 4.8235,
+    "fintech": 2.9667,
+    "medical": 3.4375,
+    "customer_support": 2.75
+  },
+  "per_domain_counts": {
+    "coding": 56,
+    "general": 69,
+    "legal": 164,
+    "fintech": 356,
+    "medical": 165,
+    "customer_support": 44
+  },
+  "per_domain_span_days": {
+    "coding": 15,
+    "general": 17,
+    "legal": 34,
+    "fintech": 120,
+    "medical": 48,
+    "customer_support": 16
+  },
+  "global_lambda_arrival": 7.1167,
+  "expected_inter_arrival_days": 0.1405,
+  "mean_inter_arrival_days": 1.0,
+  "median_inter_arrival_days": 1.0,
+  "p25_inter_arrival_days": 1.0,
+  "p75_inter_arrival_days": 1.0,
+  "burst_probability_24h": 1.0,
+  "operational_implication": "Across 854 cases and 47 (domain, round) fleets, mean synthetic inter-arrival is 1.00 days, median 1.00 days. Global arrival intensity \u03bb\u22487.117 attacks/day per fleet. Empirical 24h burst probability = 100.0%. Highest-rate domain: legal (4.824 attacks/day). Hawkes \u03bc (baseline intensity) should be seeded near 7.117; self-excitation \u03b1 should amplify only when multiple attacks arrive within <1 days.",
+  "methodology": "Synthetic 1-attack-per-day arrivals within each (domain, round) fleet. Real corpus cases lack true timestamps \u2014 this assigns sequential day indices per fleet, giving a normalised inter-arrival distribution."
+}

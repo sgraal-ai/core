@@ -1,0 +1,54 @@
+{
+  "layers": [
+    "timestamp_integrity",
+    "identity_drift",
+    "consensus_collapse",
+    "provenance_chain_integrity"
+  ],
+  "n_block_cases": 163,
+  "marginals": {
+    "timestamp_integrity": 0,
+    "identity_drift": 0,
+    "consensus_collapse": 18,
+    "provenance_chain_integrity": 19
+  },
+  "conditional_matrix": {
+    "timestamp_integrity": {
+      "timestamp_integrity": null,
+      "identity_drift": null,
+      "consensus_collapse": null,
+      "provenance_chain_integrity": null
+    },
+    "identity_drift": {
+      "timestamp_integrity": null,
+      "identity_drift": null,
+      "consensus_collapse": null,
+      "provenance_chain_integrity": null
+    },
+    "consensus_collapse": {
+      "timestamp_integrity": 0.0,
+      "identity_drift": 0.0,
+      "consensus_collapse": 1.0,
+      "provenance_chain_integrity": 0.0556
+    },
+    "provenance_chain_integrity": {
+      "timestamp_integrity": 0.0,
+      "identity_drift": 0.0,
+      "consensus_collapse": 0.0526,
+      "provenance_chain_integrity": 1.0
+    }
+  },
+  "independence_test": {
+    "pair_most_correlated": [
+      "consensus_collapse",
+      "provenance_chain_integrity",
+      0.0556
+    ],
+    "pair_least_correlated": [
+      "provenance_chain_integrity",
+      "identity_drift",
+      0.0
+    ]
+  },
+  "attack_fingerprint": "Layers fire largely independently \u2014 each targets distinct attack classes."
+}
