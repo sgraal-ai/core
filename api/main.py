@@ -15971,8 +15971,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["days_until_block"] = 0.0
         response["days_until_block_confidence"] = 1.0
     elif not _is_dry_run and len(_te_history_cache) >= 3:
-        _dub_estimates = []
-        _dub_weights = []
+        # Each real model contributes (name, estimate, weight). BOCPD is handled
+        # separately as a multiplicative adjustment, not a "fourth estimate" —
+        # so it does NOT pollute the cross-model statistics used for the CI.
+        _dub_sources: list[tuple[str, float, float]] = []
 
         # OU estimate
         _ou_data = response.get("ornstein_uhlenbeck")
@@ -15981,18 +15983,15 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _ou_hl = _ou_data["half_life"]
             if _ou_eq > omega_out and _ou_eq > 0:
                 _ou_days = _ou_hl * (_block_threshold - omega_out) / max(_ou_eq - omega_out, 0.01)
-                _dub_estimates.append(max(0.0, _ou_days))
-                _dub_weights.append(0.3)
+                _dub_sources.append(("OU", max(0.0, _ou_days), 0.3))
             elif _ou_data.get("mean_reverting") and _ou_eq < _block_threshold:
-                _dub_estimates.append(999.0)  # mean-reverting away from block
-                _dub_weights.append(0.3)
+                _dub_sources.append(("OU", 999.0, 0.3))  # mean-reverting away from block
 
         # Cox estimate: find t where P(survive) = 0.5
         _cox_data = response.get("cox_hazard")
         if _cox_data and _cox_data.get("hazard_rate") and _cox_data["hazard_rate"] > 0:
             _cox_median = 0.693 / _cox_data["hazard_rate"]  # ln(2) / hazard_rate
-            _dub_estimates.append(max(0.0, _cox_median))
-            _dub_weights.append(0.3)
+            _dub_sources.append(("Cox", max(0.0, _cox_median), 0.3))
 
         # Kalman estimate: linear extrapolation from recent trend
         if len(_te_history_cache) >= 5:
@@ -16000,45 +15999,57 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _slope = (_recent[-1] - _recent[0]) / max(len(_recent) - 1, 1)
             if _slope > 0.01:
                 _kalman_days = (_block_threshold - omega_out) / _slope
-                _dub_estimates.append(max(0.0, min(999.0, _kalman_days)))
-                _dub_weights.append(0.3)
+                _dub_sources.append(("Kalman", max(0.0, min(999.0, _kalman_days)), 0.3))
             elif _slope <= 0:
-                _dub_estimates.append(999.0)  # trending down, no block imminent
-                _dub_weights.append(0.3)
+                _dub_sources.append(("Kalman", 999.0, 0.3))  # trending down, no block imminent
 
-        # BOCPD adjustment: halve estimate if regime change imminent
+        # BOCPD adjustment: multiplicative shrink if regime change imminent.
+        # BOCPD is NOT a time-to-block estimator — it's a regime-change detector.
+        # It adjusts the other models' estimates but is not part of the CI.
         _bocpd_factor = 1.0
+        _bocpd_fired = False
         _td = response.get("trend_detection", {})
         _bocpd_data = _td.get("bocpd") if isinstance(_td, dict) else None
         if _bocpd_data and _bocpd_data.get("p_changepoint", 0) > 0.7:
             _bocpd_factor = 0.5
-            _dub_weights.append(0.1)
-            _dub_estimates.append(0.0)  # placeholder, the factor does the work
+            _bocpd_fired = True
 
-        if _dub_estimates and _dub_weights:
-            _w_sum = sum(_dub_weights)
-            _weighted = sum(e * w for e, w in zip(_dub_estimates, _dub_weights))
+        if _dub_sources:
+            _w_sum = sum(w for _, _, w in _dub_sources)
+            _weighted = sum(e * w for _, e, w in _dub_sources)
             _dub_raw = (_weighted / _w_sum) * _bocpd_factor if _w_sum > 0 else None
             if _dub_raw is not None:
                 _dub_final = round(min(999.0, max(0.0, _dub_raw)), 1)
-                # Confidence + 95% CI from cross-model spread
-                if len(_dub_estimates) >= 2:
-                    _dub_mean = sum(_dub_estimates) / len(_dub_estimates)
-                    _dub_var = sum((e - _dub_mean) ** 2 for e in _dub_estimates) / len(_dub_estimates)
+                _contributing = [n for n, _, _ in _dub_sources]
+                if _bocpd_fired:
+                    _contributing.append("BOCPD(shrink×0.5)")
+                # Confidence + 95% CI from cross-model spread of the ACTUAL estimates
+                # (no sentinel pollution). CI is centered on the reported point value
+                # so it always contains _dub_final.
+                if len(_dub_sources) >= 2:
+                    _real_estimates = [e * _bocpd_factor for _, e, _ in _dub_sources]
+                    _dub_mean = sum(_real_estimates) / len(_real_estimates)
+                    _dub_var = sum((e - _dub_mean) ** 2 for e in _real_estimates) / len(_real_estimates)
                     _dub_std = math.sqrt(max(_dub_var, 0.0))
-                    # #455: 95% CI = mean ± 1.96·std (clamped to [0, 999])
-                    _dub_ci_low = round(max(0.0, min(999.0, _dub_mean - 1.96 * _dub_std)), 1)
-                    _dub_ci_high = round(max(0.0, min(999.0, _dub_mean + 1.96 * _dub_std)), 1)
-                    # confidence = 1 - std/mean, clamped to [0,1]
+                    # Center CI on the reported point estimate (weighted mean ×
+                    # bocpd_factor), half-width = 1.96·std of scaled real estimates.
+                    _dub_ci_low = round(max(0.0, min(999.0, _dub_final - 1.96 * _dub_std)), 1)
+                    _dub_ci_high = round(max(0.0, min(999.0, _dub_final + 1.96 * _dub_std)), 1)
+                    # confidence = 1 - std/mean of scaled real estimates, clamped [0,1]
                     _dub_conf = round(max(0.0, min(1.0, 1.0 - _dub_std / max(_dub_mean, 1.0))), 2)
                     response["days_until_block_ci"] = {"low": _dub_ci_low, "high": _dub_ci_high}
-                    response["days_until_block_ci_method"] = "mean ± 1.96·std across OU/Cox/Kalman/BOCPD"
-                    response["days_until_block_n_models"] = len(_dub_estimates)
+                    response["days_until_block_ci_method"] = (
+                        "point_estimate ± 1.96·std across contributing models"
+                        + (" (post-BOCPD scaling)" if _bocpd_fired else "")
+                    )
+                    response["days_until_block_n_models"] = len(_dub_sources)
+                    response["days_until_block_contributing_models"] = _contributing
                 else:
                     _dub_conf = 0.3
                     response["days_until_block_ci"] = {"low": _dub_final, "high": _dub_final}
                     response["days_until_block_ci_method"] = "single_model_no_spread"
                     response["days_until_block_n_models"] = 1
+                    response["days_until_block_contributing_models"] = _contributing
                 response["days_until_block"] = _dub_final
                 response["days_until_block_confidence"] = _dub_conf
             else:
@@ -16204,20 +16215,29 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     response["phi_weighted"] = True
     response["knowledge_age_days"] = _ka_mean
     response["knowledge_age_std_days"] = _ka_std
-    # #457: human-readable knowledge-age summary with uncertainty + oldest trusted entry
+    # #457: human-readable knowledge-age summary with uncertainty + oldest trusted entry.
+    # If no entry has source_trust >= 0.5, we DO NOT fall back to the oldest
+    # untrusted entry — that would mislabel an untrusted entry as "trusted".
+    # Instead, report `knowledge_age_oldest_trusted_days = None` and note the
+    # absence in the summary string.
     try:
         if _ka_mean is not None and entries:
-            # Oldest trusted entry = max age among entries with source_trust >= 0.5
             _trusted = [e for e in entries if float(getattr(e, "source_trust", 0) or 0) >= 0.5]
-            _oldest_trusted = max((e.timestamp_age_days for e in _trusted), default=None)
-            if _oldest_trusted is None:
-                _oldest_trusted = max((e.timestamp_age_days for e in entries), default=0)
-            _ka_summary = (
-                f"Your agent's memory is effectively {_ka_mean} days old "
-                f"(±{_ka_std} days). Oldest trusted entry: {round(float(_oldest_trusted), 1)} days."
-            )
+            if _trusted:
+                _oldest_trusted_val = max(e.timestamp_age_days for e in _trusted)
+                _oldest_trusted_rounded = round(float(_oldest_trusted_val), 1)
+                _ka_summary = (
+                    f"Your agent's memory is effectively {_ka_mean} days old "
+                    f"(±{_ka_std} days). Oldest trusted entry: {_oldest_trusted_rounded} days."
+                )
+                response["knowledge_age_oldest_trusted_days"] = _oldest_trusted_rounded
+            else:
+                _ka_summary = (
+                    f"Your agent's memory is effectively {_ka_mean} days old "
+                    f"(±{_ka_std} days). No trusted entries (all source_trust < 0.5)."
+                )
+                response["knowledge_age_oldest_trusted_days"] = None
             response["knowledge_age_summary"] = _ka_summary
-            response["knowledge_age_oldest_trusted_days"] = round(float(_oldest_trusted), 1)
         else:
             response["knowledge_age_summary"] = None
             response["knowledge_age_oldest_trusted_days"] = None

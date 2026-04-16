@@ -41,15 +41,35 @@ class TestDaysUntilBlockCI:
         })
         assert r.status_code == 200
         d = r.json()
-        # Should have both the point estimate and the CI when multiple models fire
         assert "days_until_block" in d
         assert "days_until_block_ci" in d
         ci = d["days_until_block_ci"]
         if ci is not None:
             assert "low" in ci and "high" in ci
             assert ci["low"] <= ci["high"]
-            # CI must contain the point estimate
+            # CI must always contain the reported point estimate (fixed in #455 revision:
+            # CI is now centered on the bocpd-scaled point value, not the raw mean)
             assert ci["low"] <= d["days_until_block"] <= ci["high"]
+
+    def test_days_until_block_contributing_models_reported(self):
+        r = client.post("/v1/preflight", headers=AUTH, json={
+            "memory_state": _STALE_MULTI,
+            "action_type": "reversible",
+            "domain": "general",
+            "score_history": _SCORE_HISTORY_RISING,
+        })
+        d = r.json()
+        if d.get("days_until_block_ci") is not None:
+            # New field: explicit list of which models contributed
+            assert "days_until_block_contributing_models" in d
+            models = d["days_until_block_contributing_models"]
+            assert isinstance(models, list) and len(models) >= 1
+            # BOCPD only appears as a shrink marker, never as a standalone estimator
+            for m in models:
+                if m.startswith("BOCPD"):
+                    assert "shrink" in m
+                else:
+                    assert m in ("OU", "Cox", "Kalman")
 
     def test_days_until_block_confidence_in_range(self):
         r = client.post("/v1/preflight", headers=AUTH, json={
@@ -134,6 +154,27 @@ class TestKnowledgeAgeSummary:
         oldest = d.get("knowledge_age_oldest_trusted_days")
         # STALE_MULTI has entries aged 45 and 25 both with trust >= 0.5 → oldest trusted = 45
         assert oldest == 45.0
+
+    def test_no_trusted_entries_returns_null_oldest(self):
+        """When every entry has source_trust < 0.5, do NOT fall back to the
+        oldest untrusted entry — report None and note it in the summary."""
+        untrusted = [
+            {"id": "u1", "content": "x", "type": "tool_state", "timestamp_age_days": 50,
+             "source_trust": 0.3, "source_conflict": 0.7, "downstream_count": 1},
+            {"id": "u2", "content": "y", "type": "tool_state", "timestamp_age_days": 30,
+             "source_trust": 0.4, "source_conflict": 0.6, "downstream_count": 1},
+        ]
+        r = client.post("/v1/preflight", headers=AUTH, json={
+            "memory_state": untrusted,
+            "action_type": "reversible",
+            "domain": "general",
+        })
+        d = r.json()
+        # Explicitly null — do NOT report an untrusted entry as "trusted"
+        assert d.get("knowledge_age_oldest_trusted_days") is None
+        summary = d.get("knowledge_age_summary", "") or ""
+        # Summary should flag the absence rather than invent a trusted entry
+        assert "No trusted entries" in summary
 
 
 class TestRepairPlanRanking:
