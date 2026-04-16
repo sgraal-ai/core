@@ -68,6 +68,8 @@ Calculation: at weighted P(failure|ω) = 0.67 from the calibration curve, a BLOC
 
 This is not marketing — it is the mathematical consequence of ρ=-0.54 applied to real transaction values. The dashboard shows it in real time: per-agent ROI, fleet-wide performance percentile, and estimated failures prevented.
 
+**Every BLOCK response now returns its dollar value.** The preflight API includes `expected_savings_if_blocked` and `actual_savings_this_call` fields on every BLOCK, WARN, or ASK_USER decision. Customers can override the default transaction value per request (e.g., a $100K wire transfer vs. a $50 support ticket). Sgraal is the only memory governance system that quotes its own ROI, per call, in real time.
+
 ## Profitable from call #1
 
 The phase constant κ_MEM = 0.033 defines where governance becomes economically mandatory. At that threshold, expected savings per call exceed governance cost per call — in every domain, at every tier.
@@ -85,15 +87,34 @@ The phase constant κ_MEM = 0.033 defines where governance becomes economically 
 
 This is the business interpretation of the phase constant we discovered: κ_MEM is not just a geometric property of the signal correlation graph. It is the threshold at which governance pays for itself on the very first call.
 
+## Personalized governance per memory type
+
+The aggregate calibration curve has a "gap" at omega 55-70 where the model is uncertain. We stratified by memory type and discovered the gap doesn't exist for any single type — it was an averaging artifact. Each type has its own inflection point:
+
+| Memory type | BLOCK threshold | vs. old fixed threshold |
+|---|---|---|
+| identity | 13 | 5× too lenient |
+| policy | 17 | 4× too lenient |
+| semantic | 21 | 3× too lenient |
+| preference | 33 | 2× too lenient |
+| episodic | 37 | 2× too lenient |
+| shared_workflow | 43 | 1.6× too lenient |
+| tool_state | 47 | 1.5× too lenient |
+
+Sgraal now ships per-type BLOCK thresholds as an opt-in feature. Turn it on with `per_type_thresholds: true`. Customize per request with `per_type_threshold_values: {...}`. The result: identity memories BLOCK at omega 13 (correctly, because identity memories become unreliable fast), tool_state memories BLOCK at omega 47 (correctly, because tool state is more resilient).
+
+**This is a competitive moat.** No other governance system has type-specific calibration, because no other system has run the research to derive the inflection points. We have the only validated curves.
+
 ## Unit economics
 
 Revenue per Pro customer: $588/year. Cost to serve: $12/year. **Gross margin: 98%.** At $200 CAC with 24-month LTV of $1,176: LTV/CAC ratio > 5x.
 
 ## The moat (4 layers)
 
-**Mathematical depth** (18-24 months to replicate): 83 modules, 3 proofs, 9 benchmark rounds, 2,353 tests. The decision geometry is three parallel hyperplanes at omega thresholds 59 → 67 → 74, with Trust and Decay carrying 60% of the weight on each. The 6.2% error cases live on the 5-dimensional manifold, not off it — errors are boundary ambiguity, not missing features. The module DAG has only 10 internal dependencies — the engine is structurally parallel.
+**Mathematical depth** (18-24 months to replicate): 83 modules, 3 proofs, 9 benchmark rounds, 2,353 tests. The decision geometry is three parallel hyperplanes at omega thresholds 59 → 67 → 74, with Trust and Decay carrying 60% of the weight on each. The 6.2% error cases live on the 5-dimensional manifold, not off it — errors are boundary ambiguity, not missing features. The module DAG has only 10 internal dependencies — the engine is structurally parallel, with ThreadPoolExecutor infrastructure in place for opt-in parallel scoring (determinism-verified).
 **Regulatory readiness** (6-12 months): EU AI Act Articles 12/9/13 mapped. FDA 510(k) pre-verified via CTL model checking.
 **Network effects** (quantified): Fleet-wide vaccination yields a 1.67× Metcalfe multiplier at 100,000 agents — immunity develops 67% faster than at 1,000 agents. Scales logarithmically with fleet size.
+**Discoverability** (frictionless adoption): every deployment exposes `/.well-known/sgraal.json` — a public service discovery endpoint that lets any AI agent or orchestration framework auto-negotiate capabilities, SDK versions, and endpoint URLs. A 31-endpoint Postman collection ships in the repo. Integration time: minutes, not weeks.
 **The discovery** (must be independently confirmed, not replicated): Risk Polytope, phase constant κ_MEM = 0.033, thermodynamic structure. Validated against Grok (xAI): `tanh(0.033 × 25.12) = 0.680` — exact geometric conversion between two independent systems. F/σ = 2,299 calls to entropy death. Saturation constant F∞ = 2.27 (universal across types and domains).
 
 ## Why now
@@ -118,9 +139,11 @@ print(f'Explanation: {r.get(\"block_explanation\") or r.get(\"calibration_note\"
 
 ## Traction
 
-349 API endpoints. 2,353 tests. 950 adversarial cases (F1=1.000). 26 SDK integrations. Live at api.sgraal.com. Dashboard at app.sgraal.com. 34-page landing site. Guard endpoints for OpenAI function calls and Claude tool use. 4 audio files of what memory governance sounds like.
+350 API endpoints. 2,353 tests. 950 adversarial cases (F1=1.000). 26 SDK integrations. Live at api.sgraal.com. Dashboard at app.sgraal.com. 34-page landing site. Guard endpoints for OpenAI function calls and Claude tool use. 4 audio files of what memory governance sounds like. Public service discovery via `/.well-known/sgraal.json`. 31-endpoint Postman collection shipped.
 
-20 derived properties documented in the scientific manuscript: healing budget (146 heals), decision boundary equation (three parallel hyperplanes at 59/67/74), per-axis temperature (Trust 10.4× hotter than Drift), saturation constant F∞=2.27, optimal healing interval (3 days), eigentime τ=17.2 calls, module DAG (critical path 3, 27× theoretical speedup), component redundancy (s_drift↔r_recall at r=0.95), latency distribution (p50=29ms, p99=119ms), κ_MEM break-even (1,564× minimum ROI per call).
+20 derived properties documented in the scientific manuscript: healing budget (146 heals), decision boundary equation (three parallel hyperplanes at 59/67/74), per-axis temperature (Trust 10.4× hotter than Drift), saturation constant F∞=2.27, optimal healing interval (3 days), eigentime τ=17.2 calls, module DAG (critical path 3, 27× theoretical speedup), component redundancy (s_drift↔r_recall at r=0.95), latency distribution (p50=29ms, p99=119ms), κ_MEM break-even (1,564× minimum ROI per call), type-stratified inflection points (34-point spread, identity=13 → tool_state=47).
+
+Five product features shipped: expected_savings_if_blocked (dollar value in every decision), per_type_thresholds (opt-in type-specific calibration), parallel_scoring (ThreadPoolExecutor with determinism guarantee), service discovery (/.well-known/sgraal.json), Postman collection (31 endpoints).
 
 ρ=-0.54 omega-outcome correlation validated on 120 outcomes — governance improves agent performance, not just safety.
 
