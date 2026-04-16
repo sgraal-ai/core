@@ -9,6 +9,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["SGRAAL_SKIP_DNS_CHECK"] = "1"
+os.environ["SGRAAL_TEST_MODE"] = "1"
 
 from fastapi.testclient import TestClient
 from api.main import app, _load_benchmark_corpus

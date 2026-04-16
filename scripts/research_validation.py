@@ -12,6 +12,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["SGRAAL_SKIP_DNS_CHECK"] = "1"
+os.environ["SGRAAL_TEST_MODE"] = "1"
 
 from scoring_engine import compute, MemoryEntry
 from scoring_engine.omega_mem import WEIGHTS
@@ -297,6 +298,7 @@ def task3_calibration_curve():
     print("  Generating 200 synthetic outcome cases across full omega range...")
 
     os.environ["SGRAAL_SKIP_DNS_CHECK"] = "1"
+os.environ["SGRAAL_TEST_MODE"] = "1"
     from fastapi.testclient import TestClient
     from api.main import app
 

@@ -679,13 +679,24 @@ _validate_required_secrets()
 
 
 # In-memory API key store: api_key -> stripe_customer_id
-API_KEYS: dict[str, str] = {
-    "sg_test_key_001": "cus_test_001",
-    # Second test key exists purely to enable multi-tenant isolation tests
-    # (e.g., tests/test_plugins.py::test_activation_is_per_tenant_no_cross_tenant_leak).
-    # Not used in any production code path.
-    "sg_test_key_002": "cus_test_002",
-}
+API_KEYS: dict[str, str] = {}
+
+# Test keys are loaded ONLY when SGRAAL_TEST_MODE=1 (disabled by default).
+# Previously these were hardcoded in API_KEYS and shipped to production — any
+# third party reading the source could bypass signup and hit /v1/preflight as
+# the "test" customer. Gating behind an explicit opt-in env var prevents that.
+#
+# Production deployments (Railway, customer self-hosted) MUST NOT set this.
+# CI, local development, and tests set SGRAAL_TEST_MODE=1 to enable the keys.
+# tests/conftest.py sets this before importing api.main.
+if os.getenv("SGRAAL_TEST_MODE", "").lower() in ("1", "true", "yes"):
+    API_KEYS["sg_test_key_001"] = "cus_test_001"
+    # Second test key exists purely for multi-tenant isolation tests
+    API_KEYS["sg_test_key_002"] = "cus_test_002"
+    logger.warning(
+        "SGRAAL_TEST_MODE is ENABLED — test API keys are active. "
+        "This must not be set in production deployments."
+    )
 
 bearer_scheme = HTTPBearer()
 

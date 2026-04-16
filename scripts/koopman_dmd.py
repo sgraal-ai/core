@@ -26,6 +26,7 @@ from collections import defaultdict
 from typing import Optional, Tuple, List
 
 os.environ["SGRAAL_SKIP_DNS_CHECK"] = "1"
+os.environ["SGRAAL_TEST_MODE"] = "1"
 sys.path.insert(0, "/Users/zsobrakpeter/core")
 
 import numpy as np  # noqa: E402

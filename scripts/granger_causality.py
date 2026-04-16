@@ -17,6 +17,7 @@ Approach:
 import os, sys, json, math, random
 
 os.environ["SGRAAL_SKIP_DNS_CHECK"] = "1"
+os.environ["SGRAAL_TEST_MODE"] = "1"
 sys.path.insert(0, "/Users/zsobrakpeter/core")
 
 from fastapi.testclient import TestClient  # noqa: E402

@@ -17,6 +17,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 os.environ["SGRAAL_SKIP_DNS_CHECK"] = "1"
+os.environ["SGRAAL_TEST_MODE"] = "1"
 sys.path.insert(0, "/Users/zsobrakpeter/core")
 sys.path.insert(0, "/Users/zsobrakpeter/core/tests/corpus")
 
