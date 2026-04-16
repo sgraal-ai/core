@@ -1,0 +1,269 @@
+{
+  "synthetic": true,
+  "n_cases_analyzed": 449,
+  "omega_bands": [
+    {
+      "band": "0-10",
+      "lo": 0,
+      "hi": 10,
+      "n": 72,
+      "mean_omega": 3.026388888888889,
+      "mean_fiedler": 0.8279142857142857,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.16436527777777776
+    },
+    {
+      "band": "10-20",
+      "lo": 10,
+      "hi": 20,
+      "n": 50,
+      "mean_omega": 14.687999999999999,
+      "mean_fiedler": 0.1581125,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.25687599999999994
+    },
+    {
+      "band": "20-30",
+      "lo": 20,
+      "hi": 30,
+      "n": 30,
+      "mean_omega": 23.429999999999996,
+      "mean_fiedler": 0.2147142857142857,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.1767533333333333
+    },
+    {
+      "band": "30-40",
+      "lo": 30,
+      "hi": 40,
+      "n": 28,
+      "mean_omega": 35.35357142857143,
+      "mean_fiedler": 0.49536250000000004,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.1635357142857143
+    },
+    {
+      "band": "40-50",
+      "lo": 40,
+      "hi": 50,
+      "n": 41,
+      "mean_omega": 44.614634146341466,
+      "mean_fiedler": 0.19400714285714285,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.28055121951219514
+    },
+    {
+      "band": "50-60",
+      "lo": 50,
+      "hi": 60,
+      "n": 47,
+      "mean_omega": 54.91489361702128,
+      "mean_fiedler": 0.055858333333333336,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.27825957446808514
+    },
+    {
+      "band": "60-70",
+      "lo": 60,
+      "hi": 70,
+      "n": 38,
+      "mean_omega": 65.08421052631579,
+      "mean_fiedler": 0.031991304347826086,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.25364473684210526
+    },
+    {
+      "band": "70-80",
+      "lo": 70,
+      "hi": 80,
+      "n": 34,
+      "mean_omega": 73.52352941176468,
+      "mean_fiedler": 0.0,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.2003529411764706
+    },
+    {
+      "band": "80-90",
+      "lo": 80,
+      "hi": 90,
+      "n": 17,
+      "mean_omega": 83.78235294117648,
+      "mean_fiedler": 0.17113333333333333,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.1240764705882353
+    },
+    {
+      "band": "90-100",
+      "lo": 90,
+      "hi": 100,
+      "n": 92,
+      "mean_omega": 99.03586956521738,
+      "mean_fiedler": 0.04183103448275862,
+      "mean_hmm_critical": 0.0,
+      "mean_hawkes": 0.2250597826086956
+    }
+  ],
+  "derivatives": {
+    "fiedler_vs_omega": [
+      {
+        "at_omega": 10.0,
+        "d": -0.06698017857142857
+      },
+      {
+        "at_omega": 20.0,
+        "d": 0.00566017857142857
+      },
+      {
+        "at_omega": 30.0,
+        "d": 0.028064821428571435
+      },
+      {
+        "at_omega": 40.0,
+        "d": -0.030135535714285722
+      },
+      {
+        "at_omega": 50.0,
+        "d": -0.01381488095238095
+      },
+      {
+        "at_omega": 60.0,
+        "d": -0.0023867028985507252
+      },
+      {
+        "at_omega": 70.0,
+        "d": -0.0031991304347826085
+      },
+      {
+        "at_omega": 80.0,
+        "d": 0.017113333333333335
+      },
+      {
+        "at_omega": 90.0,
+        "d": -0.01293022988505747
+      }
+    ],
+    "hmm_critical_vs_omega": [
+      {
+        "at_omega": 10.0,
+        "d": 0.0
+      },
+      {
+        "at_omega": 20.0,
+        "d": 0.0
+      },
+      {
+        "at_omega": 30.0,
+        "d": 0.0
+      },
+      {
+        "at_omega": 40.0,
+        "d": 0.0
+      },
+      {
+        "at_omega": 50.0,
+        "d": 0.0
+      },
+      {
+        "at_omega": 60.0,
+        "d": 0.0
+      },
+      {
+        "at_omega": 70.0,
+        "d": 0.0
+      },
+      {
+        "at_omega": 80.0,
+        "d": 0.0
+      },
+      {
+        "at_omega": 90.0,
+        "d": 0.0
+      }
+    ],
+    "hawkes_vs_omega": [
+      {
+        "at_omega": 10.0,
+        "d": 0.009251072222222217
+      },
+      {
+        "at_omega": 20.0,
+        "d": -0.008012266666666665
+      },
+      {
+        "at_omega": 30.0,
+        "d": -0.0013217619047618979
+      },
+      {
+        "at_omega": 40.0,
+        "d": 0.011701550522648083
+      },
+      {
+        "at_omega": 50.0,
+        "d": -0.00022916450441100024
+      },
+      {
+        "at_omega": 60.0,
+        "d": -0.0024614837625979878
+      },
+      {
+        "at_omega": 70.0,
+        "d": -0.005329179566563466
+      },
+      {
+        "at_omega": 80.0,
+        "d": -0.007627647058823529
+      },
+      {
+        "at_omega": 90.0,
+        "d": 0.010098331202046031
+      }
+    ]
+  },
+  "combined_abs_derivative_scores": [
+    {
+      "at_omega": 10,
+      "score": 0.025410416931216928
+    },
+    {
+      "at_omega": 20,
+      "score": 0.0045574817460317454
+    },
+    {
+      "at_omega": 30,
+      "score": 0.009795527777777778
+    },
+    {
+      "at_omega": 40,
+      "score": 0.013945695412311268
+    },
+    {
+      "at_omega": 50,
+      "score": 0.004681348485597317
+    },
+    {
+      "at_omega": 60,
+      "score": 0.0016160622203829043
+    },
+    {
+      "at_omega": 70,
+      "score": 0.0028427700004486915
+    },
+    {
+      "at_omega": 80,
+      "score": 0.008246993464052289
+    },
+    {
+      "at_omega": 90,
+      "score": 0.007676187029034501
+    }
+  ],
+  "empirical_critical_omega": 10,
+  "max_derivative_location": 10,
+  "max_derivative_score": 0.025410416931216928,
+  "mean_derivative_score": 0.008752498118539268,
+  "std_derivative_score": 0.006887859481617768,
+  "peak_to_mean_ratio": 2.903218782463189,
+  "transition_type": "first_order",
+  "power_law_exponent": -0.14134099566522376,
+  "interpretation": "A first-order-like discontinuity is observed near omega ~ 10. The combined (\u03bb\u2082, HMM-critical, Hawkes) signal derivative spikes sharply at this boundary, indicating that memory system behaviour flips rather than drifts as omega crosses this point."
+}

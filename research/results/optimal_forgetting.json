@@ -1,0 +1,325 @@
+{
+  "synthetic": true,
+  "lambdas_tested": [
+    0.001,
+    0.005,
+    0.01,
+    0.05,
+    0.1,
+    0.2,
+    0.5
+  ],
+  "domains": [
+    "general",
+    "fintech",
+    "medical",
+    "legal",
+    "coding",
+    "customer_support"
+  ],
+  "simulation": {
+    "agents_per_config": 25,
+    "calls_per_agent": 20,
+    "entries_per_agent": 3,
+    "outcome_rule": "success P=0.9 if omega<40 else P=0.3",
+    "correct_rule": "action in {BLOCK, ASK_USER, WARN} AND outcome=failure, OR action=USE_MEMORY AND outcome=success"
+  },
+  "per_domain_results": {
+    "general": {
+      "lambda_values": {
+        "0.001": {
+          "accuracy": 0.098,
+          "mean_omega": 12.951,
+          "mean_savings": 1.6414,
+          "n_calls": 500
+        },
+        "0.005": {
+          "accuracy": 0.12,
+          "mean_omega": 12.664,
+          "mean_savings": 1.5543,
+          "n_calls": 500
+        },
+        "0.01": {
+          "accuracy": 0.098,
+          "mean_omega": 12.1924,
+          "mean_savings": 1.4328,
+          "n_calls": 500
+        },
+        "0.05": {
+          "accuracy": 0.096,
+          "mean_omega": 10.1376,
+          "mean_savings": 0.9913,
+          "n_calls": 500
+        },
+        "0.1": {
+          "accuracy": 0.108,
+          "mean_omega": 9.0676,
+          "mean_savings": 0.8285,
+          "n_calls": 500
+        },
+        "0.2": {
+          "accuracy": 0.104,
+          "mean_omega": 7.7152,
+          "mean_savings": 0.657,
+          "n_calls": 500
+        },
+        "0.5": {
+          "accuracy": 0.082,
+          "mean_omega": 5.983,
+          "mean_savings": 0.4961,
+          "n_calls": 500
+        }
+      },
+      "optimal_lambda_accuracy": "0.005",
+      "optimal_lambda_omega": "0.5",
+      "optimal_lambda_savings": "0.001"
+    },
+    "fintech": {
+      "lambda_values": {
+        "0.001": {
+          "accuracy": 0.278,
+          "mean_omega": 32.3982,
+          "mean_savings": 187.2674,
+          "n_calls": 500
+        },
+        "0.005": {
+          "accuracy": 0.274,
+          "mean_omega": 32.132,
+          "mean_savings": 182.5819,
+          "n_calls": 500
+        },
+        "0.01": {
+          "accuracy": 0.214,
+          "mean_omega": 31.0278,
+          "mean_savings": 157.4239,
+          "n_calls": 500
+        },
+        "0.05": {
+          "accuracy": 0.138,
+          "mean_omega": 27.077,
+          "mean_savings": 83.0523,
+          "n_calls": 500
+        },
+        "0.1": {
+          "accuracy": 0.102,
+          "mean_omega": 24.8658,
+          "mean_savings": 55.8661,
+          "n_calls": 500
+        },
+        "0.2": {
+          "accuracy": 0.102,
+          "mean_omega": 20.261,
+          "mean_savings": 26.4591,
+          "n_calls": 500
+        },
+        "0.5": {
+          "accuracy": 0.114,
+          "mean_omega": 14.8912,
+          "mean_savings": 9.637,
+          "n_calls": 500
+        }
+      },
+      "optimal_lambda_accuracy": "0.001",
+      "optimal_lambda_omega": "0.5",
+      "optimal_lambda_savings": "0.001"
+    },
+    "medical": {
+      "lambda_values": {
+        "0.001": {
+          "accuracy": 0.338,
+          "mean_omega": 35.2646,
+          "mean_savings": 1277.601,
+          "n_calls": 500
+        },
+        "0.005": {
+          "accuracy": 0.31,
+          "mean_omega": 35.126,
+          "mean_savings": 1261.272,
+          "n_calls": 500
+        },
+        "0.01": {
+          "accuracy": 0.288,
+          "mean_omega": 34.4226,
+          "mean_savings": 1148.0167,
+          "n_calls": 500
+        },
+        "0.05": {
+          "accuracy": 0.186,
+          "mean_omega": 29.689,
+          "mean_savings": 626.4684,
+          "n_calls": 500
+        },
+        "0.1": {
+          "accuracy": 0.142,
+          "mean_omega": 26.447,
+          "mean_savings": 377.1775,
+          "n_calls": 500
+        },
+        "0.2": {
+          "accuracy": 0.104,
+          "mean_omega": 21.6454,
+          "mean_savings": 158.7823,
+          "n_calls": 500
+        },
+        "0.5": {
+          "accuracy": 0.102,
+          "mean_omega": 16.514,
+          "mean_savings": 61.637,
+          "n_calls": 500
+        }
+      },
+      "optimal_lambda_accuracy": "0.001",
+      "optimal_lambda_omega": "0.5",
+      "optimal_lambda_savings": "0.001"
+    },
+    "legal": {
+      "lambda_values": {
+        "0.001": {
+          "accuracy": 0.174,
+          "mean_omega": 28.7182,
+          "mean_savings": 233.0509,
+          "n_calls": 500
+        },
+        "0.005": {
+          "accuracy": 0.162,
+          "mean_omega": 28.237,
+          "mean_savings": 214.7012,
+          "n_calls": 500
+        },
+        "0.01": {
+          "accuracy": 0.118,
+          "mean_omega": 27.6404,
+          "mean_savings": 196.8506,
+          "n_calls": 500
+        },
+        "0.05": {
+          "accuracy": 0.102,
+          "mean_omega": 23.7122,
+          "mean_savings": 98.726,
+          "n_calls": 500
+        },
+        "0.1": {
+          "accuracy": 0.09,
+          "mean_omega": 20.4344,
+          "mean_savings": 53.417,
+          "n_calls": 500
+        },
+        "0.2": {
+          "accuracy": 0.104,
+          "mean_omega": 17.2416,
+          "mean_savings": 31.2587,
+          "n_calls": 500
+        },
+        "0.5": {
+          "accuracy": 0.09,
+          "mean_omega": 13.0832,
+          "mean_savings": 14.5442,
+          "n_calls": 500
+        }
+      },
+      "optimal_lambda_accuracy": "0.001",
+      "optimal_lambda_omega": "0.5",
+      "optimal_lambda_savings": "0.001"
+    },
+    "coding": {
+      "lambda_values": {
+        "0.001": {
+          "accuracy": 0.104,
+          "mean_omega": 16.8008,
+          "mean_savings": 1.5816,
+          "n_calls": 500
+        },
+        "0.005": {
+          "accuracy": 0.104,
+          "mean_omega": 16.355,
+          "mean_savings": 1.4826,
+          "n_calls": 500
+        },
+        "0.01": {
+          "accuracy": 0.058,
+          "mean_omega": 16.2408,
+          "mean_savings": 1.4293,
+          "n_calls": 500
+        },
+        "0.05": {
+          "accuracy": 0.088,
+          "mean_omega": 13.8336,
+          "mean_savings": 0.942,
+          "n_calls": 500
+        },
+        "0.1": {
+          "accuracy": 0.112,
+          "mean_omega": 12.1968,
+          "mean_savings": 0.7023,
+          "n_calls": 500
+        },
+        "0.2": {
+          "accuracy": 0.102,
+          "mean_omega": 10.183,
+          "mean_savings": 0.4842,
+          "n_calls": 500
+        },
+        "0.5": {
+          "accuracy": 0.098,
+          "mean_omega": 7.67,
+          "mean_savings": 0.3184,
+          "n_calls": 500
+        }
+      },
+      "optimal_lambda_accuracy": "0.1",
+      "optimal_lambda_omega": "0.5",
+      "optimal_lambda_savings": "0.001"
+    },
+    "customer_support": {
+      "lambda_values": {
+        "0.001": {
+          "accuracy": 0.088,
+          "mean_omega": 15.5646,
+          "mean_savings": 0.6417,
+          "n_calls": 500
+        },
+        "0.005": {
+          "accuracy": 0.124,
+          "mean_omega": 15.2202,
+          "mean_savings": 0.603,
+          "n_calls": 500
+        },
+        "0.01": {
+          "accuracy": 0.112,
+          "mean_omega": 14.9778,
+          "mean_savings": 0.5734,
+          "n_calls": 500
+        },
+        "0.05": {
+          "accuracy": 0.1,
+          "mean_omega": 13.113,
+          "mean_savings": 0.4137,
+          "n_calls": 500
+        },
+        "0.1": {
+          "accuracy": 0.094,
+          "mean_omega": 11.2848,
+          "mean_savings": 0.2974,
+          "n_calls": 500
+        },
+        "0.2": {
+          "accuracy": 0.126,
+          "mean_omega": 9.2602,
+          "mean_savings": 0.2099,
+          "n_calls": 500
+        },
+        "0.5": {
+          "accuracy": 0.122,
+          "mean_omega": 7.1624,
+          "mean_savings": 0.1484,
+          "n_calls": 500
+        }
+      },
+      "optimal_lambda_accuracy": "0.2",
+      "optimal_lambda_omega": "0.5",
+      "optimal_lambda_savings": "0.001"
+    }
+  },
+  "overall_pattern": "High-criticality domains (fintech/medical/legal) prefer *lower* forgetting rates than lower-criticality domains (coding/customer_support/general). Under irreversible actions, retaining older evidence is worth the risk of some staleness; under reversible actions, faster turnover pays off.",
+  "recommendation": "Suggested defaults (per domain, argmax accuracy): general\u2192\u03bb=0.005, fintech\u2192\u03bb=0.001, medical\u2192\u03bb=0.001, legal\u2192\u03bb=0.001, coding\u2192\u03bb=0.1, customer_support\u2192\u03bb=0.2"
+}

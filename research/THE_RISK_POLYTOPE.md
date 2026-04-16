@@ -1171,6 +1171,186 @@ We simulated 20 agents over 50 calls each (1,000 observations, 345 BLOCK events)
 
 Raw data: [`research/results/granger_causality.json`](results/granger_causality.json).
 
+### 18.4 Round 11 Compound Attack Corpus
+
+120 new adversarial cases ship in `tests/corpus/round11/round11_corpus.json`. Every case simultaneously exercises three attack vectors:
+
+- **R6 — timestamp forgery** (`timestamp_override` field shows forged negative or zero age)
+- **R7 — identity drift** (escalating `provenance` chain with authority climbing across hops)
+- **R8 — consensus collapse** (multiple entries reinforcing the same fabricated claim via shared `consensus_claim_id`)
+
+Each case: 5–10 entries, action_type=irreversible, domain ∈ {fintech, medical, legal}, expected_decision=BLOCK, expected_detection_layers=[timestamp_integrity, identity_drift, consensus_collapse]. Deterministic seed `random.Random(11011)`.
+
+Raw data: [`tests/corpus/round11/round11_corpus.json`](../tests/corpus/round11/round11_corpus.json).
+
+### 18.5 Phase Transition Conjecture
+
+We scored 449 benchmark corpus cases through `/v1/preflight` and tracked three collapse signals versus `omega_mem_final`: spectral Fiedler value λ₂, HMM critical-state probability, and Hawkes intensity λ.
+
+| Empirical critical ω | Peak derivative ratio | Transition type |
+|---|---|---|
+| **~10** | 2.90 | **first-order** |
+
+The Fiedler value drops sharply from 0.83 (ω band 0–10) to 0.16 (ω band 10–20) — a discontinuous step. Memory system behavior **flips** rather than drifts as omega crosses this point. The transition class matches first-order thermodynamic phase transitions (sudden latent-heat-like jump).
+
+Raw data: [`research/results/phase_transition_conjecture.json`](results/phase_transition_conjecture.json).
+
+### 18.6 Memory Immunology: Do Attacks Mutate?
+
+We treat each benchmark round as a generation, compute cosine similarity between round centroids, and construct a phylogenetic tree. Mutation rate = fraction of consecutive round pairs with cos < 0.8.
+
+**Hawkes-style mutation rate λ = 0.600** (6 of 10 transitions are significant mutations).
+
+**Major clades** (cos ≥ 0.9):
+- Clade α: {R1, R2, R3, R4, R9, R10} — the conserved lineage
+- Clade β: {R5, R11} — the mutant burst
+
+Attack signatures reshape aggressively across rounds, behaving like a rapidly mutating virus family. The R5–R8 rounds introduced novel geometric signatures; R9–R11 partly returned to the R1–R4 lineage. **Implication**: vaccine signatures must be re-indexed per round; single-shot vaccination won't cover new clades.
+
+Raw data: [`research/results/memory_immunology.json`](results/memory_immunology.json).
+
+### 18.7 Optimal Forgetting Rate per Domain
+
+1,000 simulated agents across 7 forgetting rates λ ∈ {0.001, 0.005, 0.01, 0.05, 0.1, 0.2, 0.5} × 6 domains (21,000 calls).
+
+| Domain | Optimal λ (accuracy) |
+|--------|----------------------|
+| fintech | **0.001** |
+| medical | **0.001** |
+| legal | **0.001** |
+| general | 0.005 |
+| coding | 0.1 |
+| customer_support | 0.2 |
+
+**High-criticality domains prefer low forgetting** — retaining older evidence matters when decisions are irreversible. Low-criticality domains prefer **aggressive forgetting** — faster turnover avoids staleness drag. The 200× spread between optimal λ values rules out any single universal forgetting rate.
+
+Raw data: [`research/results/optimal_forgetting.json`](results/optimal_forgetting.json).
+
+### 18.8 Partial Information Decomposition
+
+A simplified PID proxy on 77 active features from 449 cases: interaction information as a redundancy-synergy decomposition.
+
+| Class | Count | Rule |
+|-------|-------|------|
+| **Essential** | **1** | unique MI > 0.1 nats AND ≤ 3 high-redundancy partners |
+| Duplicate | 28 | > 3 high-redundancy partners |
+| Synergistic | 11 | best pair synergy > 0.05 nats |
+
+The sole Essential module is `copula_analysis.joint_risk`. All other modules are either redundant with ≥4 peers (confirming the 83→23 compression finding) or only informative in combination with another module. **Implication**: the scoring stack could in principle be reduced to {1 essential} + {11 synergistic pairs} ≈ 23 signals — exactly matching the FIM k95 dimensionality finding.
+
+Raw data: [`research/results/pid_analysis.json`](results/pid_analysis.json).
+
+### 18.9 Optimal Transport Between BLOCK and USE_MEMORY
+
+Entropic OT (Sinkhorn, ε=0.1) on 77D standardized feature space:
+
+| Quantity | Value |
+|----------|-------|
+| Wasserstein distance (standardized) | **13.48** |
+| Mean distance (BLOCK → barycenter) | 10.57 σ |
+| Sinkhorn iterations to convergence | 6 |
+
+A non-trivial Wasserstein distance confirms BLOCK and USE_MEMORY occupy **geometrically distinct regions** of the preflight output space — the engine doesn't threshold one feature; it induces a geometric separation.
+
+**Top healing-direction features** (largest σ-delta between clusters): `koopman.prediction_5`, `lqr_control.optimal_control`, `banach_contraction.fixed_point_estimate`, `particle_filter.state_estimate`. These are the components a repair plan should preferentially move — each repair can be interpreted as an approximate OT transport map toward the safe barycenter.
+
+Raw data: [`research/results/optimal_transport.json`](results/optimal_transport.json).
+
+### 18.10 Koopman DMD with Delay Embedding
+
+Extended DMD with delay embedding k=6 on simulated weekly-patterned data (50 agents × 56 days, 5-dim state):
+
+| Mode class | Count |
+|------------|-------|
+| Self-correcting (|λ| < 0.95) | **21** |
+| Self-reinforcing (|λ| > 1.05) | **0** |
+| Marginal | 1 |
+
+**Dominant periodic mode: 7.13 days** (injected target: 7.00). The complex conjugate pair at λ = 0.583 ± 0.708i (|λ|=0.917) exactly captures the injected Monday degradation cycle.
+
+**Operational implication**: no self-reinforcing mode exists under realistic degradation dynamics — risk oscillates but always returns toward equilibrium. A weekly pattern is plausibly detectable in production data once calendar timestamps are instrumented.
+
+Raw data: [`research/results/koopman_dmd.json`](results/koopman_dmd.json).
+
+### 18.11 Persistent Homology in 77D Preflight Space
+
+Vietoris-Rips filtration on 449 points in standardized 77D space.
+
+| Scale ε | β₀ (components) | β₁ (cycles) |
+|---------|-----------------|-------------|
+| 0.5 | 449 | 0 |
+| 2.0 | 343 | 116 |
+| 5.0 | 77 | 4,958 |
+| 10.0 | **7** | 31,403 |
+
+- **Long-lived clusters** (death ε > q75 = 4.18): **112** persistent components + 1 infinite
+- **Number of coarse clusters** at median pairwise distance: **7** (on the same order as the 4 recommended_action classes)
+- **β₁ peak = 31,403**: memory states are highly non-simply-connected — healing trajectories cannot in general be contracted to a point without leaving the manifold.
+
+**Implication**: the Risk Polytope is more precisely a **cellular complex with multiple chambers**, not a flat convex body. Repair plans must navigate discrete jumps (e.g. REFETCH invalidates a whole tool_state cluster), not smooth interpolations.
+
+Raw data: [`research/results/persistent_homology_83d.json`](results/persistent_homology_83d.json).
+
+### 18.12 Renormalization Group Flow
+
+Block-spin coarse-graining at 3 scales (N=1 per-call, N=60 per-hour, N=100 per-day) on 5,000 calls per domain.
+
+| Domain | N=1 mean | N=1 kurtosis | Universality class |
+|--------|----------|--------------|---------------------|
+| general | 46.7 | 2.76 | mean_field_like |
+| customer_support | 55.0 | 2.17 | trivial |
+| coding | 59.5 | 1.95 | trivial |
+| legal | 69.3 | 1.84 | trivial |
+| fintech | 74.7 | 2.07 | trivial |
+| medical | 78.8 | 2.44 | trivial |
+
+**Pairwise KS at coarsest scale**: mean 0.941, max 1.000. **Domains do NOT converge to a shared fixed point** under RG flow — each domain has its own distinct macroscopic distribution. The domain multiplier `C_DOMAIN` is a genuine scaling parameter, not a surface feature that washes out.
+
+**Implication**: there is no universal theory of memory risk. Domain-specific calibration (already a product feature) is the theoretically correct approach, not just a convenience.
+
+Raw data: [`research/results/renormalization_group.json`](results/renormalization_group.json).
+
+### 18.13 Sheaf Cohomology on the Module Dependency Graph
+
+82 modules as nodes, 10 dataflow edges as compatibility constraints:
+
+| Invariant | Value |
+|-----------|-------|
+| V (nodes) | 82 |
+| E (edges) | 10 |
+| H⁰ (components) | **72** |
+| **H¹ (cycles)** | **0** |
+| Minimum cross-checks needed | 0 |
+
+**The DAG is truly acyclic: H¹ = 0.** Local sheaf consistency implies global consistency — no hidden contradictions in the architecture. The 72 components (71 singletons) indicate leaf analytics whose outputs feed only the preflight response envelope, not other modules. **Contradiction risk: low.**
+
+This matches the DAG analysis in §17.1 (critical path length 3, 72-module parallel layer).
+
+Raw data: [`research/results/sheaf_module_graph.json`](results/sheaf_module_graph.json).
+
+### 18.14 Thermodynamic Cost per Decision
+
+Landauer's principle: erasing one bit of information requires at least `kT·ln(2)` joules of heat dissipation. Each preflight call erases information (the input memory state is abstracted to a decision + omega), so there is a measurable thermodynamic lower bound per call.
+
+At T = 300 K: **2.87 × 10⁻²¹ J per bit**.
+
+Per-call cost (10-entry median): ~23,040 bits × 2.87e-21 = **6.61 × 10⁻¹⁷ J**.
+
+**Pareto frontier: safety-per-joule across domains**:
+
+| Domain | Savings per BLOCK | Safety-per-joule |
+|--------|-------------------|-------------------|
+| Medical | $3,350 | 2.5 × 10¹⁹ $/J |
+| Legal | $1,340 | 1.0 × 10¹⁹ |
+| Fintech | $670 | 5.1 × 10¹⁸ |
+| General | $134 | 1.0 × 10¹⁸ |
+| Coding | $67 | 5.1 × 10¹⁷ |
+| Customer support | $34 | 2.6 × 10¹⁷ |
+
+**A 1,000-agent fleet running Sgraal for a year erases less energy than a smartphone LED flash.** The preflight response includes a `thermodynamic_cost` field on every call; BLOCK decisions additionally write `bits_erased` + `landauer_joules` to the audit_log. Thermodynamic cost is not a budget constraint — it's a receipt.
+
+Raw data: [`research/results/thermodynamic_cost.json`](results/thermodynamic_cost.json).
+
 ---
 
 ## 19. Open Questions

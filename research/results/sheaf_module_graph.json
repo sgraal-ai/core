@@ -1,0 +1,24 @@
+{
+  "n_nodes": 82,
+  "n_edges_directed": 10,
+  "n_edges_undirected_skeleton": 10,
+  "h0_connected_components": 72,
+  "h1_cycles": 0,
+  "top_cycles": [],
+  "spanning_tree_edges": 10,
+  "minimum_cross_checks_needed": 0,
+  "contradiction_risk": "low",
+  "interpretation": "The module dependency graph is acyclic (H\u00b9 = 0). All 82 modules factor into 72 weakly-connected components with 10 undirected skeleton edges, and a spanning tree of 10 edges covers the entire graph. Local sheaf consistency implies global consistency \u2014 no hidden contradictions are carried by the architecture itself. The 72 components (most of them singletons) indicate 71 modules whose outputs do not participate in any downstream data flow \u2014 these are leaf analytics consumed only by the preflight response envelope.",
+  "component_sizes": [
+    6,
+    3,
+    2,
+    2,
+    2,
+    1,
+    1,
+    1,
+    1,
+    1
+  ]
+}

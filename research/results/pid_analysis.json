@@ -1,0 +1,1078 @@
+{
+  "method": "simplified_interaction_information_proxy",
+  "n_cases": 449,
+  "n_features_analyzed": 77,
+  "n_pair_records_top_N": 780,
+  "pairwise_top_N": 40,
+  "redundancy_q75_threshold": 0.3507747153597023,
+  "per_module_unique_info": [
+    {
+      "module": "banach_contraction.fixed_point_estimate",
+      "mi_with_omega": 2.199749,
+      "unique_mi": 1.892762,
+      "mean_redundancy": 0.49766,
+      "high_redundancy_partners": 20,
+      "best_synergy_partner": "calibration.brier_score",
+      "best_synergy": 1.871953,
+      "classification": "duplicate"
+    },
+    {
+      "module": "lqr_control.state_deviation",
+      "mi_with_omega": 2.199749,
+      "unique_mi": 1.769609,
+      "mean_redundancy": 0.49766,
+      "high_redundancy_partners": 20,
+      "best_synergy_partner": "calibration.brier_score",
+      "best_synergy": 1.871953,
+      "classification": "duplicate"
+    },
+    {
+      "module": "lqr_control.optimal_control",
+      "mi_with_omega": 2.199749,
+      "unique_mi": 1.768792,
+      "mean_redundancy": 0.49766,
+      "high_redundancy_partners": 20,
+      "best_synergy_partner": "calibration.brier_score",
+      "best_synergy": 1.871584,
+      "classification": "duplicate"
+    },
+    {
+      "module": "particle_filter.state_estimate",
+      "mi_with_omega": 1.842282,
+      "unique_mi": 1.543871,
+      "mean_redundancy": 0.47958,
+      "high_redundancy_partners": 20,
+      "best_synergy_partner": "calibration.brier_score",
+      "best_synergy": 1.523773,
+      "classification": "duplicate"
+    },
+    {
+      "module": "koopman.prediction_5",
+      "mi_with_omega": 1.644193,
+      "unique_mi": 1.436814,
+      "mean_redundancy": 0.458961,
+      "high_redundancy_partners": 20,
+      "best_synergy_partner": "calibration.brier_score",
+      "best_synergy": 1.354198,
+      "classification": "duplicate"
+    },
+    {
+      "module": "calibration.brier_score",
+      "mi_with_omega": 1.611493,
+      "unique_mi": 1.296504,
+      "mean_redundancy": 0.304042,
+      "high_redundancy_partners": 8,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.871953,
+      "classification": "duplicate"
+    },
+    {
+      "module": "info_thermodynamics.entropy_production",
+      "mi_with_omega": 1.547292,
+      "unique_mi": 1.314265,
+      "mean_redundancy": 0.353771,
+      "high_redundancy_partners": 14,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.512908,
+      "classification": "duplicate"
+    },
+    {
+      "module": "calibration.log_loss",
+      "mi_with_omega": 1.537015,
+      "unique_mi": 1.344132,
+      "mean_redundancy": 0.326973,
+      "high_redundancy_partners": 9,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.719366,
+      "classification": "duplicate"
+    },
+    {
+      "module": "lqr_control.control_effort",
+      "mi_with_omega": 1.528728,
+      "unique_mi": 1.223868,
+      "mean_redundancy": 0.277778,
+      "high_redundancy_partners": 10,
+      "best_synergy_partner": "lqr_control.optimal_control",
+      "best_synergy": 1.803264,
+      "classification": "duplicate"
+    },
+    {
+      "module": "levy_flight.alpha",
+      "mi_with_omega": 1.201474,
+      "unique_mi": 0.842117,
+      "mean_redundancy": 0.337958,
+      "high_redundancy_partners": 13,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.295373,
+      "classification": "duplicate"
+    },
+    {
+      "module": "shapley_values.mean",
+      "mi_with_omega": 1.163766,
+      "unique_mi": 0.786865,
+      "mean_redundancy": 0.39799,
+      "high_redundancy_partners": 16,
+      "best_synergy_partner": "calibration.brier_score",
+      "best_synergy": 1.044447,
+      "classification": "duplicate"
+    },
+    {
+      "module": "calibration.meta_score",
+      "mi_with_omega": 0.980321,
+      "unique_mi": 0.733219,
+      "mean_redundancy": 0.364559,
+      "high_redundancy_partners": 18,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.014424,
+      "classification": "duplicate"
+    },
+    {
+      "module": "mdp_recommendation.expected_value",
+      "mi_with_omega": 0.971774,
+      "unique_mi": 0.687564,
+      "mean_redundancy": 0.407452,
+      "high_redundancy_partners": 20,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.812577,
+      "classification": "duplicate"
+    },
+    {
+      "module": "info_thermodynamics.information_temperature",
+      "mi_with_omega": 0.808889,
+      "unique_mi": 0.521297,
+      "mean_redundancy": 0.347272,
+      "high_redundancy_partners": 16,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.861468,
+      "classification": "duplicate"
+    },
+    {
+      "module": "drift_details.ensemble_score",
+      "mi_with_omega": 0.798479,
+      "unique_mi": 0.415767,
+      "mean_redundancy": 0.290988,
+      "high_redundancy_partners": 15,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.940199,
+      "classification": "duplicate"
+    },
+    {
+      "module": "drift_details.kl_divergence",
+      "mi_with_omega": 0.790975,
+      "unique_mi": 0.547975,
+      "mean_redundancy": 0.349276,
+      "high_redundancy_partners": 17,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.854827,
+      "classification": "duplicate"
+    },
+    {
+      "module": "component_breakdown.s_drift",
+      "mi_with_omega": 0.748155,
+      "unique_mi": 0.336099,
+      "mean_redundancy": 0.276308,
+      "high_redundancy_partners": 15,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.951204,
+      "classification": "duplicate"
+    },
+    {
+      "module": "top.assurance_score",
+      "mi_with_omega": 0.738412,
+      "unique_mi": 0.454261,
+      "mean_redundancy": 0.261794,
+      "high_redundancy_partners": 9,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.149756,
+      "classification": "duplicate"
+    },
+    {
+      "module": "free_energy.kl_divergence",
+      "mi_with_omega": 0.736698,
+      "unique_mi": 0.277349,
+      "mean_redundancy": 0.245948,
+      "high_redundancy_partners": 11,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.985761,
+      "classification": "duplicate"
+    },
+    {
+      "module": "component_breakdown.r_recall",
+      "mi_with_omega": 0.715331,
+      "unique_mi": 0.39078,
+      "mean_redundancy": 0.259522,
+      "high_redundancy_partners": 14,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.997571,
+      "classification": "duplicate"
+    },
+    {
+      "module": "free_energy.surprise",
+      "mi_with_omega": 0.711264,
+      "unique_mi": 0.438357,
+      "mean_redundancy": 0.235156,
+      "high_redundancy_partners": 11,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.968573,
+      "classification": "duplicate"
+    },
+    {
+      "module": "free_energy.elbo",
+      "mi_with_omega": 0.707198,
+      "unique_mi": 0.270908,
+      "mean_redundancy": 0.234308,
+      "high_redundancy_partners": 11,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.973923,
+      "classification": "duplicate"
+    },
+    {
+      "module": "free_energy.F",
+      "mi_with_omega": 0.707198,
+      "unique_mi": 0.326583,
+      "mean_redundancy": 0.234308,
+      "high_redundancy_partners": 11,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.966515,
+      "classification": "duplicate"
+    },
+    {
+      "module": "drift_details.jsd",
+      "mi_with_omega": 0.691433,
+      "unique_mi": 0.30372,
+      "mean_redundancy": 0.310152,
+      "high_redundancy_partners": 13,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.87732,
+      "classification": "duplicate"
+    },
+    {
+      "module": "ergodicity.delta",
+      "mi_with_omega": 0.63984,
+      "unique_mi": 0.244407,
+      "mean_redundancy": 0.274294,
+      "high_redundancy_partners": 14,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.941081,
+      "classification": "duplicate"
+    },
+    {
+      "module": "jump_diffusion.jump_rate_lambda",
+      "mi_with_omega": 0.633488,
+      "unique_mi": 0.298012,
+      "mean_redundancy": 0.204558,
+      "high_redundancy_partners": 7,
+      "best_synergy_partner": "lqr_control.optimal_control",
+      "best_synergy": 1.186858,
+      "classification": "duplicate"
+    },
+    {
+      "module": "topological_entropy.entropy_estimate",
+      "mi_with_omega": 0.589886,
+      "unique_mi": 0.242122,
+      "mean_redundancy": 0.176113,
+      "high_redundancy_partners": 6,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.250937,
+      "classification": "duplicate"
+    },
+    {
+      "module": "component_breakdown.s_recovery",
+      "mi_with_omega": 0.507221,
+      "unique_mi": 0.281225,
+      "mean_redundancy": 0.176709,
+      "high_redundancy_partners": 10,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.934336,
+      "classification": "duplicate"
+    },
+    {
+      "module": "copula_analysis.joint_risk",
+      "mi_with_omega": 0.477392,
+      "unique_mi": 0.114501,
+      "mean_redundancy": 0.164243,
+      "high_redundancy_partners": 2,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.983727,
+      "classification": "essential"
+    },
+    {
+      "module": "component_breakdown.s_interference",
+      "mi_with_omega": 0.410264,
+      "unique_mi": -0.123661,
+      "mean_redundancy": 0.149462,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.944553,
+      "classification": "synergistic"
+    },
+    {
+      "module": "provenance_entropy.mean_entropy",
+      "mi_with_omega": 0.382671,
+      "unique_mi": -0.053938,
+      "mean_redundancy": 0.156597,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.935801,
+      "classification": "synergistic"
+    },
+    {
+      "module": "jump_diffusion.diffusion_sigma",
+      "mi_with_omega": 0.378101,
+      "unique_mi": 0.088587,
+      "mean_redundancy": 0.077218,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.051035,
+      "classification": "synergistic"
+    },
+    {
+      "module": "banach_contraction.k_estimate",
+      "mi_with_omega": 0.377339,
+      "unique_mi": -0.035674,
+      "mean_redundancy": 0.094598,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.014828,
+      "classification": "synergistic"
+    },
+    {
+      "module": "component_breakdown.s_provenance",
+      "mi_with_omega": 0.338537,
+      "unique_mi": -0.208108,
+      "mean_redundancy": 0.124511,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.969125,
+      "classification": "synergistic"
+    },
+    {
+      "module": "lyapunov_exponent.lambda_estimate",
+      "mi_with_omega": 0.318771,
+      "unique_mi": -0.029585,
+      "mean_redundancy": 0.049637,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.037902,
+      "classification": "synergistic"
+    },
+    {
+      "module": "levy_flight.extreme_event_probability",
+      "mi_with_omega": 0.313838,
+      "unique_mi": -0.064865,
+      "mean_redundancy": 0.021823,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.049533,
+      "classification": "synergistic"
+    },
+    {
+      "module": "component_breakdown.s_propagation",
+      "mi_with_omega": 0.29128,
+      "unique_mi": -0.194557,
+      "mean_redundancy": 0.073473,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 1.005721,
+      "classification": "synergistic"
+    },
+    {
+      "module": "component_breakdown.r_encode",
+      "mi_with_omega": 0.268382,
+      "unique_mi": -0.155871,
+      "mean_redundancy": 0.089473,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.957242,
+      "classification": "synergistic"
+    },
+    {
+      "module": "mewma.T2_stat",
+      "mi_with_omega": 0.239481,
+      "unique_mi": -0.020726,
+      "mean_redundancy": 0.054765,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.949914,
+      "classification": "synergistic"
+    },
+    {
+      "module": "levy_flight.scale",
+      "mi_with_omega": 0.21586,
+      "unique_mi": -0.096509,
+      "mean_redundancy": 0.043254,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": "lqr_control.state_deviation",
+      "best_synergy": 0.959263,
+      "classification": "synergistic"
+    },
+    {
+      "module": "free_energy.reconstruction",
+      "mi_with_omega": 0.213572,
+      "unique_mi": -0.091797,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "top.attack_surface_score",
+      "mi_with_omega": 0.20447,
+      "unique_mi": -0.175517,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "top.collapse_ratio",
+      "mi_with_omega": 0.201445,
+      "unique_mi": -0.158038,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "rate_distortion.total_distortion",
+      "mi_with_omega": 0.192039,
+      "unique_mi": -0.368379,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "component_breakdown.s_relevance",
+      "mi_with_omega": 0.191871,
+      "unique_mi": -0.212167,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "rate_distortion.total_rate",
+      "mi_with_omega": 0.191108,
+      "unique_mi": -0.359835,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "mahalanobis_analysis.covariance_condition",
+      "mi_with_omega": 0.175473,
+      "unique_mi": -0.228205,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "ricci_curvature.mean_curvature",
+      "mi_with_omega": 0.169543,
+      "unique_mi": -0.342733,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "component_breakdown.s_freshness",
+      "mi_with_omega": 0.168774,
+      "unique_mi": -0.324649,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "extended_freshness.ensemble_freshness",
+      "mi_with_omega": 0.156945,
+      "unique_mi": -0.230642,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "hawkes_intensity.current_lambda",
+      "mi_with_omega": 0.141309,
+      "unique_mi": -0.266242,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "persistence_landscape.landscape_norm",
+      "mi_with_omega": 0.140653,
+      "unique_mi": -0.298099,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "mutual_information.nmi_score",
+      "mi_with_omega": 0.139283,
+      "unique_mi": -0.195765,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "mahalanobis_analysis.mean_distance",
+      "mi_with_omega": 0.13585,
+      "unique_mi": -0.216548,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "mutual_information.information_loss",
+      "mi_with_omega": 0.13312,
+      "unique_mi": -0.182003,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "mutual_information.mi_score",
+      "mi_with_omega": 0.117297,
+      "unique_mi": -0.306784,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "consolidation.mean_consolidation",
+      "mi_with_omega": 0.112067,
+      "unique_mi": -0.459108,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "rate_distortion.compression_ratio",
+      "mi_with_omega": 0.104681,
+      "unique_mi": -0.365409,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "particle_filter.uncertainty",
+      "mi_with_omega": 0.084799,
+      "unique_mi": -0.392545,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "particle_filter.effective_sample_size",
+      "mi_with_omega": 0.082157,
+      "unique_mi": -0.370232,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "lyapunov_exponent.divergence_rate",
+      "mi_with_omega": 0.079278,
+      "unique_mi": -0.355292,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "ornstein_uhlenbeck.half_life",
+      "mi_with_omega": 0.078829,
+      "unique_mi": -0.284101,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "spectral_analysis.mixing_time_estimate",
+      "mi_with_omega": 0.071998,
+      "unique_mi": -0.397322,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "component_breakdown.r_belief",
+      "mi_with_omega": 0.066942,
+      "unique_mi": -0.222683,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "hotelling_t2.ucl",
+      "mi_with_omega": 0.066942,
+      "unique_mi": -0.270243,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "drift_details.wasserstein",
+      "mi_with_omega": 0.066942,
+      "unique_mi": -0.327816,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "shapley_values.count",
+      "mi_with_omega": 0.066942,
+      "unique_mi": -0.482894,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "rmt_analysis.signal_ratio",
+      "mi_with_omega": 0.064673,
+      "unique_mi": -0.300791,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "owa_provenance.orness",
+      "mi_with_omega": 0.049905,
+      "unique_mi": -0.440596,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "ctl_verification.verification_time_ms",
+      "mi_with_omega": 0.049265,
+      "unique_mi": -0.296936,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "spectral_analysis.fiedler_value",
+      "mi_with_omega": 0.037723,
+      "unique_mi": -0.260526,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "top.naturalness_score",
+      "mi_with_omega": 0.032562,
+      "unique_mi": -0.353321,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "dirichlet_process.n_clusters",
+      "mi_with_omega": 0.030107,
+      "unique_mi": -0.295148,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "ornstein_uhlenbeck.current_deviation",
+      "mi_with_omega": 0.021539,
+      "unique_mi": -0.151742,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "spectral_analysis.spectral_gap",
+      "mi_with_omega": 0.011315,
+      "unique_mi": -0.396124,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "unified_loss.L_v4",
+      "mi_with_omega": 0.01068,
+      "unique_mi": -0.199286,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    },
+    {
+      "module": "fisher_rao.condition_number",
+      "mi_with_omega": 0.009062,
+      "unique_mi": -0.371358,
+      "mean_redundancy": 0.0,
+      "high_redundancy_partners": 0,
+      "best_synergy_partner": null,
+      "best_synergy": 0.0,
+      "classification": "neutral"
+    }
+  ],
+  "top_redundant_pairs": [
+    {
+      "a": "lqr_control.state_deviation",
+      "b": "banach_contraction.fixed_point_estimate",
+      "redundancy": 2.199749,
+      "mi_a": 2.199749,
+      "mi_b": 2.199749,
+      "cosine": 1.0
+    },
+    {
+      "a": "lqr_control.state_deviation",
+      "b": "lqr_control.optimal_control",
+      "redundancy": 2.199749,
+      "mi_a": 2.199749,
+      "mi_b": 2.199749,
+      "cosine": -1.0
+    },
+    {
+      "a": "banach_contraction.fixed_point_estimate",
+      "b": "lqr_control.optimal_control",
+      "redundancy": 2.199749,
+      "mi_a": 2.199749,
+      "mi_b": 2.199749,
+      "cosine": -1.0
+    },
+    {
+      "a": "lqr_control.state_deviation",
+      "b": "particle_filter.state_estimate",
+      "redundancy": 1.841193,
+      "mi_a": 2.199749,
+      "mi_b": 1.842282,
+      "cosine": 0.999409
+    },
+    {
+      "a": "banach_contraction.fixed_point_estimate",
+      "b": "particle_filter.state_estimate",
+      "redundancy": 1.841193,
+      "mi_a": 2.199749,
+      "mi_b": 1.842282,
+      "cosine": 0.999409
+    },
+    {
+      "a": "lqr_control.optimal_control",
+      "b": "particle_filter.state_estimate",
+      "redundancy": 1.841193,
+      "mi_a": 2.199749,
+      "mi_b": 1.842282,
+      "cosine": -0.999409
+    },
+    {
+      "a": "lqr_control.optimal_control",
+      "b": "koopman.prediction_5",
+      "redundancy": 1.628177,
+      "mi_a": 2.199749,
+      "mi_b": 1.644193,
+      "cosine": -0.990259
+    },
+    {
+      "a": "lqr_control.state_deviation",
+      "b": "koopman.prediction_5",
+      "redundancy": 1.628177,
+      "mi_a": 2.199749,
+      "mi_b": 1.644193,
+      "cosine": 0.990259
+    },
+    {
+      "a": "banach_contraction.fixed_point_estimate",
+      "b": "koopman.prediction_5",
+      "redundancy": 1.628177,
+      "mi_a": 2.199749,
+      "mi_b": 1.644193,
+      "cosine": 0.990259
+    },
+    {
+      "a": "particle_filter.state_estimate",
+      "b": "koopman.prediction_5",
+      "redundancy": 1.62651,
+      "mi_a": 1.842282,
+      "mi_b": 1.644193,
+      "cosine": 0.989245
+    },
+    {
+      "a": "calibration.brier_score",
+      "b": "calibration.log_loss",
+      "redundancy": 1.530031,
+      "mi_a": 1.611493,
+      "mi_b": 1.537015,
+      "cosine": 0.995456
+    },
+    {
+      "a": "info_thermodynamics.entropy_production",
+      "b": "lqr_control.control_effort",
+      "redundancy": 1.443478,
+      "mi_a": 1.547292,
+      "mi_b": 1.528728,
+      "cosine": 0.944234
+    },
+    {
+      "a": "calibration.brier_score",
+      "b": "lqr_control.control_effort",
+      "redundancy": 1.263158,
+      "mi_a": 1.611493,
+      "mi_b": 1.528728,
+      "cosine": -0.82628
+    },
+    {
+      "a": "calibration.log_loss",
+      "b": "lqr_control.control_effort",
+      "redundancy": 1.243423,
+      "mi_a": 1.537015,
+      "mi_b": 1.528728,
+      "cosine": -0.813371
+    },
+    {
+      "a": "calibration.brier_score",
+      "b": "info_thermodynamics.entropy_production",
+      "redundancy": 1.231606,
+      "mi_a": 1.611493,
+      "mi_b": 1.547292,
+      "cosine": -0.795975
+    },
+    {
+      "a": "info_thermodynamics.entropy_production",
+      "b": "calibration.log_loss",
+      "redundancy": 1.228985,
+      "mi_a": 1.547292,
+      "mi_b": 1.537015,
+      "cosine": -0.799592
+    },
+    {
+      "a": "info_thermodynamics.entropy_production",
+      "b": "levy_flight.alpha",
+      "redundancy": 1.155656,
+      "mi_a": 1.547292,
+      "mi_b": 1.201474,
+      "cosine": -0.961865
+    },
+    {
+      "a": "lqr_control.state_deviation",
+      "b": "shapley_values.mean",
+      "redundancy": 1.118846,
+      "mi_a": 2.199749,
+      "mi_b": 1.163766,
+      "cosine": 0.961401
+    },
+    {
+      "a": "banach_contraction.fixed_point_estimate",
+      "b": "shapley_values.mean",
+      "redundancy": 1.118846,
+      "mi_a": 2.199749,
+      "mi_b": 1.163766,
+      "cosine": 0.961401
+    },
+    {
+      "a": "lqr_control.optimal_control",
+      "b": "shapley_values.mean",
+      "redundancy": 1.118846,
+      "mi_a": 2.199749,
+      "mi_b": 1.163766,
+      "cosine": -0.961401
+    }
+  ],
+  "top_synergistic_pairs": [
+    {
+      "a": "lqr_control.state_deviation",
+      "b": "calibration.brier_score",
+      "synergy": 1.871953,
+      "mi_a": 2.199749,
+      "mi_b": 1.611493,
+      "mi_joint": 1.754906
+    },
+    {
+      "a": "banach_contraction.fixed_point_estimate",
+      "b": "calibration.brier_score",
+      "synergy": 1.871953,
+      "mi_a": 2.199749,
+      "mi_b": 1.611493,
+      "mi_joint": 1.754906
+    },
+    {
+      "a": "lqr_control.optimal_control",
+      "b": "calibration.brier_score",
+      "synergy": 1.871584,
+      "mi_a": 2.199749,
+      "mi_b": 1.611493,
+      "mi_joint": 1.755274
+    },
+    {
+      "a": "lqr_control.optimal_control",
+      "b": "lqr_control.control_effort",
+      "synergy": 1.803264,
+      "mi_a": 2.199749,
+      "mi_b": 1.528728,
+      "mi_joint": 1.831798
+    },
+    {
+      "a": "lqr_control.state_deviation",
+      "b": "lqr_control.control_effort",
+      "synergy": 1.792121,
+      "mi_a": 2.199749,
+      "mi_b": 1.528728,
+      "mi_joint": 1.842941
+    },
+    {
+      "a": "banach_contraction.fixed_point_estimate",
+      "b": "lqr_control.control_effort",
+      "synergy": 1.792121,
+      "mi_a": 2.199749,
+      "mi_b": 1.528728,
+      "mi_joint": 1.842941
+    },
+    {
+      "a": "lqr_control.state_deviation",
+      "b": "calibration.log_loss",
+      "synergy": 1.719366,
+      "mi_a": 2.199749,
+      "mi_b": 1.537015,
+      "mi_joint": 1.754906
+    },
+    {
+      "a": "banach_contraction.fixed_point_estimate",
+      "b": "calibration.log_loss",
+      "synergy": 1.719366,
+      "mi_a": 2.199749,
+      "mi_b": 1.537015,
+      "mi_joint": 1.754906
+    },
+    {
+      "a": "lqr_control.optimal_control",
+      "b": "calibration.log_loss",
+      "synergy": 1.718998,
+      "mi_a": 2.199749,
+      "mi_b": 1.537015,
+      "mi_joint": 1.755274
+    },
+    {
+      "a": "particle_filter.state_estimate",
+      "b": "calibration.brier_score",
+      "synergy": 1.523773,
+      "mi_a": 1.842282,
+      "mi_b": 1.611493,
+      "mi_joint": 1.741229
+    }
+  ],
+  "essential_modules": [
+    "copula_analysis.joint_risk"
+  ],
+  "duplicate_modules": [
+    "component_breakdown.s_drift",
+    "component_breakdown.r_recall",
+    "component_breakdown.s_recovery",
+    "mdp_recommendation.expected_value",
+    "banach_contraction.fixed_point_estimate",
+    "jump_diffusion.jump_rate_lambda",
+    "free_energy.F",
+    "free_energy.elbo",
+    "free_energy.kl_divergence",
+    "free_energy.surprise",
+    "levy_flight.alpha",
+    "info_thermodynamics.information_temperature",
+    "info_thermodynamics.entropy_production",
+    "drift_details.kl_divergence",
+    "drift_details.jsd",
+    "drift_details.ensemble_score",
+    "calibration.brier_score",
+    "calibration.log_loss",
+    "calibration.meta_score",
+    "koopman.prediction_5",
+    "ergodicity.delta",
+    "particle_filter.state_estimate",
+    "lqr_control.optimal_control",
+    "lqr_control.state_deviation",
+    "lqr_control.control_effort",
+    "topological_entropy.entropy_estimate",
+    "top.assurance_score",
+    "shapley_values.mean"
+  ],
+  "synergistic_modules": [
+    "component_breakdown.s_provenance",
+    "component_breakdown.s_propagation",
+    "component_breakdown.r_encode",
+    "component_breakdown.s_interference",
+    "lyapunov_exponent.lambda_estimate",
+    "banach_contraction.k_estimate",
+    "jump_diffusion.diffusion_sigma",
+    "levy_flight.scale",
+    "levy_flight.extreme_event_probability",
+    "provenance_entropy.mean_entropy",
+    "mewma.T2_stat"
+  ],
+  "interpretation": "Across 77 active preflight features and 780 top-pair comparisons (top-40 by MI with omega), we find 1 ESSENTIAL modules (unique MI > 0.1 nats, low redundancy), 28 DUPLICATE modules (high redundancy with >3 partners), and 11 SYNERGISTIC modules (best pair synergy > 0.05 nats). Duplicate modules dominate the scoring stack, consistent with the FIM finding that 83 modules collapse to ~23 effective dimensions. Top redundant pair: lqr_control.state_deviation <-> banach_contraction.fixed_point_estimate (redundancy=2.200). Top synergistic pair: lqr_control.state_deviation <-> calibration.brier_score (synergy=1.872).",
+  "notes": [
+    "SIMPLIFIED PROXY: not full Williams-Beer PID. Uses pairwise interaction information with aggregated reference Y for unique-info estimation.",
+    "MI computed via 10-bin 2D histograms (nats).",
+    "Pairwise joint MI((X_i,X_j); omega) uses 4x4 equal-frequency grid over (X_i, X_j).",
+    "Unique info = MI(X_i;omega) - mean over 20 sampled j of MI(X_j;omega|X_i), where the conditional MI is estimated via 4-bin stratification on X_i.",
+    "All data derived from live preflight runs on the 449-case benchmark corpus (non-synthetic: real scoring engine output)."
+  ]
+}

@@ -1,0 +1,217 @@
+{
+  "n_block_samples": 175,
+  "n_use_memory_samples": 124,
+  "n_features": 77,
+  "feature_space": "standardized (z-score) 77 active features, target omega excluded",
+  "epsilon": 0.1,
+  "wasserstein_distance_standardized": 13.479213,
+  "wasserstein_distance_raw_units": 211580.716561,
+  "sinkhorn_iterations": 6,
+  "sinkhorn_converged": true,
+  "sinkhorn_iterations_raw": 3,
+  "sinkhorn_converged_raw": true,
+  "barycenter_weighting": {
+    "block": 0.3,
+    "use_memory": 0.7
+  },
+  "barycenter_centroid_first10": [
+    {
+      "feature": "component_breakdown.s_freshness",
+      "value_z": -0.2268376175823445,
+      "value_raw": 21.505845990783413
+    },
+    {
+      "feature": "component_breakdown.s_drift",
+      "value_z": -0.45302246878039776,
+      "value_raw": 16.05454976958525
+    },
+    {
+      "feature": "component_breakdown.s_provenance",
+      "value_z": -0.358597969968514,
+      "value_raw": 15.015172258064515
+    },
+    {
+      "feature": "component_breakdown.s_propagation",
+      "value_z": -0.2675432678211801,
+      "value_raw": 39.868917050691245
+    },
+    {
+      "feature": "component_breakdown.r_recall",
+      "value_z": -0.4484628805368889,
+      "value_raw": 32.00945299539168
+    },
+    {
+      "feature": "component_breakdown.r_encode",
+      "value_z": -0.3538574493833704,
+      "value_raw": 10.606734055299539
+    },
+    {
+      "feature": "component_breakdown.s_interference",
+      "value_z": -0.35899503971029645,
+      "value_raw": 15.935119815668198
+    },
+    {
+      "feature": "component_breakdown.s_recovery",
+      "value_z": 0.3125591722989306,
+      "value_raw": 85.77460322580646
+    },
+    {
+      "feature": "component_breakdown.r_belief",
+      "value_z": 0.04700893924108604,
+      "value_raw": 48.457142857142856
+    },
+    {
+      "feature": "component_breakdown.s_relevance",
+      "value_z": -0.17168528344639625,
+      "value_raw": 1.5417585253456219
+    }
+  ],
+  "mean_distance_block_to_barycenter": 10.573853,
+  "median_distance_block_to_barycenter": 9.845417,
+  "p95_distance_block_to_barycenter": 17.816938,
+  "mean_effort_l2": 10.573853,
+  "top_healing_direction_features": [
+    {
+      "feature": "koopman.prediction_5",
+      "block_mean": 91.81062857142861,
+      "use_memory_mean": 5.370241935483872,
+      "barycenter": 31.302357926267295,
+      "delta_block_to_barycenter": -60.50827064516132,
+      "delta_sigmas": -1.6102641361383954,
+      "feature_std": 37.57661199004738
+    },
+    {
+      "feature": "lqr_control.optimal_control",
+      "block_mean": -33.024915999999976,
+      "use_memory_mean": 38.16567903225808,
+      "barycenter": 16.808500522580665,
+      "delta_block_to_barycenter": 49.83341652258064,
+      "delta_sigmas": 1.6054407822193144,
+      "feature_std": 31.04033301913035
+    },
+    {
+      "feature": "banach_contraction.fixed_point_estimate",
+      "block_mean": 86.3274285714286,
+      "use_memory_mean": 8.01774193548387,
+      "barycenter": 31.51064792626729,
+      "delta_block_to_barycenter": -54.81678064516131,
+      "delta_sigmas": -1.60544066605313,
+      "feature_std": 34.14438278801343
+    },
+    {
+      "feature": "lqr_control.state_deviation",
+      "block_mean": 36.32742857142855,
+      "use_memory_mean": -41.98225806451613,
+      "barycenter": -18.489352073732725,
+      "delta_block_to_barycenter": -54.81678064516127,
+      "delta_sigmas": -1.6054406660531293,
+      "feature_std": 34.144382788013424
+    },
+    {
+      "feature": "particle_filter.state_estimate",
+      "block_mean": 86.25277428571427,
+      "use_memory_mean": 8.008650806451616,
+      "barycenter": 31.481887850230407,
+      "delta_block_to_barycenter": -54.77088643548386,
+      "delta_sigmas": -1.6050381876497177,
+      "feature_std": 34.12435096992036
+    },
+    {
+      "feature": "mdp_recommendation.expected_value",
+      "block_mean": 9.11362571428573,
+      "use_memory_mean": 9.46109999999999,
+      "barycenter": 9.356857714285711,
+      "delta_block_to_barycenter": 0.24323199999998124,
+      "delta_sigmas": 1.5695155645541925,
+      "feature_std": 0.15497265875733396
+    },
+    {
+      "feature": "shapley_values.mean",
+      "block_mean": 7.547500259740263,
+      "use_memory_mean": 1.3990615835777127,
+      "barycenter": 3.243593186426478,
+      "delta_block_to_barycenter": -4.303907073313786,
+      "delta_sigmas": -1.5646593900010601,
+      "feature_std": 2.7506990344466407
+    },
+    {
+      "feature": "drift_details.kl_divergence",
+      "block_mean": 21.98971428571427,
+      "use_memory_mean": 65.90274193548389,
+      "barycenter": 52.728833640553006,
+      "delta_block_to_barycenter": 30.739119354838735,
+      "delta_sigmas": 1.4658938741375382,
+      "feature_std": 20.969539403337887
+    },
+    {
+      "feature": "info_thermodynamics.information_temperature",
+      "block_mean": 17.795589714285725,
+      "use_memory_mean": 43.12174193548388,
+      "barycenter": 35.523896269124435,
+      "delta_block_to_barycenter": 17.72830655483871,
+      "delta_sigmas": 1.4528708400302328,
+      "feature_std": 12.202259186693981
+    },
+    {
+      "feature": "drift_details.jsd",
+      "block_mean": 8.772685714285716,
+      "use_memory_mean": 24.45846774193549,
+      "barycenter": 19.752733133640557,
+      "delta_block_to_barycenter": 10.980047419354841,
+      "delta_sigmas": 1.4222352070946835,
+      "feature_std": 7.72027535570905
+    },
+    {
+      "feature": "calibration.meta_score",
+      "block_mean": 84.50274285714279,
+      "use_memory_mean": 13.429193548387087,
+      "barycenter": 34.751258341013795,
+      "delta_block_to_barycenter": -49.751484516129,
+      "delta_sigmas": -1.3488281158053648,
+      "feature_std": 36.88496994772617
+    },
+    {
+      "feature": "drift_details.ensemble_score",
+      "block_mean": 41.10228571428572,
+      "use_memory_mean": 68.14112903225806,
+      "barycenter": 60.029476036866356,
+      "delta_block_to_barycenter": 18.927190322580635,
+      "delta_sigmas": 1.2769745037209503,
+      "feature_std": 14.821901508157818
+    },
+    {
+      "feature": "ergodicity.delta",
+      "block_mean": 8.922629142857138,
+      "use_memory_mean": 17.537564516129034,
+      "barycenter": 14.953083904147464,
+      "delta_block_to_barycenter": 6.030454761290326,
+      "delta_sigmas": 1.2273824926908103,
+      "feature_std": 4.913264444622851
+    },
+    {
+      "feature": "component_breakdown.s_drift",
+      "block_mean": 35.43371428571428,
+      "use_memory_mean": 7.749193548387095,
+      "barycenter": 16.05454976958525,
+      "delta_block_to_barycenter": -19.37916451612903,
+      "delta_sigmas": -1.1496299602250426,
+      "feature_std": 16.856871503536247
+    },
+    {
+      "feature": "component_breakdown.r_recall",
+      "block_mean": 55.01371428571422,
+      "use_memory_mean": 22.15048387096774,
+      "barycenter": 32.00945299539168,
+      "delta_block_to_barycenter": -23.00426129032254,
+      "delta_sigmas": -1.1200591791790289,
+      "feature_std": 20.538433788100377
+    }
+  ],
+  "interpretation": "In the 77-dim standardized feature space derived from 449 preflight runs, the Sinkhorn-regularized Wasserstein distance between the BLOCK cluster (n=175) and USE_MEMORY cluster (n=124) is W_eps = 13.479 (standardized) / 211580.717 (raw units). Sinkhorn converged in 6 iterations at epsilon=0.1. A barycenter biased 0.7 toward USE_MEMORY and 0.3 toward BLOCK (the 'safe recovery center') lies at mean L2 distance 10.57 sigmas from each BLOCK point (median=9.85, p95=17.82). The highest-leverage healing directions \u2014 features that must shift most in sigma-units to reach the barycenter \u2014 are led by `koopman.prediction_5` (delta=-1.61sigma), `lqr_control.optimal_control` (1.61sigma), `banach_contraction.fixed_point_estimate` (-1.61sigma). These are the components a repair plan should preferentially move to transport a BLOCKed memory state toward safety.",
+  "notes": [
+    "Pure numpy Sinkhorn implementation; cost matrix normalized by its max (matches repo scoring_engine/sinkhorn.py convention) before Gibbs kernel exp(-C/epsilon).",
+    "Wasserstein reported in the *original* (un-scaled) cost units via sum(gamma * C).",
+    "Barycenter is the simplified weighted mean (not the Wasserstein-barycenter fixed point) as specified: 0.3*mean(BLOCK) + 0.7*mean(USE_MEMORY).",
+    "Feature matrix derived from live /v1/preflight on the 449-case benchmark corpus; BLOCK vs USE_MEMORY split by response.recommended_action."
+  ]
+}

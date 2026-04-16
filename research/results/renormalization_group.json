@@ -1,0 +1,242 @@
+{
+  "n_calls_per_domain": 5000,
+  "scales": {
+    "per_call": 1,
+    "per_hour": 60,
+    "per_day": 100
+  },
+  "per_domain_moments": {
+    "general": {
+      "scale_1": {
+        "mean": 46.65846,
+        "std": 21.911380523107166,
+        "skewness": 0.6643465241341632,
+        "kurtosis": 2.7573958693498257,
+        "n": 5000
+      },
+      "scale_60": {
+        "mean": 46.66965863453816,
+        "std": 2.855579612553336,
+        "skewness": 0.37617807378034884,
+        "kurtosis": 3.1735700137569522,
+        "n": 83
+      },
+      "scale_100": {
+        "mean": 46.65846,
+        "std": 2.357953012339304,
+        "skewness": 0.2645859510899936,
+        "kurtosis": 2.554037045692223,
+        "n": 50
+      },
+      "tail_alpha": 7.652137488147765,
+      "universality_class": "mean_field_like"
+    },
+    "customer_support": {
+      "scale_1": {
+        "mean": 55.00658000000001,
+        "std": 24.252764681652277,
+        "skewness": 0.40616523332313664,
+        "kurtosis": 2.1665446224089875,
+        "n": 5000
+      },
+      "scale_60": {
+        "mean": 55.009457831325285,
+        "std": 2.7905684899707768,
+        "skewness": -0.48988261960445784,
+        "kurtosis": 3.3148945178205556,
+        "n": 83
+      },
+      "scale_100": {
+        "mean": 55.006580000000014,
+        "std": 1.889703004072333,
+        "skewness": -0.1951590100013015,
+        "kurtosis": 2.4039115938027336,
+        "n": 50
+      },
+      "tail_alpha": 24.426450879879663,
+      "universality_class": "trivial"
+    },
+    "coding": {
+      "scale_1": {
+        "mean": 59.46856000000001,
+        "std": 25.039865006153686,
+        "skewness": 0.2233920755487533,
+        "kurtosis": 1.946186369326475,
+        "n": 5000
+      },
+      "scale_60": {
+        "mean": 59.444799196787145,
+        "std": 3.3632162962349588,
+        "skewness": 0.02821714783322195,
+        "kurtosis": 2.5463047448234146,
+        "n": 83
+      },
+      "scale_100": {
+        "mean": 59.46856,
+        "std": 2.280151592855176,
+        "skewness": -0.24273210791356703,
+        "kurtosis": 3.1475571570096696,
+        "n": 50
+      },
+      "tail_alpha": Infinity,
+      "universality_class": "trivial"
+    },
+    "legal": {
+      "scale_1": {
+        "mean": 69.31008,
+        "std": 24.86279828164159,
+        "skewness": -0.1931315980434398,
+        "kurtosis": 1.8388287466244402,
+        "n": 5000
+      },
+      "scale_60": {
+        "mean": 69.30684738955823,
+        "std": 2.9498553728989205,
+        "skewness": 0.07258662795352536,
+        "kurtosis": 2.859848415236384,
+        "n": 83
+      },
+      "scale_100": {
+        "mean": 69.31008,
+        "std": 2.6464094682418295,
+        "skewness": 0.016586811824333036,
+        "kurtosis": 2.0686515370163834,
+        "n": 50
+      },
+      "tail_alpha": Infinity,
+      "universality_class": "trivial"
+    },
+    "fintech": {
+      "scale_1": {
+        "mean": 74.72417999999999,
+        "std": 23.900703699422742,
+        "skewness": -0.48461543083523073,
+        "kurtosis": 2.0738946606403417,
+        "n": 5000
+      },
+      "scale_60": {
+        "mean": 74.70775100401606,
+        "std": 2.898118283863639,
+        "skewness": -0.27282949194691286,
+        "kurtosis": 3.589545640128386,
+        "n": 83
+      },
+      "scale_100": {
+        "mean": 74.72418,
+        "std": 2.051652482171384,
+        "skewness": 0.14330532193305007,
+        "kurtosis": 2.502684979983972,
+        "n": 50
+      },
+      "tail_alpha": Infinity,
+      "universality_class": "trivial"
+    },
+    "medical": {
+      "scale_1": {
+        "mean": 78.8348,
+        "std": 22.999936542521155,
+        "skewness": -0.7519427741516133,
+        "kurtosis": 2.437956176336955,
+        "n": 5000
+      },
+      "scale_60": {
+        "mean": 78.8486546184739,
+        "std": 2.7949772608634453,
+        "skewness": -0.2532032856959183,
+        "kurtosis": 3.140070269816729,
+        "n": 83
+      },
+      "scale_100": {
+        "mean": 78.8348,
+        "std": 2.0524131845220643,
+        "skewness": 0.11152497205861796,
+        "kurtosis": 2.1776875131850604,
+        "n": 50
+      },
+      "tail_alpha": Infinity,
+      "universality_class": "trivial"
+    }
+  },
+  "pairwise_ks_at_coarsest": [
+    [
+      "general",
+      "customer_support",
+      0.96
+    ],
+    [
+      "general",
+      "coding",
+      1.0
+    ],
+    [
+      "general",
+      "legal",
+      1.0
+    ],
+    [
+      "general",
+      "fintech",
+      1.0
+    ],
+    [
+      "general",
+      "medical",
+      1.0
+    ],
+    [
+      "customer_support",
+      "coding",
+      0.72
+    ],
+    [
+      "customer_support",
+      "legal",
+      1.0
+    ],
+    [
+      "customer_support",
+      "fintech",
+      1.0
+    ],
+    [
+      "customer_support",
+      "medical",
+      1.0
+    ],
+    [
+      "coding",
+      "legal",
+      0.98
+    ],
+    [
+      "coding",
+      "fintech",
+      1.0
+    ],
+    [
+      "coding",
+      "medical",
+      1.0
+    ],
+    [
+      "legal",
+      "fintech",
+      0.76
+    ],
+    [
+      "legal",
+      "medical",
+      1.0
+    ],
+    [
+      "fintech",
+      "medical",
+      0.7
+    ]
+  ],
+  "pairwise_ks_mean": 0.9413,
+  "pairwise_ks_max": 1.0,
+  "fixed_point_convergence": false,
+  "fixed_point_location": null,
+  "interpretation": "Domains do NOT converge to a shared fixed point: max pairwise KS at coarsest scale = 1.000 (>0.2). Each domain has a distinct macroscopic distribution. Universality classes: 1 mean-field-like, 0 critical, 5 trivial. Mean pairwise KS at coarsest scale: 0.941."
+}

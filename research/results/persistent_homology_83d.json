@@ -1,0 +1,93 @@
+{
+  "method": "vietoris_rips_filtration_over_1_skeleton",
+  "n_points": 449,
+  "dimensionality": 78,
+  "distance_metric": "standardized euclidean",
+  "distance_stats": {
+    "min": 0.8604356982140412,
+    "median": 11.575927044575542,
+    "mean": 11.79219106125282,
+    "p95": 19.702456858027073,
+    "max": 31.225651764825525
+  },
+  "epsilon_values": [
+    0.5,
+    1.0,
+    1.5,
+    2.0,
+    2.5,
+    3.0,
+    3.5,
+    4.0,
+    5.0,
+    7.5,
+    10.0
+  ],
+  "betti_0_curve": [
+    449,
+    446,
+    413,
+    343,
+    283,
+    219,
+    174,
+    127,
+    77,
+    21,
+    7
+  ],
+  "betti_1_curve": [
+    0,
+    0,
+    9,
+    116,
+    469,
+    1002,
+    1676,
+    2589,
+    4958,
+    12891,
+    31403
+  ],
+  "edges_at_epsilon": [
+    0,
+    3,
+    45,
+    222,
+    635,
+    1232,
+    1951,
+    2911,
+    5330,
+    13319,
+    31845
+  ],
+  "beta_2_status": "not_computed_in_77d",
+  "persistent_components": {
+    "long_lived_clusters": 113,
+    "lifetime_threshold": 4.182272,
+    "lifetime_threshold_rule": "q75 of component-death-epsilon distribution",
+    "description": "number of connected components whose death epsilon exceeds 4.182 (plus 1 surviving)",
+    "death_epsilon_summary": {
+      "count": 448,
+      "min": 0.8604356982140412,
+      "max": 17.20288886740509,
+      "median": 2.926865410636535,
+      "p95": 7.295406263637845,
+      "n_deaths_over_1.0_sigma": 445,
+      "n_deaths_over_2.0_sigma": 342,
+      "n_deaths_over_q75": 112
+    }
+  },
+  "persistent_loops": {
+    "count": 31403,
+    "interpretation": "peak beta_1 across filtration \u2014 upper bound on independent cycles in 1-skeleton interpretable as healing-loop obstructions in feature space"
+  },
+  "n_real_states_estimate": 7,
+  "interpretation": "Vietoris-Rips filtration on the 449-row standardized 78-dim preflight feature matrix. beta_0 starts at 449 (each point isolated) and falls gradually as epsilon grows; beta_1 (cycle count via Euler characteristic on the 1-skeleton) grows rapidly past epsilon~2, indicating that preflight outputs span a highly NON-SIMPLY-CONNECTED region of feature space. Using q75 of the death-epsilon distribution (4.18) as a lifetime threshold, 112 components persist past that scale, suggesting O(113) distinguishable memory-state regimes at fine granularity. At the median pairwise distance epsilon~10.0 the complex has consolidated to beta_0=7 components \u2014 consistent with a small number of coarse attractors, on the same order as the 4 recommended_action classes (USE_MEMORY / WARN / ASK_USER / BLOCK).",
+  "notes": [
+    "Uses union-find for beta_0 (connected components) and Euler characteristic beta_1 = E - V + beta_0 on the 1-skeleton (an UPPER bound on the true H_1 rank once 2-simplices are included).",
+    "beta_2 requires enumerating 3-simplices: O(n^3) combinatorial cost in 77D \u2014 skipped per task spec.",
+    "Feature matrix derived from 449 live /v1/preflight runs on the benchmark corpus. Non-synthetic: real scoring engine output."
+  ]
+}
