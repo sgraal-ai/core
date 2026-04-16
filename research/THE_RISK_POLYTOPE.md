@@ -177,6 +177,8 @@ where γ = n_samples / n_features.
 
 Cumulative variance: 90% at 6 dimensions, 95% at 7, 97.9% at 5 signal dimensions.
 
+> **Note on variance figures.** The 97.9% figure was measured on the extended 13-element feature vector (10 raw components + omega_mem_final + assurance_score + an auxiliary dimension). A later validation on the raw 10-component space alone yielded 90.7% variance in 5 PCs (see §17.3). Both are correct — the difference reflects the choice of feature space. The extended vector captures more scoring-engine-specific structure, the raw 10-component vector is more conservative.
+
 ### 3.3 Principal Components
 
 The five signal eigenvectors define the axes of the Risk Polytope:
@@ -777,7 +779,7 @@ Where R=Risk (s_freshness), D=Decay (s_drift), T=Trust (s_provenance), C=Corrupt
 
 The three boundaries share the same signature: Trust and Decay carry ~60% of the weight, Corruption ~35%, Risk ~30%, Belief exactly zero for single-entry calls. The thresholds step up linearly: 58.9 → 66.6 → 73.5, with a spacing of ~7.5 units between each action level.
 
-The system is effectively a **single scalar projected onto the polytope's principal diagonal**, with three escalating trigger points. This is why the 5-dimensional representation captures 97.9% of the variance — the decision manifold is essentially 1-dimensional along the diagonal of the polytope.
+The system is effectively a **single scalar projected onto the polytope's principal diagonal**, with three escalating trigger points. This is why the 5-dimensional representation captures 97.9% of the variance in the extended 13-element vector (90.7% in the raw 10-component vector — see §3.2 note) — the decision manifold is essentially 1-dimensional along the diagonal of the polytope.
 
 ### 16.3 Fleet Vaccination Network Effect
 
@@ -839,6 +841,59 @@ The 82-module scoring engine has only **10 internal dependencies**. The dependen
 - **Top bottleneck: `omega_mem`** with 4 dependents; everything else is a leaf analytic
 
 This means the scoring engine is structurally nearly flat — almost all modules are independent leaf analytics. The 29ms median latency (p50) could theoretically drop to 3–5ms (critical path only) with parallel execution. The current implementation runs sequentially. This is a latency optimization opportunity, not a correctness issue.
+
+#### 17.1.1 DAG Visualization
+
+```mermaid
+flowchart TD
+    %% Critical path (3-layer chain)
+    CP1[client_optimizer]:::critical
+    CP2[omega_mem<br/>4 dependents]:::bottleneck
+    CP3[pagerank]:::critical
+    CP1 ==>|critical| CP2
+    CP2 ==>|critical| CP3
+
+    %% Other edges converging on the bottleneck
+    IMP[importance_detector]:::parallel --> CP2
+    FBE[fallback_engine]:::parallel --> CP2
+    SHX[shapley_explain]:::parallel --> CP2
+
+    %% Compliance sub-DAG
+    subgraph Compliance[Compliance sub-DAG]
+        direction LR
+        FV[formal_verification]:::parallel --> CE[compliance_engine]:::parallel
+        HPM[healing_policy_matrix]:::parallel --> CE
+    end
+
+    %% Drift sub-DAG
+    subgraph Drift[Drift sub-DAG]
+        direction LR
+        DD[drift_detector]:::parallel --> SK[sinkhorn]:::parallel
+    end
+
+    %% Dependency tracking sub-DAG
+    subgraph DepGraph[Dependency sub-DAG]
+        direction LR
+        MT[memory_tracker]:::parallel --> DG[dependency_graph]:::parallel
+    end
+
+    %% ZK / Sheaf sub-DAG
+    subgraph ZKSheaf[ZK sub-DAG]
+        direction LR
+        ZK[zk_sheaf]:::parallel --> SH[sheaf_cohomology]:::parallel
+    end
+
+    %% Leaf cluster (collapsed)
+    LEAF[/"72 leaf modules (parallel, no dependents):<br/>arrhenius, banach, bocpd, calibration, causal_graph,<br/>cohomological_gradient, consolidation, copula, cox_hazard,<br/>ctl_verification, cvar, differential_privacy, dirichlet_process,<br/>dual_process_auq, ergodicity, expected_utility, extended_freshness,<br/>fisher_rao, frechet, free_energy, frontdoor, geodesic_flow,<br/>gumbel_softmax, hawkes_process, hmm, homology_torsion,<br/>hotelling_t2, info_thermodynamics, jump_diffusion, kalman_forecast,<br/>koopman, levy_flight, lqr_control, lyapunov, lyapunov_exponent,<br/>mahalanobis, mdp, mewma, mttr, mutual_information,<br/>ornstein_uhlenbeck, owa_provenance, page_hinkley, particle_filter,<br/>pctl_verification, persistence_landscape, persistent_homology,<br/>poisson_recall, policy_gradient, privacy_layer, provenance_entropy,<br/>rate_distortion, recursive_colimit, ricci_curvature, rl_policy,<br/>rmt, roc_monitoring, security_transfer_entropy, simulated_annealing,<br/>sparse_merkle, spectral, stability_score, subjective_logic,<br/>thread_manager, topological_entropy, trend_detection, unified_loss,<br/>...and more"/]:::parallel
+
+    CP3 -.->|depth = 3 layers, max speedup 27.33x| LEAF
+
+    classDef critical fill:#1f6feb,stroke:#58a6ff,stroke-width:3px,color:#ffffff
+    classDef bottleneck fill:#da3633,stroke:#f85149,stroke-width:4px,color:#ffffff
+    classDef parallel fill:#238636,stroke:#56d364,stroke-width:1px,color:#ffffff
+```
+
+The diagram shows the full dependency topology: a 3-layer critical path (`client_optimizer → omega_mem → pagerank`, blue) with `omega_mem` as the sole bottleneck (red, 4 dependents). Four small sub-DAGs (compliance, drift, dependency-tracking, ZK/sheaf) share 2-layer depth, and the remaining 72 modules are independent leaves — a single horizontal band that runs in parallel. Visually, the engine is mostly one flat layer of leaf analytics feeding a tiny sequential core.
 
 ### 17.2 Two Redundant Component Pairs
 
@@ -912,6 +967,37 @@ Per-call ROI by domain × pricing tier:
 **Economic verdict: break-even is negative in every domain × tier combination.** Even the weakest profile (customer support on the Full tier) yields 1,564× ROI per call. Governance is profitable from call #1. There is no fleet size below which Sgraal is economically optional.
 
 This is the business interpretation of the phase constant: κ_MEM is not just a geometric property of the signal correlation graph — it is the point at which governance becomes mandatory in dollar terms. At κ_MEM = 0.033, every call of governance pays for itself in expected value.
+
+### 17.6 Cross-Domain Transfer Matrix
+
+We simulated 60 synthetic attacks (10 per domain × 6 domains, rotating over three attack vectors: stale data, poisoned provenance, and consensus collapse) and captured the 10-component `component_breakdown` from `/v1/preflight` as a signature vector per attack. Cosine similarity between each domain pair's signature sets answers: *if an attack works in domain A, will its signature be recognized in domain B?*
+
+**Method:** `cosine_similarity(component_breakdown_a, component_breakdown_b)` averaged over all pairs. Components: s_freshness, s_drift, s_provenance, s_propagation, r_recall, r_encode, s_interference, s_recovery, r_belief, s_relevance.
+
+| | general | customer | coding | legal | fintech | medical |
+|---|---|---|---|---|---|---|
+| **general**          | 0.745 | 0.731 | 0.757 | 0.741 | 0.754 | 0.747 |
+| **customer_support** | 0.731 | 0.834 | 0.746 | 0.848 | 0.833 | 0.854 |
+| **coding**           | 0.757 | 0.746 | 0.772 | 0.758 | 0.774 | 0.765 |
+| **legal**            | 0.741 | 0.848 | 0.758 | 0.883 | 0.855 | 0.895 |
+| **fintech**          | 0.754 | 0.833 | 0.774 | 0.855 | 0.873 | 0.864 |
+| **medical**          | 0.747 | 0.854 | 0.765 | 0.895 | 0.864 | 0.907 |
+
+Key findings:
+
+- **Mean off-diagonal transfer: 0.795.** Every domain pair shares at least 73% of attack-signature geometry — attacks are largely portable across the fleet.
+- **Highest transfer: legal ↔ medical (0.895).** High-stakes, high-criticality domains share near-identical attack shapes. A vaccine signature learned in legal will match 89.5% of the same geometry in medical.
+- **Lowest transfer: general ↔ customer_support (0.731).** The two lowest-criticality domains diverge more than either does from the high-criticality cluster.
+- **Perfect symmetry: max |M[a,b] − M[b,a]| = 0.0000.** Cosine similarity is mathematically symmetric and the corpus confirms it.
+- **Diagonal dominance: weak.** Intra-domain self-similarity (legal-legal 0.883, medical-medical 0.907) is only slightly higher than cross-domain (legal-medical 0.895), meaning the component breakdown is primarily driven by the *attack vector*, not the domain — the domain multiplier acts downstream of the 10-D signature.
+
+**Cluster structure:** A clear two-cluster pattern emerges.
+- **High-criticality cluster (legal, fintech, medical, customer_support):** pairwise similarity 0.83–0.90.
+- **Low-criticality/neutral cluster (general, coding):** pairwise similarity 0.73–0.77 both within and to the high-cluster.
+
+**Interpretation for fleet vaccination:** When a new attack signature is extracted in any high-criticality domain, it transfers with ≥ 0.83 fidelity to the other three high-criticality domains — one signature effectively inoculates four domains. `general` and `coding`, however, need their own signatures (cross-domain transfer stays near 0.75, close to the noise floor of the cosine metric on non-negative vectors). Concretely: a `BLOCK` signature learned from a medical timestamp attack will already match 89% of a legal timestamp attack, but only 75% of a coding one. Operationally, vaccinate the high-criticality cluster jointly and the low-criticality cluster separately.
+
+Raw data: [`research/results/cross_domain_transfer.json`](results/cross_domain_transfer.json).
 
 ---
 

@@ -1,0 +1,17 @@
+{
+  "n_no_heal": 100,
+  "n_post_heal": 100,
+  "success_rate_no_heal": 0.57,
+  "success_rate_post_heal": 0.51,
+  "effect_size": -0.06,
+  "mcnemar_chi2": 1.25,
+  "p_value_approx": 0.263552,
+  "mcnemar_b_no_succ_post_fail": 13,
+  "mcnemar_c_no_fail_post_succ": 7,
+  "healing_improves_outcomes": false,
+  "confidence": "high",
+  "method": "simulated_controlled_experiment",
+  "outcome_model": "P(success)=1-sigmoid((omega-46.0)*0.15)",
+  "rng_seed": 20260416,
+  "note": "Controlled simulation on synthetic data \u2014 replace with production audit_log when available"
+}

@@ -1,0 +1,50 @@
+%% Sgraal Module DAG — 82 modules, 10 edges, 3-layer depth
+%% Generated from research/results/structural_findings.json
+flowchart TD
+    %% Critical path (3-layer chain)
+    CP1[client_optimizer]:::critical
+    CP2[omega_mem<br/>4 dependents]:::bottleneck
+    CP3[pagerank]:::critical
+    CP1 ==>|critical| CP2
+    CP2 ==>|critical| CP3
+
+    %% Other edges that converge on the bottleneck
+    IMP[importance_detector]:::parallel --> CP2
+    FBE[fallback_engine]:::parallel --> CP2
+    SHX[shapley_explain]:::parallel --> CP2
+
+    %% Secondary sub-DAG: compliance_engine (2 dependents)
+    subgraph Compliance[Compliance sub-DAG]
+        direction LR
+        FV[formal_verification]:::parallel --> CE[compliance_engine]:::parallel
+        HPM[healing_policy_matrix]:::parallel --> CE
+    end
+
+    %% Drift sub-DAG
+    subgraph Drift[Drift sub-DAG]
+        direction LR
+        DD[drift_detector]:::parallel --> SK[sinkhorn]:::parallel
+    end
+
+    %% Dependency tracking sub-DAG
+    subgraph DepGraph[Dependency sub-DAG]
+        direction LR
+        MT[memory_tracker]:::parallel --> DG[dependency_graph]:::parallel
+    end
+
+    %% ZK / Sheaf
+    subgraph ZKSheaf[ZK sub-DAG]
+        direction LR
+        ZK[zk_sheaf]:::parallel --> SH[sheaf_cohomology]:::parallel
+    end
+
+    %% Leaf cluster (collapsed)
+    LEAF[/"72 leaf modules<br/>(parallel, no dependents)<br/>arrhenius, banach, bocpd, calibration,<br/>causal_graph, cohomological_gradient, consolidation,<br/>copula, cox_hazard, ctl_verification, cvar,<br/>differential_privacy, dirichlet_process, dual_process_auq,<br/>ergodicity, expected_utility, extended_freshness,<br/>fisher_rao, frechet, free_energy, frontdoor,<br/>geodesic_flow, gumbel_softmax, hawkes_process, hmm,<br/>homology_torsion, hotelling_t2, info_thermodynamics,<br/>jump_diffusion, kalman_forecast, koopman, levy_flight,<br/>lqr_control, lyapunov, lyapunov_exponent, mahalanobis,<br/>mdp, mewma, mttr, mutual_information,<br/>ornstein_uhlenbeck, owa_provenance, page_hinkley,<br/>particle_filter, pctl_verification, persistence_landscape,<br/>persistent_homology, poisson_recall, policy_gradient,<br/>privacy_layer, provenance_entropy, rate_distortion,<br/>recursive_colimit, ricci_curvature, rl_policy, rmt,<br/>roc_monitoring, security_transfer_entropy, simulated_annealing,<br/>sparse_merkle, spectral, stability_score, subjective_logic,<br/>thread_manager, topological_entropy, trend_detection,<br/>unified_loss, ...and more"/]:::parallel
+
+    %% Styling
+    classDef critical fill:#1f6feb,stroke:#58a6ff,stroke-width:3px,color:#ffffff
+    classDef bottleneck fill:#da3633,stroke:#f85149,stroke-width:4px,color:#ffffff
+    classDef parallel fill:#238636,stroke:#56d364,stroke-width:1px,color:#ffffff
+
+    %% Notes
+    CP3 -.->|depth = 3 layers<br/>max speedup 27.33x| LEAF

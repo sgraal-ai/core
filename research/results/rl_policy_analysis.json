@@ -1,0 +1,198 @@
+{
+  "extraction_method": "direct_q_table_access",
+  "total_state_action_pairs": 1024,
+  "actions": [
+    "USE_MEMORY",
+    "WARN",
+    "ASK_USER",
+    "BLOCK"
+  ],
+  "per_domain": {
+    "general": {
+      "populated_states": 11,
+      "populated_cells": 9,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0088,
+      "convergence": "cold_start",
+      "episodes": 30,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0576,
+        "WARN": 0.0954,
+        "ASK_USER": 0.0321,
+        "BLOCK": 0.0
+      },
+      "policy_character": "permissive"
+    },
+    "fintech": {
+      "populated_states": 12,
+      "populated_cells": 8,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0078,
+      "convergence": "cold_start",
+      "episodes": 30,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0435,
+        "WARN": 0.0384,
+        "ASK_USER": 0.0274,
+        "BLOCK": 0.006
+      },
+      "policy_character": "balanced"
+    },
+    "medical": {
+      "populated_states": 10,
+      "populated_cells": 10,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0098,
+      "convergence": "cold_start",
+      "episodes": 30,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0613,
+        "WARN": 0.048,
+        "ASK_USER": 0.038,
+        "BLOCK": -0.0148
+      },
+      "policy_character": "permissive"
+    },
+    "coding": {
+      "populated_states": 12,
+      "populated_cells": 9,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0088,
+      "convergence": "cold_start",
+      "episodes": 30,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0535,
+        "WARN": 0.0175,
+        "ASK_USER": 0.0475,
+        "BLOCK": 0.0158
+      },
+      "policy_character": "balanced"
+    },
+    "legal": {
+      "populated_states": 13,
+      "populated_cells": 10,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0098,
+      "convergence": "cold_start",
+      "episodes": 30,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0361,
+        "WARN": 0.0355,
+        "ASK_USER": 0.0201,
+        "BLOCK": -0.0113
+      },
+      "policy_character": "balanced"
+    },
+    "customer_support": {
+      "populated_states": 12,
+      "populated_cells": 9,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0088,
+      "convergence": "cold_start",
+      "episodes": 30,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0551,
+        "WARN": 0.051,
+        "ASK_USER": 0.0231,
+        "BLOCK": 0.0
+      },
+      "policy_character": "permissive"
+    }
+  },
+  "per_domain_cold_snapshot": {
+    "general": {
+      "populated_states": 0,
+      "populated_cells": 0,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0,
+      "convergence": "cold_start",
+      "episodes": 0,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0,
+        "WARN": 0.0,
+        "ASK_USER": 0.0,
+        "BLOCK": 0.0
+      },
+      "policy_character": "insufficient_data"
+    },
+    "fintech": {
+      "populated_states": 0,
+      "populated_cells": 0,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0,
+      "convergence": "cold_start",
+      "episodes": 0,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0,
+        "WARN": 0.0,
+        "ASK_USER": 0.0,
+        "BLOCK": 0.0
+      },
+      "policy_character": "insufficient_data"
+    },
+    "medical": {
+      "populated_states": 0,
+      "populated_cells": 0,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0,
+      "convergence": "cold_start",
+      "episodes": 0,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0,
+        "WARN": 0.0,
+        "ASK_USER": 0.0,
+        "BLOCK": 0.0
+      },
+      "policy_character": "insufficient_data"
+    },
+    "coding": {
+      "populated_states": 0,
+      "populated_cells": 0,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0,
+      "convergence": "cold_start",
+      "episodes": 0,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0,
+        "WARN": 0.0,
+        "ASK_USER": 0.0,
+        "BLOCK": 0.0
+      },
+      "policy_character": "insufficient_data"
+    },
+    "legal": {
+      "populated_states": 0,
+      "populated_cells": 0,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0,
+      "convergence": "cold_start",
+      "episodes": 0,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0,
+        "WARN": 0.0,
+        "ASK_USER": 0.0,
+        "BLOCK": 0.0
+      },
+      "policy_character": "insufficient_data"
+    },
+    "customer_support": {
+      "populated_states": 0,
+      "populated_cells": 0,
+      "total_cells": 1024,
+      "convergence_ratio": 0.0,
+      "convergence": "cold_start",
+      "episodes": 0,
+      "mean_q_per_action": {
+        "USE_MEMORY": 0.0,
+        "WARN": 0.0,
+        "ASK_USER": 0.0,
+        "BLOCK": 0.0
+      },
+      "policy_character": "insufficient_data"
+    }
+  },
+  "overall_convergence": "cold_start",
+  "recommendation": "Q-table is cold \u2014 RL adjustments will defer to the base scoring engine. Drive additional /v1/outcome calls to accumulate learning episodes.",
+  "warming_episodes_per_domain": 30,
+  "note": "Q-table is in-memory; snapshot reflects the current process only."
+}

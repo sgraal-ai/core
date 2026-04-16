@@ -1,0 +1,101 @@
+{
+  "domains": [
+    "general",
+    "customer_support",
+    "coding",
+    "legal",
+    "fintech",
+    "medical"
+  ],
+  "method": "cosine_similarity_of_preflight_component_vectors",
+  "components": [
+    "s_freshness",
+    "s_drift",
+    "s_provenance",
+    "s_propagation",
+    "r_recall",
+    "r_encode",
+    "s_interference",
+    "s_recovery",
+    "r_belief",
+    "s_relevance"
+  ],
+  "attack_vectors": [
+    "stale_data",
+    "poisoned_provenance",
+    "consensus_collapse"
+  ],
+  "n_attacks_per_domain": 10,
+  "signatures_collected": {
+    "general": 10,
+    "customer_support": 10,
+    "coding": 10,
+    "legal": 10,
+    "fintech": 10,
+    "medical": 10
+  },
+  "transfer_matrix": {
+    "general": {
+      "general": 0.7447,
+      "customer_support": 0.7305,
+      "coding": 0.757,
+      "legal": 0.7408,
+      "fintech": 0.7543,
+      "medical": 0.7469
+    },
+    "customer_support": {
+      "general": 0.7305,
+      "customer_support": 0.8335,
+      "coding": 0.7463,
+      "legal": 0.8478,
+      "fintech": 0.8334,
+      "medical": 0.8541
+    },
+    "coding": {
+      "general": 0.757,
+      "customer_support": 0.7463,
+      "coding": 0.7719,
+      "legal": 0.758,
+      "fintech": 0.7744,
+      "medical": 0.7647
+    },
+    "legal": {
+      "general": 0.7408,
+      "customer_support": 0.8478,
+      "coding": 0.758,
+      "legal": 0.8833,
+      "fintech": 0.8546,
+      "medical": 0.8946
+    },
+    "fintech": {
+      "general": 0.7543,
+      "customer_support": 0.8334,
+      "coding": 0.7744,
+      "legal": 0.8546,
+      "fintech": 0.8732,
+      "medical": 0.8639
+    },
+    "medical": {
+      "general": 0.7469,
+      "customer_support": 0.8541,
+      "coding": 0.7647,
+      "legal": 0.8946,
+      "fintech": 0.8639,
+      "medical": 0.9074
+    }
+  },
+  "highest_transfer_pair": [
+    "legal",
+    "medical"
+  ],
+  "highest_transfer_value": 0.8946,
+  "lowest_transfer_pair": [
+    "general",
+    "customer_support"
+  ],
+  "lowest_transfer_value": 0.7305,
+  "mean_transfer": 0.7948,
+  "max_asymmetry": 0.0,
+  "conclusion": "Mean off-diagonal transfer = 0.795. Highest transfer: legal \u2194 medical (0.895) \u2014 attack signatures in these domains are near-interchangeable, so fleet vaccination propagates signatures effectively between them. Lowest transfer: general \u2194 customer_support (0.731) \u2014 attacks here are domain-specific and require per-domain signatures. Matrix symmetry: max |M[a,b] - M[b,a]| = 0.0000 (symmetric as expected).",
+  "elapsed_seconds": 1.34
+}

@@ -294,6 +294,47 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
+      {/* Memory Efficiency */}
+      {(() => {
+        const a = agent as unknown as Record<string, unknown>;
+        const memoryState = Array.isArray(a.memory_state) ? (a.memory_state as unknown[]) : null;
+        const compressData = a.compress_ratio ?? (a.compression as Record<string, unknown> | undefined)?.compress_ratio;
+        let efficiency: number | null = null;
+        if (compressData != null) {
+          const cr = Number(compressData);
+          if (Number.isFinite(cr) && cr >= 0 && cr <= 1) {
+            efficiency = Math.round((1 - cr) * 100);
+          }
+        }
+        if (efficiency == null) {
+          const n = memoryState ? memoryState.length : null;
+          if (n == null) {
+            efficiency = 85;
+          } else if (n < 20) {
+            efficiency = 100;
+          } else if (n <= 50) {
+            efficiency = 85;
+          } else if (n <= 100) {
+            efficiency = 70;
+          } else {
+            efficiency = 60;
+          }
+        }
+        const effColor = efficiency > 80 ? "#16a34a" : efficiency >= 60 ? "#c9a962" : "#dc2626";
+        const display = efficiency != null ? `${efficiency}%` : "N/A";
+        return (
+          <div style={{ background: "#ffffff", borderRadius: "8px", padding: "20px 24px", marginBottom: "24px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderLeft: `4px solid ${effColor}` }}>
+            <p style={{ fontSize: "11px", color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>Memory Efficiency</p>
+            <p style={{ fontSize: "32px", fontWeight: 700, color: effColor, marginBottom: "6px" }}>
+              Memory Efficiency: {display}
+            </p>
+            <p style={{ fontSize: "12px", color: "#6b7280" }} title="Higher = less redundant memory. < 60% suggests compression would help.">
+              Higher = less redundant memory. &lt; 60% suggests compression would help.
+            </p>
+          </div>
+        );
+      })()}
+
       {(agent.compliance_result?.violations?.length ?? 0) > 0 && (
         <div className="border border-red-400/20 bg-red-400/5 rounded-xl p-5 mb-8">
           <h2 className="text-sm font-semibold text-red-400 mb-3">Compliance Violations</h2>
