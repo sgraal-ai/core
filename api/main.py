@@ -16021,24 +16021,38 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _dub_raw = (_weighted / _w_sum) * _bocpd_factor if _w_sum > 0 else None
             if _dub_raw is not None:
                 _dub_final = round(min(999.0, max(0.0, _dub_raw)), 1)
-                # Confidence: agreement between methods (low std = high confidence)
+                # Confidence + 95% CI from cross-model spread
                 if len(_dub_estimates) >= 2:
                     _dub_mean = sum(_dub_estimates) / len(_dub_estimates)
                     _dub_var = sum((e - _dub_mean) ** 2 for e in _dub_estimates) / len(_dub_estimates)
-                    _dub_conf = round(max(0.0, min(1.0, 1.0 / (1.0 + math.sqrt(_dub_var) / max(_dub_mean, 1.0)))), 2)
+                    _dub_std = math.sqrt(max(_dub_var, 0.0))
+                    # #455: 95% CI = mean ± 1.96·std (clamped to [0, 999])
+                    _dub_ci_low = round(max(0.0, min(999.0, _dub_mean - 1.96 * _dub_std)), 1)
+                    _dub_ci_high = round(max(0.0, min(999.0, _dub_mean + 1.96 * _dub_std)), 1)
+                    # confidence = 1 - std/mean, clamped to [0,1]
+                    _dub_conf = round(max(0.0, min(1.0, 1.0 - _dub_std / max(_dub_mean, 1.0))), 2)
+                    response["days_until_block_ci"] = {"low": _dub_ci_low, "high": _dub_ci_high}
+                    response["days_until_block_ci_method"] = "mean ± 1.96·std across OU/Cox/Kalman/BOCPD"
+                    response["days_until_block_n_models"] = len(_dub_estimates)
                 else:
                     _dub_conf = 0.3
+                    response["days_until_block_ci"] = {"low": _dub_final, "high": _dub_final}
+                    response["days_until_block_ci_method"] = "single_model_no_spread"
+                    response["days_until_block_n_models"] = 1
                 response["days_until_block"] = _dub_final
                 response["days_until_block_confidence"] = _dub_conf
             else:
                 response["days_until_block"] = None
                 response["days_until_block_confidence"] = None
+                response["days_until_block_ci"] = None
         else:
             response["days_until_block"] = None
             response["days_until_block_confidence"] = None
+            response["days_until_block_ci"] = None
     else:
         response["days_until_block"] = None
         response["days_until_block_confidence"] = None
+        response["days_until_block_ci"] = None
 
     # -----------------------------------------------------------------------
     # NEW FIELD 2: confidence_calibration — overconfident / underconfident / calibrated
@@ -16064,13 +16078,34 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _cal_state = "CALIBRATED"
         _cal_score = 0.5
 
+    # #456: Human-readable explanation using actual component values
+    if _cal_state == "OVERCONFIDENT":
+        _cal_explanation = (
+            f"Agent trusts drifted memories that appear internally consistent "
+            f"(r_belief score={round(_cc_belief, 1)}, s_drift={round(_cc_drift, 1)}, H¹={_cc_h1}). "
+            f"Internal consistency is masking real memory decay."
+        )
+    elif _cal_state == "UNDERCONFIDENT":
+        _cal_explanation = (
+            f"Agent underestimates its own memory quality "
+            f"(r_belief score={round(_cc_belief, 1)} at omega={round(omega_out, 1)}). "
+            f"Safe, but may over-trigger healing — consider raising r_belief weight or verifying source trust."
+        )
+    else:
+        _cal_explanation = (
+            f"Agent's self-assessment matches actual memory reliability "
+            f"(r_belief score={round(_cc_belief, 1)}, s_drift={round(_cc_drift, 1)}, H¹={_cc_h1})."
+        )
+
     response["confidence_calibration"] = {
         "state": _cal_state,
         "score": _cal_score,
         "r_belief": round(_cc_belief, 1),
         "s_drift": round(_cc_drift, 1),
         "h1_rank": _cc_h1,
+        "explanation": _cal_explanation,
     }
+    response["confidence_calibration_explanation"] = _cal_explanation
 
     # -----------------------------------------------------------------------
     # NEW FIELD 3: Signal vector logging for κ_MEM production data
@@ -16134,15 +16169,61 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     _rp_list.sort(key=lambda x: x.get("heal_roi", 0), reverse=True)
     # Apply golden ratio diminishing returns weighting (#625)
     _PHI = 1.61803
+    _rp_count = len(_rp_list)
     for _phi_i, _phi_rp in enumerate(_rp_list):
         _phi_rp["priority_weight"] = round(1.0 / (_PHI ** _phi_i), 4)
+        # #458: explicit rank + roi_percentile per repair plan entry
+        _phi_rp["rank"] = _phi_i + 1
+        # Percentile = fraction of entries this one beats (out of peers with lower ROI)
+        if _rp_count > 1:
+            _phi_rp["roi_percentile"] = round((_rp_count - _phi_i - 1) / (_rp_count - 1) * 100.0, 1)
+        else:
+            _phi_rp["roi_percentile"] = 100.0
     _top_roi_entry = _rp_list[0]["entry_id"] if _rp_list else None
+
+    # #458: repair_plan_summary — top-rank guidance in human language
+    if _rp_list:
+        _top = _rp_list[0]
+        _top_action = _top.get("action", "REFETCH")
+        _top_eid = _top.get("entry_id", "?")
+        _top_improvement = _top.get("projected_improvement", 0)
+        if _top_improvement and _top_improvement > 0:
+            response["repair_plan_summary"] = (
+                f"Heal entry {_top_eid} first: {_top_action} reduces omega by "
+                f"~{round(float(_top_improvement), 1)} points (rank 1 of {_rp_count}, highest ROI)."
+            )
+        else:
+            response["repair_plan_summary"] = (
+                f"Heal entry {_top_eid} first: {_top_action} (rank 1 of {_rp_count}, highest ROI)."
+            )
+    else:
+        response["repair_plan_summary"] = "No repair actions needed — memory is healthy."
 
     # New response fields
     response["top_roi_entry_id"] = _top_roi_entry
     response["phi_weighted"] = True
     response["knowledge_age_days"] = _ka_mean
     response["knowledge_age_std_days"] = _ka_std
+    # #457: human-readable knowledge-age summary with uncertainty + oldest trusted entry
+    try:
+        if _ka_mean is not None and entries:
+            # Oldest trusted entry = max age among entries with source_trust >= 0.5
+            _trusted = [e for e in entries if float(getattr(e, "source_trust", 0) or 0) >= 0.5]
+            _oldest_trusted = max((e.timestamp_age_days for e in _trusted), default=None)
+            if _oldest_trusted is None:
+                _oldest_trusted = max((e.timestamp_age_days for e in entries), default=0)
+            _ka_summary = (
+                f"Your agent's memory is effectively {_ka_mean} days old "
+                f"(±{_ka_std} days). Oldest trusted entry: {round(float(_oldest_trusted), 1)} days."
+            )
+            response["knowledge_age_summary"] = _ka_summary
+            response["knowledge_age_oldest_trusted_days"] = round(float(_oldest_trusted), 1)
+        else:
+            response["knowledge_age_summary"] = None
+            response["knowledge_age_oldest_trusted_days"] = None
+    except Exception:
+        response["knowledge_age_summary"] = None
+        response["knowledge_age_oldest_trusted_days"] = None
     response["fleet_health_distance"] = _fhd
     response["fleet_health_distance_available"] = _fhd_available
 
