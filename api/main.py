@@ -730,6 +730,10 @@ class PreflightRequest(BaseModel):
     grok_context: Optional[dict] = None  # Grok compatibility mode: {grok_confidence, grok_decision, consensus_agents}
     action_context: Optional[Any] = None  # FIX 3: Agent Action Checkpoint (dict or str)
     outcome_context: Optional[str] = None  # FIX 8: "refresh"|"natural" — suppresses auto-outcome on refresh
+    avg_transaction_value: Optional[float] = None  # A3: override default per-domain transaction value for expected_savings
+    per_type_thresholds: Optional[bool] = None  # A2: enable type-specific BLOCK thresholds (uses research defaults or custom dict)
+    per_type_threshold_values: Optional[dict[str, float]] = None  # A2: custom per-type thresholds, falls back to research defaults
+    parallel_scoring: Optional[bool] = None  # A1: opt-in parallel module execution via ThreadPoolExecutor (2-3x realistic speedup)
 
 class HealRequest(BaseModel):
     entry_id: str
@@ -898,6 +902,60 @@ def exchange_oauth_token(token: str, request: Request):
     redis_set(f"oauth_token:{token}", None, ttl=1)
     _exchange_attempts.pop(ip, None)
     return {"api_key": data["api_key"], "email": data.get("email", "")}
+
+
+@app.get("/.well-known/sgraal.json")
+def well_known_sgraal():
+    """Public service discovery metadata. No auth required."""
+    return {
+        "name": "Sgraal",
+        "description": "Memory governance protocol for AI agents",
+        "api_version": "v1",
+        "sdk_version": "0.3.1",
+        "phase_constant": 0.033,
+        "polytope_dimensions": 5,
+        "polytope_axes": ["Risk", "Decay", "Trust", "Corruption", "Belief"],
+        "capabilities": [
+            "preflight",
+            "healing",
+            "vaccination",
+            "ctl_verification",
+            "causal_graph",
+            "compliance_eu_ai_act",
+            "compliance_fda_510k",
+            "compliance_hipaa",
+            "memcube_v3",
+            "zero_knowledge_proofs",
+            "differential_privacy",
+            "fleet_intelligence",
+            "predictive_blocking",
+            "surgical_block",
+            "memory_vaccination",
+        ],
+        "endpoints": {
+            "api": "https://api.sgraal.com",
+            "dashboard": "https://app.sgraal.com",
+            "docs": "https://sgraal.com/docs",
+            "playground": "https://sgraal.com/playground",
+        },
+        "distributions": {
+            "python_sdk": "https://pypi.org/project/sgraal",
+            "mcp_server": "https://www.npmjs.com/package/@sgraal/mcp",
+            "github": "https://github.com/sgraal-ai/core",
+        },
+        "decision_thresholds": {
+            "warn": 40,
+            "ask_user": 60,
+            "block": 70,
+        },
+        "memory_types": [
+            "episodic", "semantic", "preference", "tool_state",
+            "shared_workflow", "policy", "identity",
+        ],
+        "supported_domains": [
+            "general", "customer_support", "coding", "legal", "fintech", "medical",
+        ],
+    }
 
 
 @app.get("/health")
@@ -13177,34 +13235,59 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     except Exception:
         pass
 
-    # LQR Control (ML-10)
-    try:
-        lqr = compute_lqr(omega_out)
-        if lqr:
-            response["lqr_control"] = {"optimal_control": lqr.optimal_control, "state_deviation": lqr.state_deviation, "control_effort": lqr.control_effort, "target_omega": lqr.target_omega}
-    except Exception:
-        pass
+    # LQR + Persistence Landscape + Topological Entropy (ML-10, TDA-02, TDA-03)
+    # A1 parallel zone: 3 pure-compute modules, no shared state, no Redis I/O.
+    # Parallelized when req.parallel_scoring=True; otherwise runs sequentially (identical behavior).
+    _a1_lqr_input = omega_out
+    _a1_ph_data = response.get("persistent_homology", {})
+    _a1_b1_data = _a1_ph_data.get("betti_1")
+    _a1_te_history = _te_history_cache[:]
+    _a1_te_ready = len(_a1_te_history) >= 10
 
-    # Persistence Landscape (TDA-02)
-    try:
-        _ph_data = response.get("persistent_homology", {})
-        _b1_data = _ph_data.get("betti_1")
-        if _b1_data:
-            pl = compute_persistence_landscape(_b1_data)
-            if pl:
-                response["persistence_landscape"] = {"landscape_values": pl.landscape_values, "landscape_norm": pl.landscape_norm, "topology_complexity": pl.topology_complexity}
-    except Exception:
-        pass
+    def _a1_run_lqr():
+        try:
+            return compute_lqr(_a1_lqr_input)
+        except Exception:
+            return None
 
-    # Topological Entropy (TDA-03)
-    try:
-        _te_history = _te_history_cache[:]
-        if len(_te_history) >= 10:
-            te = compute_topological_entropy(_te_history, omega_out)
-            if te:
-                response["topological_entropy"] = {"entropy_estimate": te.entropy_estimate, "distinct_states_visited": te.distinct_states_visited, "complexity_class": te.complexity_class}
-    except Exception:
-        pass
+    def _a1_run_pl():
+        try:
+            if not _a1_b1_data:
+                return None
+            return compute_persistence_landscape(_a1_b1_data)
+        except Exception:
+            return None
+
+    def _a1_run_te():
+        try:
+            if not _a1_te_ready:
+                return None
+            return compute_topological_entropy(_a1_te_history, omega_out)
+        except Exception:
+            return None
+
+    _a1_parallel = bool(req.parallel_scoring)
+    if _a1_parallel:
+        try:
+            from api.parallel_exec import run_parallel_safe
+            _a1_results = run_parallel_safe([_a1_run_lqr, _a1_run_pl, _a1_run_te], timeout=3.0)
+            lqr, pl, te = _a1_results[0], _a1_results[1], _a1_results[2]
+            response["parallel_scoring_applied"] = True
+            response["parallel_scoring_modules"] = ["lqr_control", "persistence_landscape", "topological_entropy"]
+        except Exception:
+            # Fallback to sequential on any failure — preserves determinism guarantee
+            lqr, pl, te = _a1_run_lqr(), _a1_run_pl(), _a1_run_te()
+            response["parallel_scoring_applied"] = False
+            response["parallel_scoring_fallback_reason"] = "executor_error"
+    else:
+        lqr, pl, te = _a1_run_lqr(), _a1_run_pl(), _a1_run_te()
+
+    if lqr:
+        response["lqr_control"] = {"optimal_control": lqr.optimal_control, "state_deviation": lqr.state_deviation, "control_effort": lqr.control_effort, "target_omega": lqr.target_omega}
+    if pl:
+        response["persistence_landscape"] = {"landscape_values": pl.landscape_values, "landscape_norm": pl.landscape_norm, "topology_complexity": pl.topology_complexity}
+    if te:
+        response["topological_entropy"] = {"entropy_estimate": te.entropy_estimate, "distinct_states_visited": te.distinct_states_visited, "complexity_class": te.complexity_class}
 
     # Homology Torsion (TDA-05)
     try:
@@ -15366,6 +15449,83 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if 55 <= omega_out <= 70 and response.get("recommended_action") not in ("BLOCK",):
         _cal_note = "omega in empirically high-risk zone (55-70). Consider ASK_USER escalation."
     response["calibration_note"] = _cal_note
+
+    # A2: Per-type BLOCK thresholds (opt-in)
+    # Research values (research/results/business_metrics.json → type_stratified_calibration):
+    # type-specific inflection points where P(success) drops to 50%
+    if req.per_type_thresholds:
+        _A2_DEFAULTS = {
+            "identity": 13.0, "policy": 17.0, "semantic": 21.0,
+            "preference": 33.0, "episodic": 37.0, "shared_workflow": 43.0,
+            "tool_state": 47.0,
+        }
+        _a2_custom = req.per_type_threshold_values or {}
+        _a2_type_thresh = {t: float(_a2_custom.get(t, _A2_DEFAULTS.get(t, 70.0))) for t in _A2_DEFAULTS}
+        # Mixed types: pick threshold of the entry type contributing most to omega
+        # Proxy for contribution: sum(s_freshness + s_drift + s_provenance) per-entry is
+        # not per-entry computed at this stage; use memory type counts weighted by age
+        # (older entries contribute more risk). If single type, use that directly.
+        try:
+            _a2_types_present = [e.type for e in req.memory_state if getattr(e, "type", None)]
+            if len(set(_a2_types_present)) == 1:
+                _a2_dom_type = _a2_types_present[0]
+            else:
+                # Weight by (timestamp_age_days * source_conflict) as a proxy for risk contribution
+                _a2_weights: dict = {}
+                for e in req.memory_state:
+                    t = getattr(e, "type", None) or "semantic"
+                    age = float(getattr(e, "timestamp_age_days", 0) or 0)
+                    conflict = float(getattr(e, "source_conflict", 0) or 0)
+                    _a2_weights[t] = _a2_weights.get(t, 0.0) + (age * (1.0 + conflict))
+                _a2_dom_type = max(_a2_weights, key=_a2_weights.get) if _a2_weights else "semantic"
+            _a2_block_threshold = _a2_type_thresh.get(_a2_dom_type, 70.0)
+            # Apply to final decision: if omega >= type-specific threshold, escalate to BLOCK
+            _a2_omega = float(response.get("omega_mem_final", 0) or 0)
+            _a2_original_action = response.get("recommended_action")
+            _a2_new_action = _a2_original_action
+            if _a2_omega >= _a2_block_threshold:
+                _a2_new_action = "BLOCK"
+            response["per_type_threshold_applied"] = True
+            response["per_type_dominant_type"] = _a2_dom_type
+            response["per_type_block_threshold"] = _a2_block_threshold
+            response["per_type_original_action"] = _a2_original_action
+            if _a2_new_action != _a2_original_action:
+                response["recommended_action"] = _a2_new_action
+                response["per_type_override_triggered"] = True
+            else:
+                response["per_type_override_triggered"] = False
+        except Exception as _a2_e:
+            response["per_type_threshold_applied"] = False
+            response["per_type_error"] = str(_a2_e)[:200]
+
+    # A3: Expected savings per BLOCK
+    # Only populated for BLOCK/WARN/ASK_USER decisions. Uses P(failure|omega) from
+    # calibration (sigmoid fit, inflection at omega=46) times domain transaction value.
+    _es_action = response.get("recommended_action")
+    if _es_action in ("BLOCK", "WARN", "ASK_USER"):
+        # Domain default transaction values (USD)
+        _es_tx_defaults = {
+            "medical": 5000.0, "legal": 2000.0, "fintech": 1000.0,
+            "general": 200.0, "coding": 100.0, "customer_support": 50.0,
+        }
+        _es_tx_value = req.avg_transaction_value if req.avg_transaction_value is not None else _es_tx_defaults.get(req.domain, 200.0)
+        # Sigmoid P(failure|omega): 1 / (1 + exp(-k*(omega - theta))), theta=46, k=0.15
+        try:
+            _es_omega = float(response.get("omega_mem_final", 0) or 0)
+            _es_p_fail = 1.0 / (1.0 + math.exp(-0.15 * (_es_omega - 46.0)))
+        except Exception:
+            _es_p_fail = 0.0
+        _es_if_blocked = round(_es_p_fail * _es_tx_value, 2)
+        # actual_savings_this_call is realized only on BLOCK (we prevented the action)
+        _es_actual = _es_if_blocked if _es_action == "BLOCK" else 0.0
+        response["expected_savings_if_blocked"] = _es_if_blocked
+        response["actual_savings_this_call"] = _es_actual
+        response["expected_savings_meta"] = {
+            "avg_transaction_value_usd": _es_tx_value,
+            "p_failure": round(_es_p_fail, 4),
+            "calibration_model": "sigmoid(theta=46, k=0.15)",
+            "source_override": req.avg_transaction_value is not None,
+        }
 
     # Track BLOCK rate for PagerDuty/OpsGenie (#395)
     _track_block_rate(

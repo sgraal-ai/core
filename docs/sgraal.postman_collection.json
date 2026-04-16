@@ -1,0 +1,585 @@
+{
+  "info": {
+    "name": "Sgraal API",
+    "description": "Memory governance protocol for AI agents — v1 public API. Preflight scoring, healing, compliance, and fleet intelligence endpoints. Set the {{api_key}} environment variable to your sg_live_ key.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {"key": "token", "value": "{{api_key}}", "type": "string"}
+    ]
+  },
+  "variable": [
+    {"key": "base_url", "value": "https://api.sgraal.com"}
+  ],
+  "item": [
+    {
+      "name": "Core Scoring",
+      "item": [
+        {
+          "name": "Preflight — basic call",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"memory_state\": [\n    {\n      \"id\": \"mem_001\",\n      \"content\": \"Customer preferred contact method: email (verified 2026-02-15)\",\n      \"type\": \"preference\",\n      \"timestamp_age_days\": 12,\n      \"source_trust\": 0.9,\n      \"source_conflict\": 0.1,\n      \"downstream_count\": 3\n    },\n    {\n      \"id\": \"mem_002\",\n      \"content\": \"Account balance as of last sync: $50,000\",\n      \"type\": \"tool_state\",\n      \"timestamp_age_days\": 3,\n      \"source_trust\": 0.7,\n      \"source_conflict\": 0.3,\n      \"downstream_count\": 5\n    }\n  ],\n  \"action_type\": \"irreversible\",\n  \"domain\": \"fintech\",\n  \"agent_id\": \"agent_finance_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/preflight",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "preflight"]
+            },
+            "description": "Score a memory state and get a recommended action (USE_MEMORY / WARN / ASK_USER / BLOCK). Returns omega_mem_final, component_breakdown, repair_plan, and 80+ analytics modules."
+          }
+        },
+        {
+          "name": "Preflight batch — up to 100 entries",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"requests\": [\n    {\n      \"memory_state\": [\n        {\"id\": \"mem_001\", \"content\": \"Account balance: $50,000\", \"type\": \"tool_state\", \"timestamp_age_days\": 3, \"source_trust\": 0.9, \"source_conflict\": 0.1, \"downstream_count\": 2}\n      ],\n      \"action_type\": \"irreversible\",\n      \"domain\": \"fintech\",\n      \"agent_id\": \"agent_batch_001\"\n    },\n    {\n      \"memory_state\": [\n        {\"id\": \"mem_002\", \"content\": \"Medical dosage: 10mg every 6 hours\", \"type\": \"semantic\", \"timestamp_age_days\": 30, \"source_trust\": 0.95, \"source_conflict\": 0.05, \"downstream_count\": 1}\n      ],\n      \"action_type\": \"destructive\",\n      \"domain\": \"medical\",\n      \"agent_id\": \"agent_batch_002\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/preflight/batch",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "preflight", "batch"]
+            },
+            "description": "Run up to 100 preflight requests in a single call. Returns an array of preflight responses in the same order."
+          }
+        },
+        {
+          "name": "Heal — repair memory entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"entry_id\": \"mem_001\",\n  \"action\": \"REFETCH\",\n  \"agent_id\": \"agent_finance_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/heal",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "heal"]
+            },
+            "description": "Apply a healing action (REFETCH / VERIFY_WITH_SOURCE / REBUILD_WORKING_SET) to a memory entry. Increments healing_counter and returns Lyapunov stability guarantee."
+          }
+        },
+        {
+          "name": "Outcome — close outcome log",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"outcome_id\": \"{{outcome_id}}\",\n  \"status\": \"success\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/outcome",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "outcome"]
+            },
+            "description": "Close an outcome from a previous preflight call. Status: success / failure / partial. Optionally pass failure_components for RL attribution."
+          }
+        },
+        {
+          "name": "Explain — Shapley + causal breakdown",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"memory_state\": [\n    {\n      \"id\": \"mem_001\",\n      \"content\": \"User prefers email contact\",\n      \"type\": \"preference\",\n      \"timestamp_age_days\": 5,\n      \"source_trust\": 0.9,\n      \"source_conflict\": 0.1,\n      \"downstream_count\": 2\n    }\n  ],\n  \"action_type\": \"reversible\",\n  \"domain\": \"customer_support\",\n  \"agent_id\": \"agent_support_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/explain",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "explain"]
+            },
+            "description": "Return a human-readable explanation of the preflight decision including Shapley values, causal graph, and root cause analysis."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Discovery & Health",
+      "item": [
+        {
+          "name": "Well-known metadata",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/.well-known/sgraal.json",
+              "host": ["{{base_url}}"],
+              "path": [".well-known", "sgraal.json"]
+            },
+            "description": "Public service discovery document. Returns API version, capabilities, supported memory types, and compliance profiles. No auth required."
+          }
+        },
+        {
+          "name": "Health check",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Liveness probe. Returns 200 OK with service version and dependency status. No auth required."
+          }
+        },
+        {
+          "name": "Verify — formal verification",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/verify?history=45,52,58,61,65",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "verify"],
+              "query": [
+                {"key": "history", "value": "45,52,58,61,65", "description": "Comma-separated recent omega scores for Kalman trend forecast"}
+              ]
+            },
+            "description": "Run Z3 SMT verification of healing policies and compliance rules. Optional history param triggers Kalman filter forecast of collapse risk."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth & Signup",
+      "item": [
+        {
+          "name": "Signup — create API key",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"email\": \"you@company.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/signup",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "signup"]
+            },
+            "description": "Create a Stripe customer, subscribe to the free tier, and return a plaintext sg_live_ API key. The key is shown once — store it immediately."
+          }
+        },
+        {
+          "name": "Generate additional API key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"name\": \"production-key-2026\",\n  \"tier\": \"starter\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/api-keys/generate",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "api-keys", "generate"]
+            },
+            "description": "Generate an additional API key for your account. Returns the plaintext key once — store it. Requires an existing valid key to authenticate."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "Analytics summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/summary",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "summary"]
+            },
+            "description": "Aggregate stats for the caller: total calls, decision breakdown, average omega, top domains."
+          }
+        },
+        {
+          "name": "Performance ROI",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/performance-roi",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "performance-roi"]
+            },
+            "description": "Estimated ROI from prevented incidents: blocked-risk cost savings, successful heals, avoided rollbacks."
+          }
+        },
+        {
+          "name": "Token waste report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/token-waste",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "token-waste"]
+            },
+            "description": "Estimate LLM tokens saved by blocking unreliable memory reads before they enter the context window."
+          }
+        },
+        {
+          "name": "Memory type distribution",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/analytics/memory-types",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "analytics", "memory-types"]
+            },
+            "description": "Breakdown of preflight calls by memory type (episodic, semantic, preference, tool_state, shared_workflow, policy, identity)."
+          }
+        },
+        {
+          "name": "Audit log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/audit-log?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "audit-log"],
+              "query": [
+                {"key": "limit", "value": "50"},
+                {"key": "decision", "value": "BLOCK", "disabled": true},
+                {"key": "agent_id", "value": "agent_finance_001", "disabled": true}
+              ]
+            },
+            "description": "Tamper-evident log of every preflight/heal call. Filter by decision, agent_id, domain, or date range."
+          }
+        },
+        {
+          "name": "Insights — pattern intelligence",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/insights",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "insights"]
+            },
+            "description": "High-level insights: fleet health, recurring risk components, agent rankings, and actionable recommendations."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Compliance",
+      "item": [
+        {
+          "name": "Compliance docs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/compliance/docs",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "compliance", "docs"]
+            },
+            "description": "Compliance profile catalog: GENERAL, EU_AI_ACT, FDA_510K, HIPAA. Includes article mappings and enforcement rules."
+          }
+        },
+        {
+          "name": "GDPR compliance report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"subject_id\": \"user_12345\",\n  \"request_type\": \"access\",\n  \"include_memory_ledger\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/compliance/gdpr",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "compliance", "gdpr"]
+            },
+            "description": "Generate a GDPR Article 15 / 17 / 20 report for a data subject (access, erasure, portability)."
+          }
+        },
+        {
+          "name": "EU AI Act report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/compliance/eu-ai-act/report?force_refresh=false",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "compliance", "eu-ai-act", "report"],
+              "query": [
+                {"key": "force_refresh", "value": "false"}
+              ]
+            },
+            "description": "EU AI Act compliance report: Article 9 (risk management), Article 12 (record-keeping), Article 13 (transparency). SIEM-exportable."
+          }
+        },
+        {
+          "name": "SLA status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/compliance/sla",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "compliance", "sla"]
+            },
+            "description": "Current SLA metrics: latency p95, uptime, decision accuracy. Returns per-domain breakdown when configured."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Guard (function/tool calls)",
+      "item": [
+        {
+          "name": "Guard OpenAI function call",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"function_call\": {\n    \"name\": \"transfer_funds\",\n    \"arguments\": {\n      \"amount\": 50000,\n      \"destination_account\": \"ACC-98765\",\n      \"currency\": \"USD\"\n    }\n  },\n  \"memory_state\": [\n    {\n      \"id\": \"mem_001\",\n      \"content\": \"Beneficiary ACC-98765 verified by user on 2026-02-01\",\n      \"type\": \"tool_state\",\n      \"timestamp_age_days\": 75,\n      \"source_trust\": 0.6,\n      \"source_conflict\": 0.2,\n      \"downstream_count\": 4\n    }\n  ],\n  \"domain\": \"fintech\",\n  \"agent_id\": \"agent_openai_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/guard/openai-function",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "guard", "openai-function"]
+            },
+            "description": "Preflight check for OpenAI function calls. Infers action_type from function name and arguments, then runs full scoring."
+          }
+        },
+        {
+          "name": "Guard Claude tool call",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"tool_use\": {\n    \"name\": \"delete_user_record\",\n    \"input\": {\n      \"user_id\": \"user_12345\",\n      \"confirm\": true\n    }\n  },\n  \"memory_state\": [\n    {\n      \"id\": \"mem_001\",\n      \"content\": \"User user_12345 requested account deletion on 2026-04-10\",\n      \"type\": \"episodic\",\n      \"timestamp_age_days\": 6,\n      \"source_trust\": 0.85,\n      \"source_conflict\": 0.15,\n      \"downstream_count\": 2\n    }\n  ],\n  \"domain\": \"customer_support\",\n  \"agent_id\": \"agent_claude_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/guard/claude-tool",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "guard", "claude-tool"]
+            },
+            "description": "Preflight check for Anthropic Claude tool_use calls. Infers action_type from tool name, then runs full scoring."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Memory Lifecycle",
+      "item": [
+        {
+          "name": "Recover — assess damaged memory",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"memory_state\": [\n    {\n      \"id\": \"mem_damaged_001\",\n      \"content\": \"[partial/corrupted] ...balance: $??,000\",\n      \"type\": \"tool_state\",\n      \"timestamp_age_days\": 120,\n      \"source_trust\": 0.3,\n      \"source_conflict\": 0.7,\n      \"downstream_count\": 8\n    }\n  ],\n  \"agent_id\": \"agent_recover_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/recover/assess",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "recover", "assess"]
+            },
+            "description": "Assess recoverability of damaged memory entries. Returns per-entry recovery probability, suggested actions, and MTTR estimate."
+          }
+        },
+        {
+          "name": "Refine — improve memory entries",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"memory_state\": [\n    {\n      \"id\": \"mem_001\",\n      \"content\": \"User likes product X\",\n      \"type\": \"preference\",\n      \"timestamp_age_days\": 30,\n      \"source_trust\": 0.6,\n      \"source_conflict\": 0.2,\n      \"downstream_count\": 1\n    }\n  ],\n  \"goal\": \"increase_specificity\",\n  \"agent_id\": \"agent_refine_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/refine",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "refine"]
+            },
+            "description": "Refine low-quality memory entries (enrich metadata, increase specificity, resolve conflicts). Returns improved MemCube entries."
+          }
+        },
+        {
+          "name": "Compress — consolidate memory",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"memory_state\": [\n    {\"id\": \"mem_001\", \"content\": \"User likes email\", \"type\": \"preference\", \"timestamp_age_days\": 30, \"source_trust\": 0.8, \"source_conflict\": 0.1, \"downstream_count\": 1},\n    {\"id\": \"mem_002\", \"content\": \"User prefers email contact\", \"type\": \"preference\", \"timestamp_age_days\": 25, \"source_trust\": 0.85, \"source_conflict\": 0.1, \"downstream_count\": 1},\n    {\"id\": \"mem_003\", \"content\": \"Email is user's primary channel\", \"type\": \"preference\", \"timestamp_age_days\": 20, \"source_trust\": 0.9, \"source_conflict\": 0.1, \"downstream_count\": 1}\n  ],\n  \"target_size\": 1,\n  \"agent_id\": \"agent_compress_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/compress",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "compress"]
+            },
+            "description": "Rate-distortion optimal compression: consolidate redundant memory entries while preserving information value."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fleet Intelligence",
+      "item": [
+        {
+          "name": "Vaccines — attack signatures",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/vaccines",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "vaccines"]
+            },
+            "description": "Fleet-wide attack signature registry. Every MANIPULATED BLOCK extracts a signature to Redis for fleet immunity."
+          }
+        },
+        {
+          "name": "Compromised agents registry",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/compromised-agents",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "compromised-agents"]
+            },
+            "description": "List of agent_ids auto-flagged from provenance chains during MANIPULATED BLOCK events."
+          }
+        },
+        {
+          "name": "Fleet divergence",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/fleet/divergence",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "fleet", "divergence"]
+            },
+            "description": "Detect agents whose memory state has diverged from fleet consensus. Returns per-agent divergence scores."
+          }
+        },
+        {
+          "name": "Fleet gaming detection",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/fleet/gaming-detection",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "fleet", "gaming-detection"]
+            },
+            "description": "Detect agents gaming the scoring system (suspicious low-omega patterns, adversarial memory shaping)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Adaptation",
+      "item": [
+        {
+          "name": "Adapt — convert to MemCube",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"source_format\": \"mem0\",\n  \"data\": [\n    {\n      \"memory_id\": \"mem0_abc123\",\n      \"text\": \"User prefers dark mode\",\n      \"user_id\": \"user_12345\",\n      \"created_at\": \"2026-03-15T10:30:00Z\",\n      \"metadata\": {\"category\": \"preference\"}\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/adapt",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "adapt"]
+            },
+            "description": "Convert any memory format (mem0, langchain, raw) to Sgraal MemCube v3 schema. Supports bulk conversion."
+          }
+        },
+        {
+          "name": "Migrate — convert + preflight",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {"raw": {"language": "json"}},
+              "raw": "{\n  \"source_format\": \"langchain\",\n  \"data\": [\n    {\n      \"id\": \"doc_001\",\n      \"page_content\": \"User's billing address: 123 Main St\",\n      \"metadata\": {\"source\": \"crm\", \"timestamp\": \"2026-02-20T14:00:00Z\"}\n    }\n  ],\n  \"action_type\": \"irreversible\",\n  \"domain\": \"customer_support\",\n  \"agent_id\": \"agent_migrate_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/migrate",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "migrate"]
+            },
+            "description": "One-shot: convert source format to MemCube AND run preflight scoring in a single call."
+          }
+        }
+      ]
+    }
+  ]
+}
