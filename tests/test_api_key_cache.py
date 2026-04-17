@@ -24,6 +24,13 @@ def _make_credentials(key: str = FAKE_KEY):
     return creds
 
 
+def _make_request(path: str = "/v1/preflight"):
+    """Mock Request object for verify_api_key (needs request.url.path for demo scope check)."""
+    req = MagicMock()
+    req.url.path = path
+    return req
+
+
 @patch("api.main.redis_set")
 @patch("api.main.redis_get", return_value=None)
 @patch("api.main.supabase_service_client")
@@ -34,7 +41,7 @@ def test_cache_miss_then_supabase_hit_caches(mock_supa, mock_rget, mock_rset):
     mock_result.data = [SUPABASE_ROW]
     mock_supa.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_result
 
-    result = verify_api_key(_make_credentials())
+    result = verify_api_key(_make_request(), _make_credentials())
 
     assert result["customer_id"] == "cus_123"
     mock_rget.assert_called_once_with(CACHE_KEY)
@@ -48,7 +55,7 @@ def test_cache_hit_skips_supabase(mock_supa, mock_rget, mock_rset):
     """2. Valid key → Redis hit → Supabase NOT called."""
     from api.main import verify_api_key
 
-    result = verify_api_key(_make_credentials())
+    result = verify_api_key(_make_request(), _make_credentials())
 
     assert result["customer_id"] == "cus_123"
     assert result["tier"] == "pro"
@@ -86,7 +93,7 @@ def test_redis_down_falls_through_to_supabase(mock_supa, mock_rget, mock_rset):
     mock_result.data = [SUPABASE_ROW]
     mock_supa.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_result
 
-    result = verify_api_key(_make_credentials())
+    result = verify_api_key(_make_request(), _make_credentials())
 
     assert result["customer_id"] == "cus_123"
     # redis_set may still be attempted (Supabase succeeded), that's fine
@@ -103,7 +110,7 @@ def test_invalid_key_not_cached(mock_supa, mock_rget, mock_rset):
     mock_supa.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_result
 
     with pytest.raises(HTTPException) as exc_info:
-        verify_api_key(_make_credentials("sg_live_bad_key"))
+        verify_api_key(_make_request(), _make_credentials("sg_live_bad_key"))
     assert exc_info.value.status_code == 401
     mock_rset.assert_not_called()
 

@@ -981,11 +981,10 @@ _DEMO_BLOCKED_PATHS = {
     "/v1/destroy",
     "/v1/api-keys/generate",
     "/v1/config/thresholds",
-    "/v1/governance-score",  # prefix-matched below
     "/v1/research/production-validation",
     "/v1/research/constants",
 }
-_DEMO_BLOCKED_PREFIXES = ("/v1/governance-score/", "/v1/team", "/v1/sla/")
+_DEMO_BLOCKED_PREFIXES = ("/v1/team",)
 
 
 def verify_api_key(
