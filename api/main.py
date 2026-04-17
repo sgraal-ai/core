@@ -2214,7 +2214,7 @@ def apply_policy(req: PolicyApplyRequest, key_record: dict = Depends(verify_api_
         agent_id=cfg.get("agent_id", "anonymous"),
         thresholds=thresholds,
     )
-    result = preflight(pf_req, key_record)
+    result = _preflight_internal(pf_req, key_record)
     if isinstance(result, dict):
         result["policy_source"] = "inline"
     return result
@@ -2312,7 +2312,7 @@ def migrate_memory(req: MigrateRequest, key_record: dict = Depends(verify_api_ke
         domain=req.domain,
         action_type=req.action_type,
     )
-    pf_result = preflight(pf_req, key_record)
+    pf_result = _preflight_internal(pf_req, key_record)
     ready = pf_result.get("recommended_action") in ("USE_MEMORY", "WARN")
 
     # Fix 4: Audit logging for migrate calls (same as preflight)
@@ -2635,7 +2635,7 @@ def register_memory(req: RegistryRegisterRequest, key_record: dict = Depends(ver
         memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in req.memory_state],
         domain=req.domain, action_type=req.action_type, agent_id=req.agent_id,
     )
-    pf_result = preflight(pf_req, key_record)
+    pf_result = _preflight_internal(pf_req, key_record)
     decision = pf_result.get("recommended_action", "BLOCK") if isinstance(pf_result, dict) else "BLOCK"
     if decision != "USE_MEMORY":
         raise HTTPException(status_code=422, detail=f"Memory not clean enough for registry: {decision}. Only USE_MEMORY qualifies.")
@@ -2840,10 +2840,10 @@ def memory_diff(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_ke
             modified.append({"id": eid, "before": b, "after": a, "changes": changes})
 
     # Run preflight on both states
-    pf_before = preflight(PreflightRequest(
+    pf_before = _preflight_internal(PreflightRequest(
         memory_state=[MemoryEntryRequest(**(e if isinstance(e, dict) else {"id": e.id, "content": e.content, "type": e.type, "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust})) for e in req.before] if req.before else [MemoryEntryRequest(id="empty", content="", type="semantic", timestamp_age_days=0)],
         domain=req.domain, action_type=req.action_type), key_record) if req.before else {"omega_mem_final": 0, "recommended_action": "USE_MEMORY"}
-    pf_after = preflight(PreflightRequest(
+    pf_after = _preflight_internal(PreflightRequest(
         memory_state=[MemoryEntryRequest(**(e if isinstance(e, dict) else {"id": e.id, "content": e.content, "type": e.type, "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust})) for e in req.after] if req.after else [MemoryEntryRequest(id="empty", content="", type="semantic", timestamp_age_days=0)],
         domain=req.domain, action_type=req.action_type), key_record) if req.after else {"omega_mem_final": 0, "recommended_action": "USE_MEMORY"}
 
@@ -2899,7 +2899,7 @@ def replay_preflight(req: ReplayRequest, key_record: dict = Depends(verify_api_k
                 domain=_original_domain,
                 action_type=_original_action_type,
             )
-            pf = preflight(pf_req, key_record)
+            pf = _preflight_internal(pf_req, key_record)
             if isinstance(pf, dict):
                 replay_result["replayed_decision"] = pf.get("recommended_action", "USE_MEMORY")
                 replay_result["replayed_omega"] = pf.get("omega_mem_final", 0)
@@ -3623,7 +3623,7 @@ def heal_counterfactual(req: CounterfactualHealRequest, key_record: dict = Depen
         memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in req.memory_state],
         domain=req.domain, action_type=req.action_type,
     )
-    original = preflight(pf_req, key_record)
+    original = _preflight_internal(pf_req, key_record)
     original_decision = original.get("recommended_action", "BLOCK") if isinstance(original, dict) else "BLOCK"
 
     # 2. Generate counterfactual — try refreshing entries (set age=0)
@@ -3649,7 +3649,7 @@ def heal_counterfactual(req: CounterfactualHealRequest, key_record: dict = Depen
             memory_state=[MemoryEntryRequest(**e) for e in healed_entries],
             domain=req.domain, action_type=req.action_type,
         )
-        verification = preflight(verify_req, key_record)
+        verification = _preflight_internal(verify_req, key_record)
         achieved = verification.get("recommended_action", "BLOCK") if isinstance(verification, dict) else "BLOCK"
         verify_omega = verification.get("omega_mem_final", 0) if isinstance(verification, dict) else 0
     else:
@@ -3879,7 +3879,7 @@ def a2a_preflight(req: A2ARequest, key_record: dict = Depends(verify_api_key)):
         domain=params.get("domain", "general"),
         action_type=params.get("action_type", "reversible"),
     )
-    pf_result = preflight(pf_req, key_record)
+    pf_result = _preflight_internal(pf_req, key_record)
     decision = pf_result.get("recommended_action", "USE_MEMORY") if isinstance(pf_result, dict) else "ERROR"
     return {
         "jsonrpc": "2.0",
@@ -10529,7 +10529,7 @@ def quickstart():
 
 client = SgraalClient(api_key="sg_live_...")
 
-result = client.preflight(
+result = client._preflight_internal(
     memory_state=[
         {"id": "mem_001", "content": "User credit score updated to 720", "type": "tool_state", "timestamp_age_days": 2, "source_trust": 0.95, "source_conflict": 0.05, "downstream_count": 4},
         {"id": "mem_002", "content": "User income verified at $85k", "type": "tool_state", "timestamp_age_days": 45, "source_trust": 0.8, "source_conflict": 0.2, "downstream_count": 3},
@@ -12434,22 +12434,24 @@ def propagation_trace(req: PropagationTraceRequest, key_record: dict = Depends(v
     }
 
 
-@app.post("/v1/preflight")
-def preflight(req: PreflightRequest, request: Optional[Request] = None, key_record: dict = Depends(verify_api_key)):
+def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str = "internal"):
+    """Core preflight logic. Called by the HTTP route AND by internal
+    endpoints (migrate, heal_counterfactual, memory_diff, etc.).
+
+    `client_ip` is the caller's IP for anomaly detection. Internal
+    callers pass the default "internal" which skips IP tracking.
+    """
     _t_start = _time.monotonic()
 
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
     # #34: Track key activity for anomaly detection (stolen/cloned key).
-    # `request` is None when preflight() is called internally by other
-    # endpoints (migrate, heal_counterfactual, etc.) — skip IP tracking.
     _pf_kh = _safe_key_hash(key_record)
-    if request is not None and hasattr(request, "client") and request.client:
-        _pf_client_ip = request.client.host
+    _pf_client_ip = client_ip
+    if _pf_client_ip != "internal":
         _key_anomaly = _track_key_activity(_pf_kh, _pf_client_ip)
     else:
-        _pf_client_ip = "internal"
         _key_anomaly = {"suspicious": False, "reason": None, "unique_ips": 0,
                         "calls_last_hour": 0, "calls_last_minute": 0, "avg_rpm": 0}
 
@@ -17371,6 +17373,19 @@ def preflight(req: PreflightRequest, request: Optional[Request] = None, key_reco
             logger.debug("Deferred audit_log failed: %s", _ae)
 
     return response
+
+
+@app.post("/v1/preflight")
+def preflight(req: PreflightRequest, request: Request, key_record: dict = Depends(verify_api_key)):
+    """HTTP-facing preflight endpoint. Extracts client IP for anomaly detection
+    and delegates to _preflight_internal().
+
+    Internal callers (migrate, heal_counterfactual, etc.) call
+    _preflight_internal(req, key_record) directly — they skip IP tracking
+    and avoid the FastAPI Request dependency.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    return _preflight_internal(req, key_record, client_ip=client_ip)
 
 
 # ---- Router includes ----
