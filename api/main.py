@@ -964,14 +964,24 @@ if (
 bearer_scheme = HTTPBearer()
 
 
+_DEMO_ALLOWED_PATHS = {"/v1/preflight", "/v1/explain", "/v1/preflight/batch"}
+
+
 def verify_api_key(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> dict:
     """Validate Bearer token and return the key record with tier/usage info."""
     api_key = credentials.credentials
 
-    # Demo playground key — limited to /v1/preflight and /v1/explain only
+    # Demo playground key — scope-enforced here, not just in _check_rate_limit
     if api_key == "sg_demo_playground":
+        if request.url.path not in _DEMO_ALLOWED_PATHS:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Demo key (sg_demo_playground) is restricted to {sorted(_DEMO_ALLOWED_PATHS)}. "
+                       f"Sign up at /v1/signup for a full API key.",
+            )
         return {"customer_id": "demo", "tier": "demo", "calls_this_month": 0, "key_hash": "demo", "demo": True}
 
     # Check in-memory store first (test keys skip rate limiting, default to standard profile)
@@ -4819,8 +4829,8 @@ class MemoryDiffRequest(BaseModel):
     memory_state_before: list[dict]
     memory_state_after: list[dict]
 
-@app.post("/v1/memory/diff")
-def memory_diff(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_key)):
+@app.post("/v1/memory/diff", operation_id="memory_diff_v2")
+def memory_diff_v2(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record, allow_demo=True)
     before_ids = {e["id"]: e for e in req.memory_state_before}
     after_ids = {e["id"]: e for e in req.memory_state_after}
@@ -8177,8 +8187,8 @@ _scheduler_jobs = {
     "daily_snapshot": {"interval": "00:00 UTC", "last_run": None, "runs": 0, "failures": 0},
 }
 
-@app.get("/v1/scheduler/status")
-def scheduler_status(key_record: dict = Depends(verify_api_key)):
+@app.get("/v1/scheduler/status", operation_id="scheduler_status_legacy")
+def scheduler_status_legacy(key_record: dict = Depends(verify_api_key)):
     return {"jobs": _scheduler_jobs, "scheduler_active": True}
 
 def _run_truth_subscriptions():
@@ -8502,8 +8512,8 @@ class RAGFilterRequest(BaseModel):
     max_omega: float = 60
     query: Optional[str] = None
 
-@app.post("/v1/rag/filter")
-def rag_filter(req: RAGFilterRequest, key_record: dict = Depends(verify_api_key)):
+@app.post("/v1/rag/filter", operation_id="rag_filter_v2")
+def rag_filter_v2(req: RAGFilterRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record, allow_demo=True)
     if len(req.chunks) > 500:
         raise HTTPException(status_code=400, detail="Maximum 500 chunks per request.")
@@ -12903,6 +12913,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         thread_bucket_id = _thread_manager.assign_bucket(req.thread_id, req.domain)
         thread_sample_rate = _thread_manager.get_sample_rate(req.domain)
         if not _thread_manager.should_check(req.thread_id, req.domain):
+            # FIX 2: include decision_trail + scoring_warnings for schema consistency
             return {
                 "sampled": False,
                 "recommended_action": "USE_MEMORY",
@@ -12910,6 +12921,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 "thread_id": req.thread_id,
                 "bucket_id": thread_bucket_id,
                 "sample_rate": thread_sample_rate,
+                "decision_trail": [{"seq": 0, "action": "USE_MEMORY", "source": "thread_sampling", "reason": "sampled_out"}],
+                "decision_trail_length": 1,
+                "scoring_warnings": [],
+                "scoring_warnings_count": 0,
             }
 
     # Sheaf cohomology: auto-compute source_conflict when not provided
@@ -12971,8 +12986,14 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     if req.policy_id:
         _policy_result = _evaluate_policy(req.policy_id, req.action_type, req.domain, 0)
         if _policy_result and _policy_result.get("override") == "BLOCK":
+            # FIX 2: include decision_trail + scoring_warnings for schema consistency
             return {"omega_mem_final": 100, "recommended_action": "BLOCK",
-                    "policy_applied": _policy_result, "request_id": str(uuid.uuid4())}
+                    "policy_applied": _policy_result, "request_id": str(uuid.uuid4()),
+                    "decision_trail": [{"seq": 0, "action": "BLOCK", "source": "policy_override", "reason": f"policy {req.policy_id} forced BLOCK"}],
+                    "decision_trail_length": 1,
+                    "scoring_warnings": [],
+                    "scoring_warnings_count": 0,
+                    }
 
     # Load calibrated weights from outcome learning (merge with user custom_weights)
     _effective_weights = req.custom_weights
@@ -13435,20 +13456,13 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 _fhd_available = True
         except Exception as _e:
             _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
-        # Store current vector for future fleet health computation (only USE_MEMORY)
-        if _final_action == "USE_MEMORY":
-            try:
-                _fh_vec = [result.component_breakdown.get(k, 0) for k in
-                           ["s_freshness", "s_drift", "s_provenance", "s_propagation", "r_recall",
-                            "r_encode", "s_interference", "s_recovery", "r_belief", "s_relevance"]]
-                _fh_existing = redis_get("fleet_health_vectors", [])
-                if not isinstance(_fh_existing, list):
-                    _fh_existing = []
-                _fh_existing.append(_fh_vec)
-                _fh_existing = _fh_existing[-500:]  # Keep last 500
-                _persist_store_bg("fleet_health_vectors", _fh_existing, ttl=604800)  # 7 days
-            except Exception as _e:
-                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+        # FIX 4: fleet health vector storage deferred to AFTER _finalize_decision()
+        # so it uses the FINAL action. Pre-override USE_MEMORY that gets overridden
+        # to BLOCK should NOT contaminate the healthy fleet baseline.
+        # The actual store is near the end of _preflight_internal, gated on _blessed_action.
+        _fh_vec_for_fleet = [result.component_breakdown.get(k, 0) for k in
+                              ["s_freshness", "s_drift", "s_provenance", "s_propagation", "r_recall",
+                               "r_encode", "s_interference", "s_recovery", "r_belief", "s_relevance"]]
 
     response = {
         "omega_mem_final": omega_out,
@@ -13492,6 +13506,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
     }
+
+    # FIX 6: save immutable engine output before enrichment mutates component_breakdown
+    response["component_breakdown_engine"] = dict(result.component_breakdown)
+    response["enrichment_applied"] = False  # updated to True after enrichment runs
 
     # #9: seed the decision trail with the initial scoring result
     _decision_trail.append({
@@ -15724,6 +15742,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         response["omega_adjusted"] = _omega_adjusted
         response["omega_delta"] = _omega_delta
         response["score_version"] = "v2_reconciled"
+        # FIX 6: enrichment has mutated component_breakdown by this point
+        if response.get("component_breakdown") != response.get("component_breakdown_engine"):
+            response["enrichment_applied"] = True
         # FIX 3: Use omega_adjusted for decisions when delta is significant
         # Guard: reversible/informational with omega < 20 = clean memory, skip adjusted escalation
         _skip_adjusted = omega_out < 20 and req.action_type in ("reversible", "informational")
@@ -17664,13 +17685,27 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 collect_results=_plugin_results,
                 tenant=_pf_tenant,
             )
+            # FIX 5: escalate-only by default — plugins can only make decisions
+            # stricter (USE_MEMORY→WARN→ASK_USER→BLOCK), not weaker.
+            _SEVERITY = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
             if isinstance(_hook_out, tuple) and len(_hook_out) == 2:
                 _new_omega, _new_decision = _hook_out
                 if abs(float(_new_omega) - _current_omega) > 1e-9:
                     response["omega_mem_final"] = round(float(_new_omega), 2)
                 if _new_decision != _current_decision:
-                    _set_action(_new_decision, "plugin_override", "plugin on_omega_computed override")
-                    response["plugin_override_decision"] = True
+                    _cur_sev = _SEVERITY.get(_current_decision, 0)
+                    _new_sev = _SEVERITY.get(str(_new_decision), 0)
+                    if _new_sev >= _cur_sev:
+                        _set_action(_new_decision, "plugin_override", "plugin on_omega_computed escalation")
+                        response["plugin_override_decision"] = True
+                    else:
+                        # Plugin tried to downgrade — blocked by escalate-only policy
+                        response["plugin_downgrade_blocked"] = True
+                        response["plugin_attempted_action"] = str(_new_decision)
+                        logger.warning(
+                            "Plugin tried to downgrade %s → %s — blocked by escalate-only policy",
+                            _current_decision, _new_decision,
+                        )
 
             # on_preflight_complete — full response transformation
             _final = _plugin_registry.run_hook(
@@ -17710,6 +17745,18 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # last writer (last-writer-wins ordering is preserved). This call adds the
     # trail to the response and captures the final action for audit.
     _blessed_action = _finalize_decision()
+
+    # FIX 4: store fleet health vector ONLY when the FINAL decision is USE_MEMORY
+    if not _is_dry_run and _redis_enabled and _blessed_action == "USE_MEMORY":
+        try:
+            _fh_existing = redis_get("fleet_health_vectors", [])
+            if not isinstance(_fh_existing, list):
+                _fh_existing = []
+            _fh_existing.append(_fh_vec_for_fleet)
+            _fh_existing = _fh_existing[-500:]
+            _persist_store_bg("fleet_health_vectors", _fh_existing, ttl=604800)
+        except Exception:
+            pass
 
     # #19 fix: webhook dispatch uses the FINAL decision (after all overrides).
     if not _is_dry_run:
