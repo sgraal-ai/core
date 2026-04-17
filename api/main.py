@@ -1053,15 +1053,17 @@ def exchange_oauth_token(token: str, request: Request):
 
 @app.get("/.well-known/sgraal.json")
 def well_known_sgraal():
-    """Public service discovery metadata. No auth required."""
+    """Public service discovery metadata. No auth required.
+
+    #31 fix: research constants (phase_constant, polytope_dimensions, etc.)
+    moved to authenticated GET /v1/research/constants. Attackers could read
+    scoring structure before designing attacks.
+    """
     return {
         "name": "Sgraal",
         "description": "Memory governance protocol for AI agents",
         "api_version": "v1",
         "sdk_version": "0.3.1",
-        "phase_constant": 0.033,
-        "polytope_dimensions": 5,
-        "polytope_axes": ["Risk", "Decay", "Trust", "Corruption", "Belief"],
         "capabilities": [
             "preflight",
             "healing",
@@ -1090,11 +1092,6 @@ def well_known_sgraal():
             "mcp_server": "https://www.npmjs.com/package/@sgraal/mcp",
             "github": "https://github.com/sgraal-ai/core",
         },
-        "decision_thresholds": {
-            "warn": 40,
-            "ask_user": 60,
-            "block": 70,
-        },
         "memory_types": [
             "episodic", "semantic", "preference", "tool_state",
             "shared_workflow", "policy", "identity",
@@ -1103,6 +1100,116 @@ def well_known_sgraal():
             "general", "customer_support", "coding", "legal", "fintech", "medical",
         ],
     }
+
+
+@app.get("/v1/research/constants")
+def research_constants(key_record: dict = Depends(verify_api_key)):
+    """Authenticated endpoint exposing research-derived scoring constants.
+
+    Moved from /.well-known/sgraal.json (#31) so unauthenticated users
+    cannot read the scoring structure before designing attacks.
+    """
+    _check_rate_limit(key_record, allow_demo=True)
+    return {
+        "phase_constant": 0.033,
+        "polytope_dimensions": 5,
+        "polytope_axes": ["Risk", "Decay", "Trust", "Corruption", "Belief"],
+        "saturation_constant_F_inf": 2.27,
+        "eigentime_calls": 17.2,
+        "healing_budget": 146,
+        "optimal_healing_interval_days": 3,
+        "decision_thresholds_default": {
+            "warn": 40,
+            "ask_user": 60,
+            "block": 70,
+        },
+        "per_type_thresholds_research": {
+            "identity": 13, "policy": 17, "semantic": 21,
+            "preference": 33, "episodic": 37, "shared_workflow": 43,
+            "tool_state": 47,
+        },
+        "leniency_bias_ratio": 0.571,
+        "correlation_rho": -0.54,
+        "note": "These constants are derived from synthetic research data. "
+                "Use GET /v1/research/production-validation to verify against real data.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# #34: Stolen/cloned API key anomaly detection
+# Tracks per-key activity in memory: call_count_last_hour, unique_ips, peak RPM.
+# Alerts on: 3+ unique IPs in 1 hour, or calls_per_minute > 10× historical avg.
+# ---------------------------------------------------------------------------
+import collections as _collections
+
+# key_hash → deque of (timestamp, ip_address) tuples; auto-pruned to last 1 hour
+_key_activity: dict[str, _collections.deque] = {}
+_key_activity_lock = threading.Lock()
+
+_KEY_ACTIVITY_WINDOW_S = 3600  # 1 hour
+_KEY_ACTIVITY_IP_THRESHOLD = 3  # 3+ unique IPs → suspicious
+_KEY_ACTIVITY_RPM_MULTIPLIER = 10  # 10× historical average → suspicious
+
+
+def _track_key_activity(key_hash: str, client_ip: str) -> dict:
+    """Record a call for this key and return anomaly signals.
+
+    Returns {"suspicious": bool, "reason": str|None, "unique_ips": int, "calls_last_hour": int}
+    """
+    now = _time.time()
+    cutoff = now - _KEY_ACTIVITY_WINDOW_S
+
+    with _key_activity_lock:
+        dq = _key_activity.get(key_hash)
+        if dq is None:
+            dq = _collections.deque()
+            _key_activity[key_hash] = dq
+
+        # Prune old entries
+        while dq and dq[0][0] < cutoff:
+            dq.popleft()
+
+        dq.append((now, client_ip))
+
+        calls_last_hour = len(dq)
+        unique_ips = len(set(ip for _, ip in dq))
+
+        # Peak RPM: count calls in the busiest 60-second window (last 60s as proxy)
+        one_min_ago = now - 60
+        calls_last_minute = sum(1 for ts, _ in dq if ts >= one_min_ago)
+
+        # Historical average RPM: calls_last_hour / 60
+        avg_rpm = max(calls_last_hour / 60.0, 0.1)
+
+    reasons = []
+    if unique_ips >= _KEY_ACTIVITY_IP_THRESHOLD:
+        reasons.append(f"{unique_ips} unique IPs in last hour (threshold: {_KEY_ACTIVITY_IP_THRESHOLD})")
+    if calls_last_minute > _KEY_ACTIVITY_RPM_MULTIPLIER * avg_rpm and calls_last_hour > 10:
+        reasons.append(f"{calls_last_minute} RPM vs {avg_rpm:.1f} avg (>{_KEY_ACTIVITY_RPM_MULTIPLIER}x)")
+
+    return {
+        "suspicious": bool(reasons),
+        "reason": "; ".join(reasons) if reasons else None,
+        "unique_ips": unique_ips,
+        "calls_last_hour": calls_last_hour,
+        "calls_last_minute": calls_last_minute,
+        "avg_rpm": round(avg_rpm, 2),
+    }
+
+
+@app.get("/v1/security/key-activity")
+def security_key_activity(request: Request, key_record: dict = Depends(verify_api_key)):
+    """Show anomaly signals for the caller's own API key.
+
+    Returns call volume, unique IPs, RPM, and whether the key is flagged
+    as suspicious. Useful for customers to self-audit their key usage.
+    """
+    _check_rate_limit(key_record, allow_demo=True)
+    kh = _safe_key_hash(key_record)
+    client_ip = request.client.host if request.client else "unknown"
+    activity = _track_key_activity(kh, client_ip)
+    activity["key_hash_prefix"] = kh[:16]
+    return activity
 
 
 @app.get("/health")
@@ -12328,11 +12435,16 @@ def propagation_trace(req: PropagationTraceRequest, key_record: dict = Depends(v
 
 
 @app.post("/v1/preflight")
-def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key)):
+def preflight(req: PreflightRequest, request: Request, key_record: dict = Depends(verify_api_key)):
     _t_start = _time.monotonic()
 
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
+
+    # #34: Track key activity for anomaly detection (stolen/cloned key)
+    _pf_kh = _safe_key_hash(key_record)
+    _pf_client_ip = request.client.host if request.client else "unknown"
+    _key_anomaly = _track_key_activity(_pf_kh, _pf_client_ip)
 
     # #1: Scoring warnings — every bare `except Exception: pass` now captures
     # the error instead of silently swallowing it. The list is exposed in the
@@ -15947,6 +16059,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 })
 
     # #116 Response headers (added to JSON response for now — actual HTTP headers via middleware)
+    _sec_alert = "true" if _key_anomaly.get("suspicious") else "false"
     response["_headers"] = {
         "X-Sgraal-Decision": response.get("recommended_action", "USE_MEMORY"),
         "X-Sgraal-Omega": str(omega_out),
@@ -15955,9 +16068,18 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         "X-Sgraal-Naturalness": response.get("naturalness_level", "ORGANIC"),
         "X-Sgraal-Latency-Ms": str(response.get("_trace", {}).get("duration_ms", 0)),
         "X-SMRS": str(omega_out),
+        "X-Sgraal-Security-Alert": _sec_alert,
         "traceparent": response.get("otel", {}).get("traceparent", ""),
         "X-B3-TraceId": response.get("otel", {}).get("trace_id", ""),
     }
+    # #34: Include anomaly signals in the response body for observability
+    if _key_anomaly.get("suspicious"):
+        response["suspicious_key_activity"] = True
+        response["key_anomaly"] = _key_anomaly
+        logger.warning(
+            "SUSPICIOUS_KEY_ACTIVITY: key=%s ip=%s reason=%s",
+            _pf_kh[:16], _pf_client_ip, _key_anomaly.get("reason"),
+        )
     if response.get("degraded_mode"):
         response["_headers"]["X-Sgraal-Degraded"] = "true"
     if response.get("sla_status", {}).get("breached"):
