@@ -14239,25 +14239,8 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 old_prov = response["component_breakdown"].get("s_provenance", 0)
                 response["component_breakdown"]["s_provenance"] = round(min(100, old_prov + boost), 2)
 
-    # FIX 4: Trust oscillation detector — if trust variance across entries with
-    # similar content is high (>0.05), it suggests adaptive provenance layering
-    # (attacker oscillates trust to evade flat-trust heuristics). Boost s_provenance.
-    try:
-        if len(entries) >= 2 and "component_breakdown" in response:
-            _trusts = [float(getattr(e, "source_trust", 0) or 0) for e in entries]
-            _trust_mean = sum(_trusts) / len(_trusts)
-            _trust_var = sum((t - _trust_mean) ** 2 for t in _trusts) / len(_trusts)
-            if _trust_var > 0.05:
-                _osc_boost = min(20.0, _trust_var * 100)  # up to +20 points
-                _old = float(response["component_breakdown"].get("s_provenance", 0))
-                response["component_breakdown"]["s_provenance"] = round(min(100, _old + _osc_boost), 2)
-                response["trust_oscillation_detected"] = True
-                response["trust_oscillation_variance"] = round(_trust_var, 4)
-    except Exception as _e:
-        _scoring_warnings.append({"module": "trust_oscillation_detector", "error": str(_e)[:200]})
-
             # Push to Redis for trend (skip for demo/dry_run — read-only)
-            if _redis_enabled:
+            if not _is_dry_run and _redis_enabled:
                 try:
                     http_requests.post(
                         f"{UPSTASH_REDIS_URL}/RPUSH/{_pe_key}/{pe.mean_entropy}",
@@ -14275,9 +14258,24 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                         timeout=2,
                     )
                 except Exception as _e:
-                    _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+                    _scoring_warnings.append({"module": "provenance_entropy_redis", "error": str(_e)[:200]})
     except Exception as _e:
-        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+        _scoring_warnings.append({"module": "provenance_entropy", "error": str(_e)[:200]})
+
+    # FIX 4: Trust oscillation detector
+    try:
+        if len(entries) >= 2 and "component_breakdown" in response:
+            _trusts = [float(getattr(e, "source_trust", 0) or 0) for e in entries]
+            _trust_mean = sum(_trusts) / len(_trusts)
+            _trust_var = sum((t - _trust_mean) ** 2 for t in _trusts) / len(_trusts)
+            if _trust_var > 0.05:
+                _osc_boost = min(20.0, _trust_var * 100)
+                _old = float(response["component_breakdown"].get("s_provenance", 0))
+                response["component_breakdown"]["s_provenance"] = round(min(100, _old + _osc_boost), 2)
+                response["trust_oscillation_detected"] = True
+                response["trust_oscillation_variance"] = round(_trust_var, 4)
+    except Exception as _e:
+        _scoring_warnings.append({"module": "trust_oscillation_detector", "error": str(_e)[:200]})
 
     # Subjective Logic (P-04) — clamp trust + conflict ≤ 1.0
     try:
