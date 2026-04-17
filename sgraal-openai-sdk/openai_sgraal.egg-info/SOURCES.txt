@@ -1,0 +1,13 @@
+LICENSE
+README.md
+pyproject.toml
+setup.cfg
+setup.py
+openai_sgraal/__init__.py
+openai_sgraal/client.py
+openai_sgraal/hooks.py
+openai_sgraal.egg-info/PKG-INFO
+openai_sgraal.egg-info/SOURCES.txt
+openai_sgraal.egg-info/dependency_links.txt
+openai_sgraal.egg-info/requires.txt
+openai_sgraal.egg-info/top_level.txt

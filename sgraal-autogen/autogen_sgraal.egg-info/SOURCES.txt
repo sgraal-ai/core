@@ -1,0 +1,12 @@
+LICENSE
+README.md
+pyproject.toml
+setup.cfg
+setup.py
+autogen_sgraal/__init__.py
+autogen_sgraal/middleware.py
+autogen_sgraal.egg-info/PKG-INFO
+autogen_sgraal.egg-info/SOURCES.txt
+autogen_sgraal.egg-info/dependency_links.txt
+autogen_sgraal.egg-info/requires.txt
+autogen_sgraal.egg-info/top_level.txt

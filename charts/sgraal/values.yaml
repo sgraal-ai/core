@@ -55,6 +55,7 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
 
 # Environment variables — non-secret config
 env:

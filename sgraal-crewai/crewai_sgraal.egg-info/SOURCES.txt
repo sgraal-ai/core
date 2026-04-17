@@ -1,0 +1,12 @@
+LICENSE
+README.md
+pyproject.toml
+setup.cfg
+setup.py
+crewai_sgraal/__init__.py
+crewai_sgraal/memory.py
+crewai_sgraal.egg-info/PKG-INFO
+crewai_sgraal.egg-info/SOURCES.txt
+crewai_sgraal.egg-info/dependency_links.txt
+crewai_sgraal.egg-info/requires.txt
+crewai_sgraal.egg-info/top_level.txt

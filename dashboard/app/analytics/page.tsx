@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { getApiKey, getApiUrl } from "../lib/storage";
 import { LoadingSkeleton, ConnectKeyState } from "../components/LoadingSkeleton";
+import ErrorBanner from "../components/ErrorBanner";
 
 interface Summary {
   total_calls: number;
@@ -44,6 +45,7 @@ export default function AnalyticsPage() {
   const [repairEff, setRepairEff] = useState<Record<string, unknown> | null>(null);
   const [perfRoi, setPerfRoi] = useState<Record<string, unknown> | null>(null);
   const [projVolume, setProjVolume] = useState(100000);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setMounted(true);
@@ -52,6 +54,7 @@ export default function AnalyticsPage() {
     if (!apiKey) { setLoading(false); return; }
     const apiUrl = getApiUrl();
     const h = { Authorization: `Bearer ${apiKey}` };
+    setApiError(null);
     try {
       const [sR, wR, prR] = await Promise.all([
         fetch(`${apiUrl}/v1/analytics/summary`, { headers: h }),
@@ -61,7 +64,9 @@ export default function AnalyticsPage() {
       if (sR.ok) setSummary(await sR.json());
       if (wR.ok) setWaste(await wR.json());
       if (prR.ok) setPerfRoi(await prR.json());
-    } catch {}
+    } catch {
+      setApiError("Failed to load analytics data");
+    }
     // Fetch audit entries for domain/agent breakdown
     try {
       const aR = await fetch(`${apiUrl}/v1/audit-log?limit=500`, { headers: h });
@@ -154,6 +159,8 @@ export default function AnalyticsPage() {
         </div>
         <p style={{ fontSize: "12px", color: "#6b7280" }}>Updated {timeAgo}</p>
       </div>
+
+      {apiError && <ErrorBanner message={apiError} onRetry={load} />}
 
       {/* #27: Demo data banner */}
       {(totalDecisions === 0 || (summary as Record<string, unknown> | null)?.demo_mode === true) && (

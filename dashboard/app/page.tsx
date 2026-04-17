@@ -8,6 +8,7 @@ import { DEMO_FLEET } from "./lib/demo-fleet";
 import { fetchFleet, fetchPreflight } from "./lib/api-client";
 import { AgentCard } from "./components/AgentCard";
 import { LoadingSkeleton, ConnectKeyState } from "./components/LoadingSkeleton";
+import ErrorBanner from "./components/ErrorBanner";
 import { getApiKey, getApiUrl } from "./lib/storage";
 
 function _isRealAgentId(id: string): boolean {
@@ -26,6 +27,7 @@ export default function DashboardHome() {
   const [mounted, setMounted] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [auditError, setAuditError] = useState("");
+  const [apiError, setApiError] = useState<string | null>(null);
 
   // Fleet Intelligence
   interface Insight {
@@ -116,7 +118,7 @@ export default function DashboardHome() {
             }
           }
         }
-      } catch (e) { setAuditError("Could not load fleet from audit log"); }
+      } catch (e) { setAuditError("Could not load fleet from audit log"); setApiError("Failed to load fleet data"); }
 
       // Step 2: Fallback to DEMO_FLEET
       try {
@@ -318,6 +320,8 @@ export default function DashboardHome() {
     <div>
       <h1 className="text-2xl font-bold mb-1">Decision Readiness Dashboard</h1>
       <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
+
+      {apiError && <ErrorBanner message={apiError} onRetry={() => window.location.reload()} />}
 
       {/* #27: Demo data banner */}
       {agents.length === 0 && !loading && (

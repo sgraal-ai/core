@@ -471,13 +471,21 @@ app = FastAPI(
 # #54: CORS allowed origins. localhost is included ONLY in dev/test mode —
 # in production (ENV=production), it is stripped to prevent credential-theft
 # via XSS from any local dev server running on port 3000.
+@app.get("/docs/openapi.json", include_in_schema=False)
+def openapi_json_export():
+    """Public endpoint serving the auto-generated OpenAPI spec."""
+    return app.openapi()
+
+
+# #22 fix: localhost CORS only in explicit "development" mode. Staging,
+# preview, test, and production environments all exclude localhost.
 _CORS_DEFAULT = "https://sgraal.com,https://www.sgraal.com,https://app.sgraal.com,https://api.sgraal.com"
 _ENV = os.getenv("ENV", "").lower()
-if _ENV != "production":
+if _ENV == "development":
     _CORS_DEFAULT += ",http://localhost:3000"
 _ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", _CORS_DEFAULT).split(",")
-# Even if ALLOWED_ORIGINS is explicitly set, strip localhost in production
-if _ENV == "production":
+# Strip localhost in any non-development environment
+if _ENV != "development":
     _ALLOWED_ORIGINS = [o for o in _ALLOWED_ORIGINS if "localhost" not in o and "127.0.0.1" not in o]
 app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
@@ -778,18 +786,29 @@ async def _scheduler_stripe_retry():
 
 def _safe_key_hash(key_record: dict) -> str:
     """Return a tenant-scoped key_hash. Never returns 'default' or empty string.
-    Demo keys get 'demo'. Test keys get a deterministic hash derived from their customer_id.
-    Production keys return their actual key_hash."""
+
+    #15: Caches the result on key_record["_cached_hash"] so subsequent calls
+    within the same request don't recompute SHA-256.
+    """
+    # Fast path: cached from a previous call in the same request
+    cached = key_record.get("_cached_hash")
+    if cached:
+        return cached
+
     # Demo keys: always return "demo" bucket
     if key_record.get("demo"):
+        key_record["_cached_hash"] = "demo"
         return "demo"
     kh = key_record.get("key_hash")
     if kh and kh != "default":
+        key_record["_cached_hash"] = kh
         return kh
     # Fallback: derive from customer_id for test keys
     cid = key_record.get("customer_id", "")
     if cid:
-        return f"test_{hashlib.sha256(cid.encode()).hexdigest()[:16]}"
+        result = f"test_{hashlib.sha256(cid.encode()).hexdigest()[:16]}"
+        key_record["_cached_hash"] = result
+        return result
     raise HTTPException(status_code=403, detail="API key has no valid key_hash — cannot identify tenant")
 
 
@@ -1949,12 +1968,22 @@ try:
     except Exception as _pe:
         logger.warning("Failed to load example plugins: %s", _pe)
     # Optionally load plugins from an operator-supplied directory
+    # #21: validate the path to prevent arbitrary filesystem traversal
     _custom_plugin_dir = os.getenv("SGRAAL_PLUGIN_DIR", "")
+    _FORBIDDEN_PLUGIN_DIRS = {"/", "/etc", "/usr", "/bin", "/sbin", "/sys", "/proc", "/dev", "/var"}
     if _custom_plugin_dir:
-        try:
-            _plugin_loader.load_from_directory(_custom_plugin_dir, activate=False)
-        except Exception as _pe:
-            logger.warning("Failed to load plugins from %s: %s", _custom_plugin_dir, _pe)
+        _pd_resolved = os.path.realpath(_custom_plugin_dir)
+        if not os.path.isabs(_pd_resolved):
+            logger.warning("SGRAAL_PLUGIN_DIR=%s is not absolute — skipping", _custom_plugin_dir)
+        elif _pd_resolved in _FORBIDDEN_PLUGIN_DIRS:
+            logger.warning("SGRAAL_PLUGIN_DIR=%s points to a forbidden system directory — skipping", _pd_resolved)
+        elif not os.path.isdir(_pd_resolved):
+            logger.warning("SGRAAL_PLUGIN_DIR=%s does not exist or is not a directory — skipping", _pd_resolved)
+        else:
+            try:
+                _plugin_loader.load_from_directory(_pd_resolved, activate=False)
+            except Exception as _pe:
+                logger.warning("Failed to load plugins from %s: %s", _pd_resolved, _pe)
 except Exception as _pe:
     logger.warning("Plugin system unavailable: %s", _pe)
     _plugin_registry = None  # type: ignore
@@ -11420,7 +11449,7 @@ _thread_manager = ThreadManager()
 # Writes go to both in-memory and Redis. Reads check in-memory first, then Redis.
 _outcomes: dict[str, dict] = {}
 _outcomes_lock = threading.Lock()
-_OUTCOME_TTL = 3600  # 1 hour in Redis
+_OUTCOME_TTL = 86400  # 24 hours in Redis (#18 fix: survive process restarts)
 
 
 def _outcome_set(outcome_id: str, data: dict):
@@ -12286,9 +12315,21 @@ def preflight_batch(req: BatchRequest, key_record: dict = Depends(verify_api_key
     }
 
 
+_KNOWN_COMPONENTS = {
+    "s_freshness", "s_drift", "s_provenance", "s_propagation",
+    "r_recall", "r_encode", "s_interference", "s_recovery",
+    "r_belief", "s_relevance",
+}
+
+
 @app.post("/v1/outcome")
 def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    # #45: validate component_attribution entries — warn on unknown, don't reject
+    if req.failure_components:
+        _unknown = [c for c in req.failure_components if c not in _KNOWN_COMPONENTS]
+        if _unknown:
+            logger.warning("outcome %s: unknown component_attribution entries: %s", req.outcome_id, _unknown[:5])
     with _outcomes_lock:
         outcome = _outcome_get(req.outcome_id)
         if not outcome:
@@ -16604,14 +16645,18 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             if _slope > 0.01:
                 _kalman_days = (_block_threshold - omega_out) / _slope
                 _dub_sources.append(("Kalman", max(0.0, min(999.0, _kalman_days)), 0.3))
-            elif _slope <= 0:
-                _dub_no_block_votes.append("Kalman(downtrend)")
+            elif _slope <= 0.01:
+                # Issue J fix: slopes in (0, 0.01] are too small to predict
+                # a meaningful time-to-block. Treat as a no-block vote alongside
+                # flat/downtrend signals.
+                _dub_no_block_votes.append("Kalman(flat_or_downtrend)")
 
         # BOCPD adjustment: multiplicative shrink if regime change imminent.
         _bocpd_factor = 1.0
         _bocpd_fired = False
         _td = response.get("trend_detection", {})
-        _bocpd_data = _td.get("bocpd") if isinstance(_td, dict) else None
+        # Issue L: _td is always a dict (from .get("trend_detection", {}))
+        _bocpd_data = _td.get("bocpd")
         # Issue K fix: a key can exist with None value — .get(..., 0) returns None then,
         # and `None > 0.7` raises TypeError in Python 3. Coerce to float defensively.
         if _bocpd_data:
@@ -16641,7 +16686,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                     _dub_std = math.sqrt(max(_dub_var, 0.0))
                     _dub_ci_low = round(max(0.0, min(999.0, _dub_final - 1.96 * _dub_std)), 1)
                     _dub_ci_high = round(max(0.0, min(999.0, _dub_final + 1.96 * _dub_std)), 1)
-                    _dub_conf = round(max(0.0, min(1.0, 1.0 - _dub_std / max(_dub_mean, 1.0))), 2)
+                    # Bug B fix: use _dub_final (the reported point estimate) as denominator,
+                    # not _dub_mean (simple mean). Currently equal for equal weights, but
+                    # _dub_final is the value the consumer sees.
+                    _dub_conf = round(max(0.0, min(1.0, 1.0 - _dub_std / max(float(_dub_final), 1.0))), 2)
                     response["days_until_block_ci"] = {"low": _dub_ci_low, "high": _dub_ci_high}
                     response["days_until_block_ci_method"] = (
                         "point_estimate ± 1.96·std across contributing models"
@@ -16657,6 +16705,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                     response["days_until_block_contributing_models"] = _contributing
                 response["days_until_block"] = _dub_final
                 response["days_until_block_confidence"] = _dub_conf
+                # Bug C fix: explicit availability flag so consumers can distinguish
+                # "confidence not computed" (single model) from "confidence is zero"
+                response["days_until_block_confidence_available"] = _dub_conf is not None
                 # Dissent flag: when at least one real model predicts a block time AND
                 # at least one other model says "no block imminent", the point estimate
                 # is disputed. Callers can decide how to act on this.
@@ -16712,9 +16763,25 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # Combines: r_belief + s_drift + sheaf h1_rank
     # -----------------------------------------------------------------------
     _cb = response.get("component_breakdown", {})
-    _cc_belief = _cb.get("r_belief", 50.0)  # 0-100 (higher = more belief divergence = less trust)
-    _cc_drift = _cb.get("s_drift", 0.0)
-    _cc_h1 = response.get("consistency_analysis", {}).get("h1_rank", 0) if isinstance(response.get("consistency_analysis"), dict) else 0
+    # Issue 10: safe coercion — handle None values from scoring modules
+    _cc_belief_raw = _cb.get("r_belief")
+    _cc_belief_is_default = _cc_belief_raw is None
+    try:
+        _cc_belief = float(_cc_belief_raw) if _cc_belief_raw is not None else 50.0
+    except (TypeError, ValueError):
+        _cc_belief = 50.0
+        _cc_belief_is_default = True
+    try:
+        _cc_drift = float(_cb.get("s_drift") or 0)
+    except (TypeError, ValueError):
+        _cc_drift = 0.0
+    _ca = response.get("consistency_analysis")
+    _cc_h1 = 0
+    if isinstance(_ca, dict):
+        try:
+            _cc_h1 = int(_ca.get("h1_rank") or 0)
+        except (TypeError, ValueError):
+            _cc_h1 = 0
     # r_belief in component_breakdown is (1 - belief) * 100, so low value = high belief
     _agent_trusts = _cc_belief < 30  # belief score < 30 means agent trusts itself (r_belief > 0.7)
     _agent_doubts = _cc_belief > 70  # belief score > 70 means agent doubts itself (r_belief < 0.3)
@@ -16732,10 +16799,16 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _cal_score = 0.5
 
     # #456: Human-readable explanation using actual component values
+    # Issue 8: clarify that r_belief is a risk score (inverted)
+    # Issue 9: mark defaulted values as "(estimated)"
+    _rb_label = f"{round(_cc_belief, 1)}"
+    if _cc_belief_is_default:
+        _rb_label += " (estimated)"
+    _rb_label += " — risk score, inverted: lower = more trust"
     if _cal_state == "OVERCONFIDENT":
         _cal_explanation = (
             f"Agent trusts drifted memories that appear internally consistent "
-            f"(r_belief score={round(_cc_belief, 1)}, s_drift={round(_cc_drift, 1)}, H¹={_cc_h1}). "
+            f"(r_belief={_rb_label}, s_drift={round(_cc_drift, 1)}, H¹={_cc_h1}). "
             f"Internal consistency is masking real memory decay."
         )
     elif _cal_state == "UNDERCONFIDENT":
@@ -16856,11 +16929,16 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # Apply golden ratio diminishing returns weighting (#625)
     _PHI = 1.61803
     _rp_count = len(_rp_list)
+    # Bug F fix: dense ranking — entries with identical heal_roi share the same rank
+    _current_rank = 0
+    _prev_roi = None
     for _phi_i, _phi_rp in enumerate(_rp_list):
         _phi_rp["priority_weight"] = round(1.0 / (_PHI ** _phi_i), 4)
-        # #458: explicit rank + roi_percentile per repair plan entry
-        _phi_rp["rank"] = _phi_i + 1
-        # Percentile = fraction of entries this one beats (out of peers with lower ROI)
+        _this_roi = _phi_rp.get("heal_roi", 0)
+        if _this_roi != _prev_roi:
+            _current_rank = _phi_i + 1
+            _prev_roi = _this_roi
+        _phi_rp["rank"] = _current_rank
         if _rp_count > 1:
             _phi_rp["roi_percentile"] = round((_rp_count - _phi_i - 1) / (_rp_count - 1) * 100.0, 1)
         else:
@@ -16902,6 +16980,11 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 f"Top-ranked item is a {_top_action} notification; "
                 f"the highest-ROI heal is rank {_rh_rank}: {_rh_action} on entry {_rh_eid}."
             )
+        elif all(item.get("heal_roi", 0) == 0 for item in _rp_list):
+            # Issue 6 fix: all ROI == 0 — no meaningful prioritization
+            response["repair_plan_summary"] = (
+                "No prioritized healing — all entries equally low-value (heal_roi=0 for all)."
+            )
         elif _top_improvement and _top_improvement > 0:
             response["repair_plan_summary"] = (
                 f"Heal entry {_top_eid} first: {_top_action} reduces omega by "
@@ -16926,19 +17009,21 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # absence in the summary string.
     try:
         if _ka_mean is not None and entries:
+            # Issue 7: suppress "(±0.0 days)" when std is negligible
+            _ka_std_clause = f" (±{_ka_std} days)" if (_ka_std or 0) >= 0.1 else ""
             _trusted = [e for e in entries if float(getattr(e, "source_trust", 0) or 0) >= 0.5]
             if _trusted:
                 _oldest_trusted_val = max(e.timestamp_age_days for e in _trusted)
                 _oldest_trusted_rounded = round(float(_oldest_trusted_val), 1)
                 _ka_summary = (
-                    f"Your agent's memory is effectively {_ka_mean} days old "
-                    f"(±{_ka_std} days). Oldest trusted entry: {_oldest_trusted_rounded} days."
+                    f"Your agent's memory is effectively {_ka_mean} days old"
+                    f"{_ka_std_clause}. Oldest trusted entry: {_oldest_trusted_rounded} days."
                 )
                 response["knowledge_age_oldest_trusted_days"] = _oldest_trusted_rounded
             else:
                 _ka_summary = (
-                    f"Your agent's memory is effectively {_ka_mean} days old "
-                    f"(±{_ka_std} days). No trusted entries (all source_trust < 0.5)."
+                    f"Your agent's memory is effectively {_ka_mean} days old"
+                    f"{_ka_std_clause}. No trusted entries (all source_trust < 0.5)."
                 )
                 response["knowledge_age_oldest_trusted_days"] = None
             response["knowledge_age_summary"] = _ka_summary

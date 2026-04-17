@@ -9,6 +9,9 @@ COPY tests/ tests/
 COPY docs/ docs/
 COPY api/ api/
 
+RUN adduser --disabled-password --gecos '' --uid 1000 sgraal
+USER sgraal
+
 ENV PYTHONPATH=/app
 EXPOSE 8000
 

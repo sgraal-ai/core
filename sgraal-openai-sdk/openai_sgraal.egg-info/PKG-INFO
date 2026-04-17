@@ -1,0 +1,36 @@
+Metadata-Version: 2.4
+Name: openai-sgraal
+Version: 0.1.0
+Summary: Sgraal memory governance for OpenAI Agents SDK
+Author-email: Sgraal AI <hello@sgraal.com>
+License: Apache-2.0
+Project-URL: Homepage, https://sgraal.com
+Project-URL: Repository, https://github.com/sgraal-ai/core
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests>=2.28.0
+Requires-Dist: sgraal>=0.2.0
+Requires-Dist: openai>=1.0.0
+Dynamic: license-file
+
+# openai-sgraal
+
+Sgraal memory governance for OpenAI Agents SDK. Validates message context before completion.
+
+```bash
+pip install openai-sgraal
+```
+
+```python
+from openai_sgraal import OpenAISgraalClient
+
+client = OpenAISgraalClient(sgraal_api_key="sg_demo_playground")
+result = client.safe_complete(
+    messages=[{"role": "user", "content": "What is my account balance?"}],
+    model="gpt-4o", domain="fintech"
+)
+```
+
+## License
+Apache 2.0

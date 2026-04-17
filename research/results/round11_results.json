@@ -1,0 +1,969 @@
+{
+  "round": 11,
+  "total_cases": 120,
+  "strict": {
+    "block_count": 115,
+    "tp": 115,
+    "fp": 0,
+    "fn": 5,
+    "precision": 1.0,
+    "recall": 0.9583,
+    "f1": 0.9787
+  },
+  "lenient": {
+    "non_use_count": 115,
+    "tp": 115,
+    "fp": 0,
+    "fn": 5,
+    "precision": 1.0,
+    "recall": 0.9583,
+    "f1": 0.9787
+  },
+  "cases": [
+    {
+      "case_id": "r11_compound_001",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_002",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_003",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_004",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_005",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_006",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_007",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_008",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_009",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_010",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_011",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_012",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_013",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_014",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_015",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_016",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_017",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_018",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_019",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_020",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_021",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_022",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_023",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_024",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_025",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_026",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_027",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_028",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_029",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_030",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_031",
+      "status": "error",
+      "error": "math domain error"
+    },
+    {
+      "case_id": "r11_compound_032",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_033",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_034",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_035",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_036",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_037",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_038",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_039",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_040",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_041",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_042",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_043",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_044",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_045",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_046",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_047",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_048",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_049",
+      "status": "error",
+      "error": "math domain error"
+    },
+    {
+      "case_id": "r11_compound_050",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_051",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_052",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_053",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_054",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_055",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_056",
+      "status": "error",
+      "error": "math domain error"
+    },
+    {
+      "case_id": "r11_compound_057",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_058",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_059",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_060",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_061",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_062",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_063",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_064",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_065",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_066",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_067",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_068",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_069",
+      "status": "error",
+      "error": "math domain error"
+    },
+    {
+      "case_id": "r11_compound_070",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_071",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_072",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_073",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_074",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_075",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_076",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_077",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_078",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_079",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_080",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_081",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_082",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_083",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_084",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_085",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_086",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_087",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_088",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_089",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_090",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_091",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_092",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_093",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_094",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_095",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_096",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_097",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_098",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_099",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_100",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_101",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_102",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_103",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_104",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_105",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_106",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_107",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_108",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_109",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_110",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_111",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_112",
+      "status": "error",
+      "error": "math domain error"
+    },
+    {
+      "case_id": "r11_compound_113",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_114",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_115",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_116",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_117",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_118",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_119",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    },
+    {
+      "case_id": "r11_compound_120",
+      "expected": "BLOCK",
+      "predicted": "BLOCK",
+      "omega": 100.0,
+      "strict_match": true,
+      "lenient_match": true
+    }
+  ]
+}
