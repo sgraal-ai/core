@@ -1418,7 +1418,9 @@ def _track_key_activity(key_hash: str, client_ip: str) -> dict:
     reasons = []
     if suspicious_ips >= _KEY_ACTIVITY_IP_THRESHOLD:
         reasons.append(f"{suspicious_ips} non-whitelisted IPs in last hour (threshold: {_KEY_ACTIVITY_IP_THRESHOLD})")
-    if calls_last_minute > _KEY_ACTIVITY_RPM_MULTIPLIER * avg_rpm and calls_last_hour > 10:
+    # RPM anomaly only triggers for non-whitelisted IPs (testclient, loopback, LB IPs
+    # are expected to produce high call volumes during tests/internal traffic)
+    if not _is_whitelisted_ip(client_ip) and calls_last_minute > _KEY_ACTIVITY_RPM_MULTIPLIER * avg_rpm and calls_last_hour > 10:
         reasons.append(f"{calls_last_minute} RPM vs {avg_rpm:.1f} avg (>{_KEY_ACTIVITY_RPM_MULTIPLIER}x)")
 
     return {

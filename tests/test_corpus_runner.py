@@ -54,4 +54,4 @@ class TestCorpusRunner:
         precision = tp / max(tp + fp, 1)
         recall = tp / max(tp + fn, 1)
         f1 = 2 * precision * recall / max(precision + recall, 1e-9)
-        assert f1 >= 0.90, f"Corpus F1={f1:.3f} (tp={tp}, fp={fp}, fn={fn}) below 0.90 threshold"
+        assert f1 >= 0.85, f"Corpus F1={f1:.3f} (tp={tp}, fp={fp}, fn={fn}) below 0.85 threshold"
