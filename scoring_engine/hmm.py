@@ -139,6 +139,14 @@ def _baum_welch_np(
     x = _np.ascontiguousarray(_np.asarray(history, dtype=_np.float64))
     T = x.shape[0]
     K = N_STATES
+    # #12 safety: the forward/backward loops below unroll for K=3 (indices 0,1,2
+    # hardcoded as scalar variables a00..a22). If N_STATES is changed without
+    # rewriting these loops, the unrolled code silently produces wrong scores.
+    assert K == 3, (
+        f"HMM fast path requires exactly 3 states (STABLE/DEGRADING/CRITICAL), "
+        f"got N_STATES={K}. The pure-Python forward/backward passes unroll K=3 "
+        f"into scalar variables; any other K needs the loops rewritten."
+    )
 
     pi_arr = _np.asarray(pi, dtype=_np.float64)
     A_arr = _np.asarray(A, dtype=_np.float64)
@@ -558,6 +566,7 @@ def _compute_hmm_regime_cached(
 
         T = len(full_history)
         K = N_STATES
+        assert K == 3, f"HMM post-BW forward pass unrolled for K=3, got N_STATES={K}"
 
         # Recompute log_alpha with the FINAL (reordered) parameters to get the posterior
         # with the same semantics as before. We cannot reuse the B-W log_alpha directly
