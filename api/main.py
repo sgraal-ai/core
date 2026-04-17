@@ -667,17 +667,46 @@ def _validate_webhook_url(url: str) -> str:
 
 
 def _validate_required_secrets():
-    """Validate that all required cryptographic secrets are set. Called at startup."""
+    """Validate that all required cryptographic secrets are set and strong enough.
+
+    Called at startup. Checks:
+    1. Presence: each secret must be set (non-empty).
+    2. Strength: each secret must be at least 32 characters. Shorter values
+       suggest auto-generated placeholders, cut-paste errors, or weak secrets
+       like "changeme".
+
+    These secrets MUST persist across deploys. If Railway or any CI system
+    rotates them on redeploy, every existing W3C Verifiable Credential,
+    Memory Passport, and email unsubscribe token becomes cryptographically
+    invalid. See KEYS.md for the full explanation.
+    """
+    _MIN_SECRET_LEN = 32
+    _SECRETS = {
+        "ATTESTATION_SECRET": "HMAC proof hashes for proof-of-decision attestations and W3C VCs",
+        "PASSPORT_SIGNING_KEY_V1": "Memory Passport signing — issued passports are verified against this key",
+        "UNSUB_HMAC_SECRET": "Email unsubscribe token HMAC — tokens become invalid if this key changes",
+    }
     missing = []
-    if not os.getenv("ATTESTATION_SECRET"):
-        missing.append("ATTESTATION_SECRET")
-    if not os.getenv("PASSPORT_SIGNING_KEY_V1"):
-        missing.append("PASSPORT_SIGNING_KEY_V1")
-    if not os.getenv("UNSUB_HMAC_SECRET"):
-        missing.append("UNSUB_HMAC_SECRET")
+    weak = []
+    for name, purpose in _SECRETS.items():
+        val = os.getenv(name, "")
+        if not val:
+            missing.append(name)
+        elif len(val) < _MIN_SECRET_LEN:
+            weak.append(f"{name} ({len(val)} chars, need >={_MIN_SECRET_LEN})")
     if missing:
-        logger.warning("Missing required secrets: %s — using insecure defaults. "
-                       "Set these environment variables in production.", ", ".join(missing))
+        logger.warning(
+            "Missing required secrets: %s — using insecure defaults. "
+            "Set these environment variables in production. See KEYS.md for details.",
+            ", ".join(missing),
+        )
+    if weak:
+        logger.warning(
+            "Weak secrets detected (shorter than %d characters): %s. "
+            "Short secrets may indicate auto-generated placeholders or cut-paste errors. "
+            "These keys must NEVER be rotated without migration — see KEYS.md.",
+            _MIN_SECRET_LEN, "; ".join(weak),
+        )
 
 
 # Supabase retry queue for compliance-critical writes
