@@ -1,7 +1,0 @@
-replicaCount: 1
-image:
-  repository: sgraal/api
-  tag: latest
-service:
-  type: ClusterIP
-  port: 8080

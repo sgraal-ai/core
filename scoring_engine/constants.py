@@ -18,3 +18,17 @@ class DecisionAction(str, Enum):
     WARN = "WARN"
     ASK_USER = "ASK_USER"
     BLOCK = "BLOCK"
+
+
+# Thermodynamic constants
+LANDAUER_CONSTANT_JOULES_PER_BIT = 2.87e-21  # kT·ln(2) at T=300K
+LANDAUER_TEMPERATURE_KELVIN = 300
+LANDAUER_BITS_PER_ENTRY = 2304  # 256-bit id hash + 2048-bit content proxy
+
+# Phase constant
+KAPPA_MEM_PHASE_CONSTANT = 0.033
+
+# Default decision thresholds
+DEFAULT_WARN_THRESHOLD = 25
+DEFAULT_ASK_USER_THRESHOLD = 45
+DEFAULT_BLOCK_THRESHOLD = 70

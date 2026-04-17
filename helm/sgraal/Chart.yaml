@@ -1,5 +1,0 @@
-apiVersion: v2
-name: sgraal
-description: Sgraal Memory Governance Protocol
-version: 0.1.0
-appVersion: "1.0.0"

@@ -4,7 +4,15 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import RedirectResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import Any, Literal, Optional
-from scoring_engine.constants import DecisionAction  # #4: canonical decision enum
+from scoring_engine.constants import (  # #4: canonical decision enum
+    DecisionAction,
+    LANDAUER_CONSTANT_JOULES_PER_BIT,
+    LANDAUER_TEMPERATURE_KELVIN,
+    LANDAUER_BITS_PER_ENTRY,
+    DEFAULT_WARN_THRESHOLD,
+    DEFAULT_ASK_USER_THRESHOLD,
+    DEFAULT_BLOCK_THRESHOLD,
+)
 import sys, os, math, re, logging
 import secrets
 import hashlib
@@ -691,9 +699,39 @@ def _run_periodic_cleanup():
         logger.info("Periodic cleanup: evicted %d expired entries across %d dicts", total_evicted, len(_managed))
 
 
-# Stripe billing retry queue (#375)
+# Stripe billing retry queue (#375) with Redis persistence (#9 from known issues)
 _stripe_retry_queue: list[dict] = []
 _stripe_retry_lock = threading.Lock()
+_STRIPE_RETRY_REDIS_KEY = "sgraal:stripe_retry_queue"
+
+
+def _stripe_retry_load_from_redis() -> None:
+    """Load any persisted retry queue items from Redis on startup."""
+    global _stripe_retry_queue
+    try:
+        from api.redis_state import redis_get
+        stored = redis_get(_STRIPE_RETRY_REDIS_KEY)
+        if isinstance(stored, list) and stored:
+            with _stripe_retry_lock:
+                _stripe_retry_queue = stored
+            logger.info("Stripe retry queue loaded from Redis: %d items", len(stored))
+    except Exception:
+        pass  # Redis unavailable — start with empty queue
+
+
+def _stripe_retry_sync_to_redis() -> None:
+    """Persist current retry queue to Redis (best-effort)."""
+    try:
+        from api.redis_state import redis_set
+        with _stripe_retry_lock:
+            snapshot = list(_stripe_retry_queue)
+        redis_set(_STRIPE_RETRY_REDIS_KEY, snapshot, ttl=0)  # permanent
+    except Exception:
+        pass  # Redis unavailable — queue stays in memory only
+
+
+# Load on module init (will be empty if Redis has nothing or is unavailable)
+_stripe_retry_load_from_redis()
 
 
 async def _scheduler_stripe_retry():
@@ -706,6 +744,7 @@ async def _scheduler_stripe_retry():
             with _stripe_retry_lock:
                 _to_retry = list(_stripe_retry_queue)
                 _stripe_retry_queue.clear()
+            _stripe_retry_sync_to_redis()  # persist cleared state
 
             _permanent_failures = 0
             _retried = 0
@@ -724,6 +763,7 @@ async def _scheduler_stripe_retry():
                     item["retry_count"] = item.get("retry_count", 0) + 1
                     with _stripe_retry_lock:
                         _stripe_retry_queue.append(item)
+                    _stripe_retry_sync_to_redis()  # persist re-queued item
 
             if _retried or _permanent_failures:
                 logger.info("Stripe retry: %d retried, %d permanent failures, %d remaining",
@@ -834,6 +874,13 @@ def _validate_required_secrets():
             "These keys must NEVER be rotated without migration — see KEYS.md.",
             _MIN_SECRET_LEN, "; ".join(weak),
         )
+        # #23: In production, weak secrets are fatal — refuse to start.
+        if os.getenv("ENV", "").lower() == "production":
+            raise RuntimeError(
+                f"FATAL: weak cryptographic secrets in production — {'; '.join(weak)}. "
+                f"All secrets must be at least {_MIN_SECRET_LEN} characters. "
+                f"Generate with: openssl rand -hex 32. See KEYS.md."
+            )
 
 
 # Supabase retry queue for compliance-critical writes
@@ -842,6 +889,18 @@ _supabase_retry_lock = threading.Lock()
 
 # Validate required secrets at startup (warning only — not fatal for dev/test)
 _validate_required_secrets()
+
+# #20: Warn if SSRF protection is weakened in production
+if (
+    os.getenv("ENV", "").lower() == "production"
+    and os.getenv("SGRAAL_SKIP_DNS_CHECK", "").lower() in ("1", "true", "yes")
+):
+    logger.warning(
+        "SGRAAL_SKIP_DNS_CHECK is enabled in production — webhook URL SSRF "
+        "protection is weakened. Webhooks can target internal/private IPs. "
+        "Unset this variable unless you have a specific reason (e.g., "
+        "internal-only webhook endpoints behind a VPN). See KEYS.md."
+    )
 
 # Startup feature flags
 logger.info("Signal vector logging: %s", "ENABLED" if _SIGNAL_LOGGING_ENABLED else "DISABLED (set SGRAAL_SIGNAL_LOGGING=true to enable)")
@@ -1370,32 +1429,63 @@ def security_key_activity(request: Request, key_record: dict = Depends(verify_ap
 
 @app.get("/health")
 def health():
-    # #128b Redis health monitoring
-    redis_health = {"status": "down", "latency_ms": None, "keys_count": 0}
+    """Comprehensive health check covering all external dependencies.
+
+    Status logic:
+      - all ok → "healthy"
+      - any non-critical error (Supabase, Stripe) → "degraded"
+      - Redis error → "unhealthy" (Redis is in the critical scoring path)
+    """
+    # Redis check (critical path)
+    redis_status = "ok"
+    redis_latency = None
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
             _rh_start = _time.monotonic()
             _rh_r = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/DBSIZE",
                 headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=3)
-            _rh_lat = round((_time.monotonic() - _rh_start) * 1000, 2)
+            redis_latency = round((_time.monotonic() - _rh_start) * 1000, 2)
             if _rh_r.ok:
-                redis_health = {
-                    "status": "degraded" if _rh_lat > 100 else "healthy",
-                    "latency_ms": _rh_lat,
-                    "keys_count": _rh_r.json().get("result", 0),
-                }
+                redis_status = "degraded" if redis_latency > 100 else "ok"
             else:
-                redis_health = {"status": "down", "latency_ms": _rh_lat, "keys_count": 0}
+                redis_status = "error"
         except Exception:
-            redis_health = {"status": "down", "latency_ms": None, "keys_count": 0}
-    return {"status": "ok", "port": os.environ.get("PORT", "not set"), "redis": redis_health,
-            "ws_streaming_available": True,
-            "truth_subscription_scheduler": "running",
-            "last_truth_check": _scheduler_status.get("truth_subscription", "not_run_yet"),
-            "sleeper_scan_scheduler": "running",
-            "last_sleeper_scan": _scheduler_status.get("sleeper_scan", "not_run_yet"),
-            "auto_snapshot_scheduler": "running",
-            "last_auto_snapshot": _scheduler_status.get("daily_snapshot", "not_run_yet")}
+            redis_status = "error"
+    else:
+        redis_status = "not_configured"
+
+    # Supabase check (important but non-critical)
+    supabase_status = "not_configured"
+    _sb = supabase_service_client or supabase_client
+    if _sb:
+        try:
+            _sb_start = _time.monotonic()
+            _sb.table("audit_log").select("id").limit(1).execute()
+            _sb_lat = round((_time.monotonic() - _sb_start) * 1000, 2)
+            supabase_status = "ok" if _sb_lat < 2000 else "timeout"
+        except Exception:
+            supabase_status = "error"
+
+    # Stripe check (config only — no API call)
+    stripe_status = "configured" if os.getenv("STRIPE_SECRET_KEY") else "missing"
+
+    # Overall status
+    if redis_status == "error":
+        overall = "unhealthy"
+    elif supabase_status in ("error", "timeout"):
+        overall = "degraded"
+    else:
+        overall = "healthy"
+
+    return {
+        "status": overall,
+        "redis": redis_status,
+        "redis_latency_ms": redis_latency,
+        "supabase": supabase_status,
+        "stripe": stripe_status,
+        "port": os.environ.get("PORT", "not set"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.get("/v1/scheduler/status")
@@ -1581,7 +1671,7 @@ def destroy_entries(req: DestroyRequest, key_record: dict = Depends(verify_api_k
     # Step 1+2: Identify & filter — compute content-based bit count for Landauer
     # Landauer's principle: E_min = kT·ln(2) per bit erased
     # At T=300K: kT·ln(2) ≈ 2.87e-21 J per bit
-    _LANDAUER_PER_BIT = 2.87e-21  # Joules per bit at 300K
+    _LANDAUER_PER_BIT = LANDAUER_CONSTANT_JOULES_PER_BIT
     _total_bits = 0
     for eid in req.entry_ids:
         # Estimate bits per entry: 256 bits (SHA-256 id) + 2048 bits content proxy (256 bytes)
@@ -6345,16 +6435,16 @@ def config_get_thresholds(domain: str = "general", key_record: dict = Depends(ve
         return {
             "domain": domain,
             "thresholds": {
-                "warn": stored.get("warn", 25),
-                "ask_user": stored.get("ask_user", 45),
-                "block": stored.get("block", 70),
+                "warn": stored.get("warn", DEFAULT_WARN_THRESHOLD),
+                "ask_user": stored.get("ask_user", DEFAULT_ASK_USER_THRESHOLD),
+                "block": stored.get("block", DEFAULT_BLOCK_THRESHOLD),
             },
             "source": "custom",
         }
     # Defaults
     return {
         "domain": domain,
-        "thresholds": {"warn": 25, "ask_user": 45, "block": 70},
+        "thresholds": {"warn": DEFAULT_WARN_THRESHOLD, "ask_user": DEFAULT_ASK_USER_THRESHOLD, "block": DEFAULT_BLOCK_THRESHOLD},
         "source": "default",
     }
 
@@ -6362,9 +6452,9 @@ def config_get_thresholds(domain: str = "general", key_record: dict = Depends(ve
 @app.post("/v1/thresholds/apply")
 def apply_thresholds(req: dict, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    warn = req.get("warn", 25)
-    ask = req.get("ask_user", 45)
-    block = req.get("block", 70)
+    warn = req.get("warn", DEFAULT_WARN_THRESHOLD)
+    ask = req.get("ask_user", DEFAULT_ASK_USER_THRESHOLD)
+    block = req.get("block", DEFAULT_BLOCK_THRESHOLD)
     domain = req.get("domain", "general")
     # Safety bounds
     if warn < 10 or warn > 40:
@@ -13055,6 +13145,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                         "retry_count": 0,
                         "failed_at": _time.time(),
                     })
+            _stripe_retry_sync_to_redis()  # persist across deploys
 
     # Use service_client (bypasses RLS) with anon fallback; non-critical write
     _ledger_sb = supabase_service_client or supabase_client
@@ -15371,10 +15462,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # hooks, detection-layer overrides, Issue I reconciliation). See below.
     _is_dry_run = req.dry_run or key_record.get("demo", False)
 
-    # Webhook dispatch (skip in dry_run)
+    # Webhook dispatch — deferred to end of preflight (after _finalize_decision)
+    # alongside audit_log, so it uses the FINAL decision. See below.
     entry_ids = [e.id for e in entries]
-    if not _is_dry_run:
-        _dispatch_webhooks(result.recommended_action, request_id, omega_out, entry_ids)
 
     # Metrics + tracing
     _duration = _time.monotonic() - _t_start
@@ -15596,9 +15686,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _skip_adjusted = omega_out < 20 and req.action_type in ("reversible", "informational")
         if abs(_omega_delta) > 5.0 and not _skip_adjusted:
             response["decision_based_on"] = "omega_adjusted"
-            _t_warn = req.thresholds.get("warn", 25) if req.thresholds else 25
-            _t_ask = req.thresholds.get("ask_user", 45) if req.thresholds else 45
-            _t_block = req.thresholds.get("block", 70) if req.thresholds else 70
+            _t_warn = req.thresholds.get("warn", DEFAULT_WARN_THRESHOLD) if req.thresholds else DEFAULT_WARN_THRESHOLD
+            _t_ask = req.thresholds.get("ask_user", DEFAULT_ASK_USER_THRESHOLD) if req.thresholds else DEFAULT_ASK_USER_THRESHOLD
+            _t_block = req.thresholds.get("block", DEFAULT_BLOCK_THRESHOLD) if req.thresholds else DEFAULT_BLOCK_THRESHOLD
             if _omega_adjusted < _t_warn: _adj_action = "USE_MEMORY"
             elif _omega_adjusted < _t_ask: _adj_action = "WARN"
             elif _omega_adjusted < _t_block: _adj_action = "ASK_USER"
@@ -16466,7 +16556,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # NEW FIELD 1: days_until_block — weighted multi-model time-to-BLOCK estimate
     # Combines: OU half-life, Cox survival, Kalman forecast, BOCPD changepoint
     # -----------------------------------------------------------------------
-    _block_threshold = req.thresholds.get("block", 70) if req.thresholds else 70
+    _block_threshold = req.thresholds.get("block", DEFAULT_BLOCK_THRESHOLD) if req.thresholds else DEFAULT_BLOCK_THRESHOLD
     if omega_out >= _block_threshold:
         # Already-blocked path: populate ALL days_until_block_* fields for schema consistency
         response["days_until_block"] = 0.0
@@ -17346,8 +17436,8 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # Every preflight call erases information: entries processed × bits per entry.
     # E_min = kT·ln(2) per bit at T=300K → 2.87e-21 J per bit.
     try:
-        _td_LANDAUER_PER_BIT = 2.87e-21  # joules/bit at 300K
-        _td_bits_per_entry = 2304  # 256-bit id + 2048-bit content proxy
+        _td_LANDAUER_PER_BIT = LANDAUER_CONSTANT_JOULES_PER_BIT
+        _td_bits_per_entry = LANDAUER_BITS_PER_ENTRY
         _td_bits = len(req.memory_state) * _td_bits_per_entry
         _td_joules = _td_bits * _td_LANDAUER_PER_BIT
         response["thermodynamic_cost"] = {
@@ -17534,6 +17624,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # trail to the response and captures the final action for audit.
     _blessed_action = _finalize_decision()
 
+    # #19 fix: webhook dispatch uses the FINAL decision (after all overrides).
+    if not _is_dry_run:
+        _dispatch_webhooks(_blessed_action, request_id, response.get("omega_mem_final", omega_out), entry_ids)
+
     # Issue R/S fix: audit_log the FINAL decision, not the pre-override one.
     if not _is_dry_run:
         _final_action = _blessed_action
@@ -17544,9 +17638,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             "action_type": req.action_type,
         }
         if _final_action == "BLOCK":
-            _td_bits = len(req.memory_state) * 2304
+            _td_bits = len(req.memory_state) * LANDAUER_BITS_PER_ENTRY
             _audit_extra["bits_erased"] = _td_bits
-            _audit_extra["landauer_joules"] = _td_bits * 2.87e-21
+            _audit_extra["landauer_joules"] = _td_bits * LANDAUER_CONSTANT_JOULES_PER_BIT
         # Capture which override path (if any) changed the decision from its
         # original value, for forensic analysis.
         if _final_action != result.recommended_action:

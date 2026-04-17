@@ -94,3 +94,13 @@ At startup, `api/main.py` calls `_validate_required_secrets()`:
 - **Weak key** (set but shorter than 32 characters): `logger.warning("Weak secrets detected: ...")`. Suggests auto-generated placeholder, copy-paste error, or weak value like `"changeme"`.
 
 - **Production + test mode**: `ENV=production` AND `SGRAAL_TEST_MODE=1` → `RuntimeError` at import time. The API refuses to start. (This is a separate guard unrelated to key strength, but it runs in the same startup sequence.)
+
+## SGRAAL_SKIP_DNS_CHECK
+
+This variable disables DNS resolution checks in webhook URL validation. When enabled, webhooks can target internal/private IP addresses (RFC 1918, loopback, link-local).
+
+**Default:** not set (SSRF protection active).
+
+**When to set:** only in test environments where webhook URLs point to localhost services, or in production deployments where webhook endpoints are intentionally behind a VPN and cannot resolve via public DNS.
+
+**Risk if set in production:** an attacker who controls webhook configuration can aim webhooks at internal services (cloud metadata endpoint at 169.254.169.254, internal APIs, etc.). A startup warning fires if `ENV=production` and this is enabled.
