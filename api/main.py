@@ -1150,9 +1150,29 @@ _KEY_ACTIVITY_WINDOW_S = 3600  # 1 hour
 _KEY_ACTIVITY_IP_THRESHOLD = 3  # 3+ unique IPs → suspicious
 _KEY_ACTIVITY_RPM_MULTIPLIER = 10  # 10× historical average → suspicious
 
+# IPs to exclude from anomaly detection: load balancers, internal infra.
+# Railway uses 100.64.0.0/10 (Carrier-Grade NAT, RFC 6598) for internal routing.
+# Localhost/loopback for local dev. "testclient" for FastAPI TestClient.
+_WHITELISTED_IP_PREFIXES = ("100.64.", "100.65.", "100.66.", "100.67.", "100.68.", "100.69.",
+                             "100.7", "100.8", "100.9", "100.10", "100.11", "100.12",
+                             "127.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+                             "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+                             "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
+                             "192.168.", "::1")
+
+def _is_whitelisted_ip(ip: str) -> bool:
+    """Return True if the IP is a known infrastructure address (load balancer,
+    internal network, loopback) that should not count toward anomaly detection."""
+    if ip in ("testclient", "internal", "unknown"):
+        return True
+    return any(ip.startswith(p) for p in _WHITELISTED_IP_PREFIXES)
+
 
 def _track_key_activity(key_hash: str, client_ip: str) -> dict:
     """Record a call for this key and return anomaly signals.
+
+    Whitelisted IPs (Railway LB, private RFC1918, loopback) are recorded
+    but excluded from the unique-IP count for anomaly detection.
 
     Returns {"suspicious": bool, "reason": str|None, "unique_ips": int, "calls_last_hour": int}
     """
@@ -1172,7 +1192,10 @@ def _track_key_activity(key_hash: str, client_ip: str) -> dict:
         dq.append((now, client_ip))
 
         calls_last_hour = len(dq)
-        unique_ips = len(set(ip for _, ip in dq))
+        # Only count non-whitelisted IPs for the anomaly signal.
+        # Railway LB IPs (100.64.0.0/10), private-network IPs, and loopback
+        # are excluded — they represent infrastructure, not distinct clients.
+        unique_ips = len(set(ip for _, ip in dq if not _is_whitelisted_ip(ip)))
 
         # Peak RPM: count calls in the busiest 60-second window (last 60s as proxy)
         one_min_ago = now - 60
@@ -1674,7 +1697,17 @@ def certify_verify_get_not_supported():
 # is intentionally NOT supported — see plugins/base.py SECURITY_MODEL.
 
 try:
-    from plugins import registry as _plugin_registry, loader as _plugin_loader  # noqa: E402
+    # Try direct import first (works when PYTHONPATH includes repo root)
+    try:
+        from plugins import registry as _plugin_registry, loader as _plugin_loader
+    except ImportError:
+        # Fallback: add parent directory to sys.path (Railway PYTHONPATH=/app,
+        # but plugins/ may be at /app/plugins/ which needs /app on sys.path)
+        import pathlib as _pathlib
+        _repo_root = str(_pathlib.Path(__file__).resolve().parent.parent)
+        if _repo_root not in sys.path:
+            sys.path.insert(0, _repo_root)
+        from plugins import registry as _plugin_registry, loader as _plugin_loader
     # Load bundled example plugins (installed but NOT activated by default)
     try:
         _plugin_loader.load_examples(activate=False)
