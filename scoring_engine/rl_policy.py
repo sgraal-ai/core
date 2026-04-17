@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
+logger = logging.getLogger("sgraal.rl_policy")
 
 ACTIONS = ["USE_MEMORY", "WARN", "ASK_USER", "BLOCK"]
 ACTION_MAP = {a: i for i, a in enumerate(ACTIONS)}
@@ -63,18 +66,85 @@ def compute_reward(outcome_status: str, action: str) -> float:
 
 
 class QTable:
-    """In-memory Q-table with optional Redis persistence.
+    """Q-table with Redis persistence across deploys.
 
-    Key format: "qtable:{domain}:{state_bin}" → [Q(USE), Q(WARN), Q(ASK), Q(BLOCK)]
+    Maintains separate Q-tables per domain. On every update, the affected
+    domain's table + episode count + timestamp are written to Redis. On
+    first access per domain, the table is loaded from Redis if available.
 
-    Maintains separate Q-tables per domain to prevent cross-contamination.
+    Redis keys:
+      sgraal:rl_qtable:{domain}      — JSON dict of state→[Q values]
+      sgraal:rl_episodes:{domain}    — int episode count
+      sgraal:rl_last_update:{domain} — ISO timestamp
+
+    Fail-safe: Redis failures never crash. If Redis is down, learning
+    continues in memory (just won't survive the next deploy).
     """
 
     def __init__(self):
         self._tables: dict[str, dict[str, list[float]]] = {}
-        self._episodes: dict[str, int] = {}  # domain → episode count
+        self._episodes: dict[str, int] = {}
+        self._last_update: dict[str, str] = {}
+        self._loaded_from_redis: dict[str, bool] = {}
+        # Lazy Redis import — scoring_engine should not hard-depend on api.redis_state
+        self._redis_get = None
+        self._redis_set = None
+        self._redis_initialized = False
+
+    def _init_redis(self) -> None:
+        """Lazy-init Redis helpers. Called once on first use."""
+        if self._redis_initialized:
+            return
+        self._redis_initialized = True
+        try:
+            from api.redis_state import redis_get, redis_set
+            self._redis_get = redis_get
+            self._redis_set = redis_set
+        except Exception:
+            logger.debug("RL Redis persistence unavailable — learning is memory-only")
+
+    def _load_from_redis(self, domain: str) -> None:
+        """Load Q-table for a domain from Redis (if not already loaded)."""
+        if domain in self._loaded_from_redis:
+            return  # already attempted
+        self._loaded_from_redis[domain] = False
+        self._init_redis()
+        if not self._redis_get:
+            return
+        try:
+            table_data = self._redis_get(f"sgraal:rl_qtable:{domain}")
+            episodes = self._redis_get(f"sgraal:rl_episodes:{domain}")
+            last_update = self._redis_get(f"sgraal:rl_last_update:{domain}")
+            if isinstance(table_data, dict) and table_data:
+                self._tables[domain] = table_data
+                self._loaded_from_redis[domain] = True
+                logger.info("RL Q-table loaded from Redis for domain=%s (%d states)",
+                            domain, len(table_data))
+            if isinstance(episodes, int):
+                self._episodes[domain] = episodes
+            elif isinstance(episodes, str) and episodes.isdigit():
+                self._episodes[domain] = int(episodes)
+            if isinstance(last_update, str):
+                self._last_update[domain] = last_update
+        except Exception as e:
+            logger.debug("RL Redis load failed for domain=%s: %s", domain, e)
+
+    def _persist_to_redis(self, domain: str) -> None:
+        """Write Q-table for a domain to Redis (best-effort)."""
+        self._init_redis()
+        if not self._redis_set:
+            return
+        try:
+            self._redis_set(f"sgraal:rl_qtable:{domain}", self._tables.get(domain, {}), ttl=0)
+            self._redis_set(f"sgraal:rl_episodes:{domain}", self._episodes.get(domain, 0), ttl=0)
+            ts = datetime.now(timezone.utc).isoformat()
+            self._redis_set(f"sgraal:rl_last_update:{domain}", ts, ttl=0)
+            self._last_update[domain] = ts
+        except Exception as e:
+            logger.debug("RL Redis persist failed for domain=%s: %s", domain, e)
 
     def _get_domain_table(self, domain: str) -> dict[str, list[float]]:
+        self._load_from_redis(domain)  # lazy load on first access
         if domain not in self._tables:
             self._tables[domain] = {}
         return self._tables[domain]
@@ -108,7 +178,11 @@ class QTable:
         # Increment episode count
         self._episodes[domain] = self._episodes.get(domain, 0) + 1
 
+        # Persist to Redis after every update (best-effort, non-blocking)
+        self._persist_to_redis(domain)
+
     def get_episodes(self, domain: str) -> int:
+        self._load_from_redis(domain)
         return self._episodes.get(domain, 0)
 
     def get_best_action(self, domain: str, state: str) -> tuple[int, float]:
@@ -128,6 +202,19 @@ class QTable:
     def from_dict(self, data: dict) -> None:
         self._tables = data.get("tables", {})
         self._episodes = data.get("episodes", {})
+
+    def persistence_status(self) -> dict:
+        """Return per-domain persistence metadata for /v1/scheduler/status."""
+        result = {}
+        for domain in DOMAINS:
+            self._load_from_redis(domain)
+            result[domain] = {
+                "episodes": self._episodes.get(domain, 0),
+                "last_update": self._last_update.get(domain),
+                "loaded_from_redis": self._loaded_from_redis.get(domain, False),
+                "states_populated": len(self._tables.get(domain, {})),
+            }
+        return result
 
 
 # Global Q-table instance

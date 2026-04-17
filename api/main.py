@@ -1408,7 +1408,17 @@ def scheduler_status(key_record: dict = Depends(verify_api_key)):
             "failures_last_30s": len([t for t in _redis_cb_failures if _time.time() - t < _REDIS_CB_WINDOW]),
             "open_until": datetime.fromtimestamp(_redis_cb_open_until, tz=timezone.utc).isoformat() if _redis_cb_open_until > _time.time() else None,
         },
+        "rl_persistence": _rl_persistence_status(),
     }
+
+
+def _rl_persistence_status() -> dict:
+    """Return RL Q-table persistence metadata from the global Q-table."""
+    try:
+        from scoring_engine.rl_policy import _q_table
+        return _q_table.persistence_status()
+    except Exception:
+        return {"error": "rl_policy unavailable"}
 
 
 @app.post("/v1/warmup")
