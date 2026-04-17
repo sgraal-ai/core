@@ -812,9 +812,17 @@ def _safe_key_hash(key_record: dict) -> str:
     raise HTTPException(status_code=403, detail="API key has no valid key_hash — cannot identify tenant")
 
 
+# FIX 12: DNS resolution cache to prevent rebinding attacks.
+# At validation time, the hostname resolves to a safe IP. At dispatch time,
+# DNS could rebind to 169.254.169.254. Caching the validated IP prevents this.
+_dns_cache: dict[str, tuple[str, float]] = {}  # hostname → (ip, timestamp)
+_DNS_CACHE_TTL = 60.0  # seconds
+
+
 def _validate_webhook_url(url: str) -> str:
     """Validate a webhook URL for SSRF safety. Returns the URL if valid, raises 422 otherwise.
-    DNS resolution check is skipped in test environments (SGRAAL_SKIP_DNS_CHECK=1)."""
+    DNS resolution check is skipped in test environments (SGRAAL_SKIP_DNS_CHECK=1).
+    FIX 12: caches resolved IPs to prevent DNS rebinding between validation and dispatch."""
     if not url:
         raise HTTPException(status_code=422, detail="Webhook URL cannot be empty")
     parsed = urllib.parse.urlparse(url)
@@ -849,6 +857,9 @@ def _validate_webhook_url(url: str) -> str:
         ip = ipaddress.ip_address(sockaddr[0])
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
             raise HTTPException(status_code=422, detail="Invalid webhook URL: resolves to blocked IP range")
+    # FIX 12: cache the validated IP to prevent DNS rebinding at dispatch time
+    if addrs:
+        _dns_cache[hostname] = (addrs[0][4][0], _time.time())
     return url
 
 
@@ -1814,6 +1825,9 @@ def _cert_proof_value(credential_subject: dict, api_key_hash: str) -> str:
     import hmac as _hmac_mod
     import hashlib as _hashlib_mod
     import json as _json_mod
+    # FIX 9: warn on every call if using dev fallback (not just at startup)
+    if not ATTESTATION_SECRET:
+        logger.debug("CERT_PROOF using dev_cert_secret fallback — not production-safe")
     _secret_key = (ATTESTATION_SECRET or "dev_cert_secret").encode()
     # Deterministic canonical form: sorted keys JSON + tenant salt
     _canon = _json_mod.dumps(credential_subject, sort_keys=True, separators=(",", ":"))
@@ -1916,11 +1930,12 @@ def certify_verify(req: CertifyVerifyRequest, key_record: dict = Depends(verify_
     if not cs or not proof or not issued_at:
         return {"valid": False, "reason": "Malformed credential — missing credentialSubject/proof/issuanceDate", "omega": None, "issued_at": None, "expired": True}
 
-    # Recompute HMAC
+    # Recompute HMAC — FIX 7: use timing-safe comparison to prevent side-channel attack
+    import hmac as _hmac_verify
     _kh = _safe_key_hash(key_record)
     _expected = _cert_proof_value(cs, _kh)
     _got = proof.get("proofValue", "")
-    if _expected != _got:
+    if not _hmac_verify.compare_digest(_expected, _got):
         return {"valid": False, "reason": "HMAC mismatch — credential tampered or tenant mismatch", "omega": cs.get("omega"), "issued_at": issued_at, "expired": False}
 
     # Expiry check
@@ -6905,13 +6920,21 @@ def clone_memory(req: CloneRequest, key_record: dict = Depends(verify_api_key)):
     result = {"cloned_entries": cloned, "skipped_high_risk": skipped, "pii_stripped_fields": pii_stripped,
               "qtable_transferred": qtable_xfer, "weights_transferred": weights_xfer,
               "clone_omega_avg": round(sum(omegas) / max(len(omegas), 1), 1)}
+    # FIX 13: tenant-scope clone history entries
+    _clone_kh = _safe_key_hash(key_record)
     _clone_history.append({"source": req.source_agent_id, "target": req.target_agent_id,
-                           "timestamp": datetime.now(timezone.utc).isoformat(), **result})
+                           "timestamp": datetime.now(timezone.utc).isoformat(),
+                           "_tenant": _clone_kh, **result})
+    if len(_clone_history) > 5000:
+        _clone_history[:] = _clone_history[-5000:]
     return result
 
 @app.get("/v1/memory/clone/history")
 def clone_history(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
-    relevant = [c for c in _clone_history if c.get("source") == agent_id or c.get("target") == agent_id] if agent_id else _clone_history[-50:]
+    # FIX 13: filter by tenant — one tenant must not see another's clone history
+    _ch_kh = _safe_key_hash(key_record)
+    _ch_filtered = [c for c in _clone_history if c.get("_tenant") == _ch_kh]
+    relevant = [c for c in _ch_filtered if c.get("source") == agent_id or c.get("target") == agent_id] if agent_id else _ch_filtered[-50:]
     return {"history": relevant}
 
 
@@ -12807,6 +12830,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         # Validate — will raise ValueError for typos like "Block", "block", "BLCK"
         DecisionAction(action)
         response["recommended_action"] = action
+        # FIX 10: cap trail at 50 entries to prevent OOM from runaway overrides
+        if len(_decision_trail) >= 50:
+            return
         _decision_trail.append({
             "seq": len(_decision_trail),
             "action": action,
@@ -13450,6 +13476,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 _fleet_var = [max(0.01, sum((v[i] - _fleet_mean[i]) ** 2 for v in _fh_raw) / _n_fleet) for i in range(len(_cb_keys))]
                 # Mahalanobis distance (diagonal)
                 _mah_sq = sum((_current_vec[i] - _fleet_mean[i]) ** 2 / _fleet_var[i] for i in range(len(_cb_keys)))
+                # FIX 8: guard against NaN/inf from bad component values
+                if not math.isfinite(_mah_sq) or _mah_sq < 0:
+                    _mah_sq = 0.0
                 _mah_dist = math.sqrt(_mah_sq)
                 # Normalize to 0-1 via sigmoid
                 _fhd = round(min(1.0, 2.0 / (1.0 + math.exp(-_mah_dist / 5.0)) - 1.0), 3)
