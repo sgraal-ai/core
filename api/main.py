@@ -4,6 +4,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import RedirectResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import Any, Literal, Optional
+from scoring_engine.constants import DecisionAction  # #4: canonical decision enum
 import sys, os, math, re, logging
 import secrets
 import hashlib
@@ -12317,7 +12318,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         This is the ONLY function that should assign response["recommended_action"]
         in the preflight body. Using it instead of direct assignment ensures every
         decision change is tracked, auditable, and visible in the response.
+
+        Validates that `action` is one of the 4 canonical DecisionAction values.
+        A typo like "Block" or "block" raises ValueError at the call site
+        instead of silently producing an invalid response.
         """
+        from scoring_engine.constants import DecisionAction
+        # Validate — will raise ValueError for typos like "Block", "block", "BLCK"
+        DecisionAction(action)
         response["recommended_action"] = action
         _decision_trail.append({
             "seq": len(_decision_trail),
@@ -14433,7 +14441,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _orig_action = response.get("recommended_action", "USE_MEMORY")
             if _orig_action in ("USE_MEMORY", "WARN"):
                 response["original_recommended_action"] = _orig_action
-                _set_action("ASK_USER", "homology_torsion", "hallucination risk high")
+                _set_action(DecisionAction.ASK_USER, "homology_torsion", "hallucination risk high")
                 response["hallucination_override"] = True
     except Exception as _e:
         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
@@ -15064,9 +15072,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if aging:
             response["aging_rule"] = aging
             if aging.get("force_action") == "BLOCK":
-                _set_action("BLOCK", "aging_rule", "aging force BLOCK")
+                _set_action(DecisionAction.BLOCK, "aging_rule", "aging force BLOCK")
             elif aging.get("force_action") == "WARN" and response.get("recommended_action") == "USE_MEMORY":
-                _set_action("WARN", "aging_rule", "aging force WARN")
+                _set_action(DecisionAction.WARN, "aging_rule", "aging force WARN")
     except Exception as _e:
         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
@@ -15301,7 +15309,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if _routing_applied and _entries_excluded > 0:
         response["auto_route_warning"] = f"Assessment based on {len(entries)}/{len(req.memory_state)} entries. {_entries_excluded} excluded by routing."
         if response.get("recommended_action") == "USE_MEMORY":
-            _set_action("WARN", "auto_route_warning", "entries excluded by routing")
+            _set_action(DecisionAction.WARN, "auto_route_warning", "entries excluded by routing")
 
     # FIX 4: Real assurance_score — drift method agreement
     try:
@@ -15334,7 +15342,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Check if circuit breaker overrode
     if response.get("circuit_breaker_state") == "OPEN":
         _override_chain.append({"source": "circuit_breaker", "action": "BLOCK", "applied": True})
-        _set_action("BLOCK", "circuit_breaker", "circuit breaker OPEN")
+        _set_action(DecisionAction.BLOCK, "circuit_breaker", "circuit breaker OPEN")
         for _oc in _override_chain[:-1]: _oc["applied"] = False
         _dispatch_security_event("circuit_breaker_open", {"agent_id": req.agent_id, "omega": omega_out}, _safe_key_hash(key_record))
     # Check if policy compiler overrode
@@ -15594,7 +15602,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Timestamp integrity override — post-reconciliation
     _ts_integrity = response.get("timestamp_integrity", "VALID")
     if _ts_integrity == "MANIPULATED":
-        _set_action("BLOCK", "detection_timestamp", "MANIPULATED flag")
+        _set_action(DecisionAction.BLOCK, "detection_timestamp", "MANIPULATED flag")
     elif _ts_integrity == "SUSPICIOUS":
         _ts_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _ts_cur = response["recommended_action"]
@@ -15604,7 +15612,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Identity drift override — post-reconciliation
     _id_drift = response.get("identity_drift", "CLEAN")
     if _id_drift == "MANIPULATED":
-        _set_action("BLOCK", "detection_identity", "MANIPULATED flag")
+        _set_action(DecisionAction.BLOCK, "detection_identity", "MANIPULATED flag")
     elif _id_drift == "SUSPICIOUS":
         _id_sev_map = {"USE_MEMORY": "WARN", "WARN": "BLOCK", "ASK_USER": "BLOCK"}
         _id_cur = response["recommended_action"]
@@ -15614,7 +15622,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Consensus collapse override — post-reconciliation
     _cc_collapse = response.get("consensus_collapse", "CLEAN")
     if _cc_collapse == "MANIPULATED":
-        _set_action("BLOCK", "detection_consensus", "MANIPULATED flag")
+        _set_action(DecisionAction.BLOCK, "detection_consensus", "MANIPULATED flag")
     elif _cc_collapse == "SUSPICIOUS":
         _cc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _cc_cur = response["recommended_action"]
@@ -15624,7 +15632,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Provenance chain override — post-reconciliation (last = strongest)
     _pc_integrity = response.get("provenance_chain_integrity", "CLEAN")
     if _pc_integrity == "MANIPULATED":
-        _set_action("BLOCK", "detection_provenance", "MANIPULATED flag")
+        _set_action(DecisionAction.BLOCK, "detection_provenance", "MANIPULATED flag")
     elif _pc_integrity == "SUSPICIOUS":
         _pc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _pc_cur = response["recommended_action"]
@@ -16020,7 +16028,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["persona_conflict"] = True
             response["persona_violation"] = _pc.get("persona_violation", "")
             if response.get("recommended_action") == "USE_MEMORY":
-                _set_action("WARN", "persona_conflict", "persona violation detected")
+                _set_action(DecisionAction.WARN, "persona_conflict", "persona violation detected")
             repair_plan_out = response.get("repair_plan", [])
             if isinstance(repair_plan_out, list):
                 repair_plan_out.append({"action": "PERSONA_REVIEW", "entry_id": "*",
