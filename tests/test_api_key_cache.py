@@ -125,7 +125,7 @@ def test_cache_ttl_is_300(mock_supa, mock_rget, mock_rset):
     mock_result.data = [SUPABASE_ROW]
     mock_supa.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_result
 
-    verify_api_key(_make_credentials())
+    verify_api_key(_make_request(), _make_credentials())
 
     args, kwargs = mock_rset.call_args
     assert args[0] == CACHE_KEY
