@@ -686,7 +686,23 @@ def compute_hmm_regime(
 
     Returns:
         HMMRegimeResult or None if insufficient history
+
+    Raises:
+        AssertionError: if N_STATES != 3. The fast-path forward/backward
+            loops are unrolled for exactly 3 states; any other value would
+            silently produce wrong scores. This assert is OUTSIDE the
+            try/except so it is never swallowed.
     """
+    # #12: this assert is intentionally OUTSIDE the try/except in
+    # _compute_hmm_regime_cached so it propagates to the caller. If it
+    # were inside, `except Exception` would swallow it and return None,
+    # masking the configuration error.
+    assert N_STATES == 3, (
+        f"HMM requires exactly 3 states (STABLE/DEGRADING/CRITICAL), "
+        f"got N_STATES={N_STATES}. The pure-Python forward/backward passes "
+        f"unroll K=3 into scalar variables; any other K needs the loops rewritten."
+    )
+
     # Fast path: length check before any hashing/copying.
     if score_history is None or len(score_history) < min_observations:
         return None
