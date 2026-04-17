@@ -18,13 +18,15 @@ AUTH = {"Authorization": "Bearer sg_demo_playground"}
 
 
 class TestSchedulerHealth:
-    def test_truth_scheduler_in_health(self):
+    def test_truth_scheduler_in_scheduler_status(self):
+        """Scheduler info moved from /health to /v1/scheduler/status."""
         c = _client()
-        resp = c.get("/health")
+        resp = c.get("/v1/scheduler/status", headers={"Authorization": "Bearer sg_test_key_001"})
         assert resp.status_code == 200
         data = resp.json()
-        assert "truth_subscription_scheduler" in data
-        assert data["truth_subscription_scheduler"] == "running"
+        assert "jobs" in data
+        assert "truth_subscription_check" in data["jobs"]
+        assert data["jobs"]["truth_subscription_check"]["status"] == "running"
 
 
 class TestSleeperAlerts:
