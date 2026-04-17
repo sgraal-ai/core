@@ -103,7 +103,8 @@ try:
     _AES_AVAILABLE = True
 except ImportError:
     _AES_AVAILABLE = False
-    logger.warning("cryptography library not installed — vaccine encryption falls back to XOR")
+    # logger is not yet defined at this point in module load — use logging directly
+    logging.getLogger(__name__).warning("cryptography library not installed — vaccine encryption falls back to XOR")
 
 
 def _derive_aes_key(secret: str) -> bytes:
