@@ -12299,6 +12299,39 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
+    # #9: Decision trail — single source of truth for recommended_action.
+    # All code paths that change the decision MUST use _set_action() instead of
+    # directly assigning response["recommended_action"]. This records a trail
+    # entry with source/reason, enabling auditability and preventing silent
+    # overrides. finalize_decision() at the end is the last touch.
+    _decision_trail: list[dict] = []
+
+    def _set_action(action: str, source: str, reason: str = "") -> None:
+        """Set response["recommended_action"] and record the override in the trail.
+
+        This is the ONLY function that should assign response["recommended_action"]
+        in the preflight body. Using it instead of direct assignment ensures every
+        decision change is tracked, auditable, and visible in the response.
+        """
+        response["recommended_action"] = action
+        _decision_trail.append({
+            "seq": len(_decision_trail),
+            "action": action,
+            "source": source,
+            "reason": reason,
+        })
+
+    def _finalize_decision() -> str:
+        """Bless the final decision. Must be called exactly once, at the end.
+
+        Returns the final action (for audit_log). Adds decision_trail to the
+        response so callers can see every override that fired.
+        """
+        final = response.get("recommended_action", "USE_MEMORY")
+        response["decision_trail"] = _decision_trail
+        response["decision_trail_length"] = len(_decision_trail)
+        return final
+
     # --- Plugin hook: on_preflight_start ---------------------------------
     # Plugins are TENANT-SCOPED: only plugins this tenant activated will run.
     _plugin_results: list = []
@@ -12971,6 +13004,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             result.component_breakdown, req.action_type, req.domain, req.custom_weights,
         ),
     }
+
+    # #9: seed the decision trail with the initial scoring result
+    _decision_trail.append({
+        "seq": 0,
+        "action": _final_action,
+        "source": "scoring_engine",
+        "reason": f"compute() result (omega={omega_out})",
+    })
 
     # Timestamp integrity check (fields only — override applied post-reconciliation)
     try:
@@ -14372,7 +14413,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _orig_action = response.get("recommended_action", "USE_MEMORY")
             if _orig_action in ("USE_MEMORY", "WARN"):
                 response["original_recommended_action"] = _orig_action
-                response["recommended_action"] = "ASK_USER"
+                _set_action("ASK_USER", "homology_torsion", "hallucination risk high")
                 response["hallucination_override"] = True
     except Exception:
         pass
@@ -14809,7 +14850,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if (_episodes >= 20
             and pg.advantage > 0.1
             and not pg.exploration_mode):
-            response["recommended_action"] = pg.best_action
+            _set_action(pg.best_action, "policy_gradient", "pg override")
             if "rl_adjustment" in response:
                 response["rl_adjustment"]["rl_adjusted_action"] = pg.best_action
             response["pg_override"] = True
@@ -15003,9 +15044,9 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         if aging:
             response["aging_rule"] = aging
             if aging.get("force_action") == "BLOCK":
-                response["recommended_action"] = "BLOCK"
+                _set_action("BLOCK", "aging_rule", "aging force BLOCK")
             elif aging.get("force_action") == "WARN" and response.get("recommended_action") == "USE_MEMORY":
-                response["recommended_action"] = "WARN"
+                _set_action("WARN", "aging_rule", "aging force WARN")
     except Exception:
         pass
 
@@ -15196,7 +15237,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             elif _omega_adjusted < _t_ask: _adj_action = "WARN"
             elif _omega_adjusted < _t_block: _adj_action = "ASK_USER"
             else: _adj_action = "BLOCK"
-            response["recommended_action"] = _adj_action
+            _set_action(_adj_action, "omega_adjusted", "omega adjusted reconciliation")
         else:
             response["decision_based_on"] = "omega_raw"
         # Recompute Shapley from FINAL breakdown
@@ -15239,7 +15280,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if _routing_applied and _entries_excluded > 0:
         response["auto_route_warning"] = f"Assessment based on {len(entries)}/{len(req.memory_state)} entries. {_entries_excluded} excluded by routing."
         if response.get("recommended_action") == "USE_MEMORY":
-            response["recommended_action"] = "WARN"
+            _set_action("WARN", "auto_route_warning", "entries excluded by routing")
 
     # FIX 4: Real assurance_score — drift method agreement
     try:
@@ -15271,7 +15312,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # Check if circuit breaker overrode
     if response.get("circuit_breaker_state") == "OPEN":
         _override_chain.append({"source": "circuit_breaker", "action": "BLOCK", "applied": True})
-        response["recommended_action"] = "BLOCK"
+        _set_action("BLOCK", "circuit_breaker", "circuit breaker OPEN")
         for _oc in _override_chain[:-1]: _oc["applied"] = False
         _dispatch_security_event("circuit_breaker_open", {"agent_id": req.agent_id, "omega": omega_out}, _safe_key_hash(key_record))
     # Check if policy compiler overrode
@@ -15509,7 +15550,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
 
     # Step 4 — Final decision: max(base, forecast, sticky)
     _final_sev = max(_SEVERITY[_base], _SEVERITY[_forecast], _SEVERITY[_sticky])
-    response["recommended_action"] = _SEV_TO_ACTION[_final_sev]
+    _set_action(_SEV_TO_ACTION[_final_sev], "severity_reconciliation", "max(base, forecast, sticky)")
 
     # Hysteresis metadata
     response["hysteresis_applied"] = _SEVERITY[_sticky] > _SEVERITY[_base] and _is_stateful
@@ -15525,47 +15566,47 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _nat_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER", "ASK_USER": "BLOCK"}
         _nat_cur = response["recommended_action"]
         if _nat_cur in _nat_sev_map:
-            response["recommended_action"] = _nat_sev_map[_nat_cur]
+            _set_action(_nat_sev_map[_nat_cur], "detection_naturalness", "FABRICATED escalation")
 
     # Timestamp integrity override — post-reconciliation
     _ts_integrity = response.get("timestamp_integrity", "VALID")
     if _ts_integrity == "MANIPULATED":
-        response["recommended_action"] = "BLOCK"
+        _set_action("BLOCK", "detection_timestamp", "MANIPULATED flag")
     elif _ts_integrity == "SUSPICIOUS":
         _ts_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _ts_cur = response["recommended_action"]
         if _ts_cur in _ts_sev_map:
-            response["recommended_action"] = _ts_sev_map[_ts_cur]
+            _set_action(_ts_sev_map[_ts_cur], "detection_timestamp", "SUSPICIOUS escalation")
 
     # Identity drift override — post-reconciliation
     _id_drift = response.get("identity_drift", "CLEAN")
     if _id_drift == "MANIPULATED":
-        response["recommended_action"] = "BLOCK"
+        _set_action("BLOCK", "detection_identity", "MANIPULATED flag")
     elif _id_drift == "SUSPICIOUS":
         _id_sev_map = {"USE_MEMORY": "WARN", "WARN": "BLOCK", "ASK_USER": "BLOCK"}
         _id_cur = response["recommended_action"]
         if _id_cur in _id_sev_map:
-            response["recommended_action"] = _id_sev_map[_id_cur]
+            _set_action(_id_sev_map[_id_cur], "detection_identity", "SUSPICIOUS escalation")
 
     # Consensus collapse override — post-reconciliation
     _cc_collapse = response.get("consensus_collapse", "CLEAN")
     if _cc_collapse == "MANIPULATED":
-        response["recommended_action"] = "BLOCK"
+        _set_action("BLOCK", "detection_consensus", "MANIPULATED flag")
     elif _cc_collapse == "SUSPICIOUS":
         _cc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _cc_cur = response["recommended_action"]
         if _cc_cur in _cc_sev_map:
-            response["recommended_action"] = _cc_sev_map[_cc_cur]
+            _set_action(_cc_sev_map[_cc_cur], "detection_consensus", "SUSPICIOUS escalation")
 
     # Provenance chain override — post-reconciliation (last = strongest)
     _pc_integrity = response.get("provenance_chain_integrity", "CLEAN")
     if _pc_integrity == "MANIPULATED":
-        response["recommended_action"] = "BLOCK"
+        _set_action("BLOCK", "detection_provenance", "MANIPULATED flag")
     elif _pc_integrity == "SUSPICIOUS":
         _pc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _pc_cur = response["recommended_action"]
         if _pc_cur in _pc_sev_map:
-            response["recommended_action"] = _pc_sev_map[_pc_cur]
+            _set_action(_pc_sev_map[_pc_cur], "detection_provenance", "SUSPICIOUS escalation")
 
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
@@ -15954,7 +15995,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["persona_conflict"] = True
             response["persona_violation"] = _pc.get("persona_violation", "")
             if response.get("recommended_action") == "USE_MEMORY":
-                response["recommended_action"] = "WARN"
+                _set_action("WARN", "persona_conflict", "persona violation detected")
             repair_plan_out = response.get("repair_plan", [])
             if isinstance(repair_plan_out, list):
                 repair_plan_out.append({"action": "PERSONA_REVIEW", "entry_id": "*",
@@ -16510,7 +16551,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _new_action = "WARN"
         else:
             _new_action = "USE_MEMORY"
-        response["recommended_action"] = _new_action
+        _set_action(_new_action, "compound_detection", "cost-adjusted threshold override")
     response["decision_cost_asymmetry"] = {
         "cost_adjusted_decision": _cost_adjusted,
         "cost_adjustment_reason": _cost_reason,
@@ -16776,7 +16817,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["per_type_block_threshold"] = _a2_block_threshold
             response["per_type_original_action"] = _a2_original_action
             if _a2_new_action != _a2_original_action:
-                response["recommended_action"] = _a2_new_action
+                _set_action(_a2_new_action, "per_type_threshold", f"A2 override for {_a2_dom_type}")
                 response["per_type_override_triggered"] = True
             else:
                 response["per_type_override_triggered"] = False
@@ -17065,7 +17106,7 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 if abs(float(_new_omega) - _current_omega) > 1e-9:
                     response["omega_mem_final"] = round(float(_new_omega), 2)
                 if _new_decision != _current_decision:
-                    response["recommended_action"] = _new_decision
+                    _set_action(_new_decision, "plugin_override", "plugin on_omega_computed override")
                     response["plugin_override_decision"] = True
 
             # on_preflight_complete — full response transformation
@@ -17100,13 +17141,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["days_until_block_model_dissent"] = False
             response["days_until_block_no_block_signals"] = []
 
+    # #9: finalize_decision — single point where the decision is blessed.
+    # All 21 _set_action() call sites have recorded their proposals in
+    # _decision_trail. The response["recommended_action"] already reflects the
+    # last writer (last-writer-wins ordering is preserved). This call adds the
+    # trail to the response and captures the final action for audit.
+    _blessed_action = _finalize_decision()
+
     # Issue R/S fix: audit_log the FINAL decision, not the pre-override one.
-    # Runs at the very end of preflight so every override path (per-type
-    # thresholds, plugin hooks, detection layers, Issue I reconciliation)
-    # has already had its say. thermodynamic_cost (bits_erased + landauer_joules)
-    # is logged to extra when the final action is BLOCK.
     if not _is_dry_run:
-        _final_action = response.get("recommended_action", result.recommended_action)
+        _final_action = _blessed_action
         _final_omega = response.get("omega_mem_final", omega_out)
         _audit_extra: dict = {
             "agent_id": req.agent_id,
