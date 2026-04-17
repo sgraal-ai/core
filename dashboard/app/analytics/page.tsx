@@ -155,6 +155,25 @@ export default function AnalyticsPage() {
         <p style={{ fontSize: "12px", color: "#6b7280" }}>Updated {timeAgo}</p>
       </div>
 
+      {/* #27: Demo data banner */}
+      {(totalDecisions === 0 || (summary as Record<string, unknown> | null)?.demo_mode === true) && (
+        <div style={{
+          background: "#fffbeb",
+          border: "1px solid #f59e0b",
+          borderRadius: "8px",
+          padding: "12px 16px",
+          marginBottom: "16px",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}>
+          <span style={{ fontSize: "16px" }}>&#x26A0;&#xFE0F;</span>
+          <span style={{ fontSize: "14px", color: "#92400e" }}>
+            Showing demo data — connect your agents to see real metrics
+          </span>
+        </div>
+      )}
+
       {/* Top Issues */}
       {totalDecisions > 0 && (() => {
         const issues: { title: string; desc: string; domain: string; severity: "red" | "amber" }[] = [];

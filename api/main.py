@@ -73,6 +73,12 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 ATTESTATION_SECRET = os.getenv("ATTESTATION_SECRET", "")
 
+# #39: Signal vector logging to Redis — disabled by default (storage cost with no reader).
+_SIGNAL_LOGGING_ENABLED = os.getenv("SGRAAL_SIGNAL_LOGGING", "false").lower() in ("1", "true", "yes")
+
+# #44: Audit log retention — days to keep before cleanup.
+_AUDIT_RETENTION_DAYS = int(os.getenv("SGRAAL_AUDIT_RETENTION_DAYS", "90"))
+
 
 # ---------------------------------------------------------------------------
 # Vaccine encryption helpers — encrypt at rest in Redis so a Redis breach
@@ -332,6 +338,26 @@ async def _scheduler_daily_snapshot():
             _persist_store_bg("scheduler:daily_snapshot:last_run", datetime.now(timezone.utc).isoformat(), ttl=604800)
             _scheduler_status["daily_snapshot"] = datetime.now(timezone.utc).isoformat()
             logger.info("Daily snapshot: %d agents snapshotted", n_snapshotted)
+
+            # #44: Audit log retention — delete rows older than _AUDIT_RETENTION_DAYS
+            try:
+                _sb = supabase_service_client or supabase_client
+                if _sb and _AUDIT_RETENTION_DAYS > 0:
+                    _cutoff_date = (datetime.now(timezone.utc) - timedelta(days=_AUDIT_RETENTION_DAYS)).isoformat()
+                    _del_result = (
+                        _sb.table("audit_log")
+                        .delete()
+                        .lt("created_at", _cutoff_date)
+                        .execute()
+                    )
+                    _n_deleted = len(_del_result.data) if hasattr(_del_result, "data") and _del_result.data else 0
+                    if _n_deleted > 0:
+                        logger.info("AUDIT_LOG_CLEANUP: deleted %d rows older than %d days", _n_deleted, _AUDIT_RETENTION_DAYS)
+                    _scheduler_status["audit_log_cleanup"] = datetime.now(timezone.utc).isoformat()
+                    _scheduler_status["audit_log_cleanup_deleted"] = str(_n_deleted)
+            except Exception as _cleanup_e:
+                logger.warning("AUDIT_LOG_CLEANUP failed (non-fatal): %s", _cleanup_e)
+
         except Exception as e:
             logger.error("Scheduler daily_snapshot error: %s", e)
 
@@ -816,6 +842,10 @@ _supabase_retry_lock = threading.Lock()
 
 # Validate required secrets at startup (warning only — not fatal for dev/test)
 _validate_required_secrets()
+
+# Startup feature flags
+logger.info("Signal vector logging: %s", "ENABLED" if _SIGNAL_LOGGING_ENABLED else "DISABLED (set SGRAAL_SIGNAL_LOGGING=true to enable)")
+logger.info("Audit log retention: %d days (set SGRAAL_AUDIT_RETENTION_DAYS to change)", _AUDIT_RETENTION_DAYS)
 
 
 # In-memory API key store: api_key -> stripe_customer_id
@@ -5161,9 +5191,13 @@ def analytics_summary(key_record: dict = Depends(verify_api_key)):
                 first_pf = _fp_r.json()["result"]
     except Exception:
         pass
+    # #27: demo_mode flag — true when no real preflight calls have been made
+    _demo_mode = _metrics.preflight_total == 0
+
     return {"total_calls": _metrics.preflight_total, "block_rate": round(_metrics.decisions.get("BLOCK", 0) / max(_metrics.preflight_total, 1) * 100, 1),
             "avg_omega": _metrics.avg_omega(), "trend": "stable",
-            "threshold_recommendations": _threshold_recs, "first_preflight_at": first_pf}
+            "threshold_recommendations": _threshold_recs, "first_preflight_at": first_pf,
+            "demo_mode": _demo_mode}
 
 @app.get("/v1/analytics/performance-roi")
 def analytics_performance_roi(key_record: dict = Depends(verify_api_key)):
@@ -16638,10 +16672,12 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
 
     # -----------------------------------------------------------------------
     # NEW FIELD 3: Signal vector logging for κ_MEM production data
-    # Logs normalized scoring signal vector to Redis for phase constant computation
+    # #39: Disabled by default — consumes Redis storage with no current reader.
+    # Enable via SGRAAL_SIGNAL_LOGGING=true when you need production data for
+    # κ_MEM computation or /v1/research/production-validation.
     # -----------------------------------------------------------------------
     _sv_logged = False
-    if _redis_enabled and not _is_dry_run:
+    if _redis_enabled and not _is_dry_run and _SIGNAL_LOGGING_ENABLED:
         try:
             _sv = {
                 "s_freshness": round(_cb.get("s_freshness", 0) / 100, 4),

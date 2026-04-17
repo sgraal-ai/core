@@ -319,6 +319,25 @@ export default function DashboardHome() {
       <h1 className="text-2xl font-bold mb-1">Decision Readiness Dashboard</h1>
       <p className="text-muted text-sm mb-4">Fleet-wide memory governance overview</p>
 
+      {/* #27: Demo data banner */}
+      {agents.length === 0 && !loading && (
+        <div style={{
+          background: "#fffbeb",
+          border: "1px solid #f59e0b",
+          borderRadius: "8px",
+          padding: "12px 16px",
+          marginBottom: "16px",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}>
+          <span style={{ fontSize: "16px" }}>&#x26A0;&#xFE0F;</span>
+          <span style={{ fontSize: "14px", color: "#92400e" }}>
+            Showing demo data — connect your agents to see real metrics
+          </span>
+        </div>
+      )}
+
       {auditError && (
         <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-lg px-4 py-3 mb-6 text-sm text-yellow-500">{auditError}</div>
       )}
