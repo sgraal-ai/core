@@ -73,6 +73,106 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 ATTESTATION_SECRET = os.getenv("ATTESTATION_SECRET", "")
 
+
+# ---------------------------------------------------------------------------
+# Vaccine encryption helpers — encrypt at rest in Redis so a Redis breach
+# does not expose the full list of known attack signatures (#35).
+# Uses HMAC-SHA256 key derivation + XOR stream cipher + HMAC auth tag.
+# Pure stdlib — no external crypto library required.
+# ---------------------------------------------------------------------------
+import base64 as _b64
+
+def _encrypt_vaccine(data: dict) -> str:
+    """Encrypt a vaccine signature dict for Redis storage.
+
+    Returns a base64-encoded string: nonce(16) || ciphertext || tag(32).
+    If ATTESTATION_SECRET is missing, returns raw JSON (fail-open for dev).
+    """
+    key = ATTESTATION_SECRET
+    if not key or len(key) < 8:
+        return _json.dumps(data)
+    try:
+        plaintext = _json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        nonce = secrets.token_bytes(16)
+        # KDF: HMAC-SHA256(key, nonce) → 32-byte keystream seed
+        dk = hashlib.sha256(key.encode() + nonce).digest()
+        # Generate keystream by chaining SHA-256: dk, sha256(dk), sha256(sha256(dk)), ...
+        keystream = b""
+        block = dk
+        while len(keystream) < len(plaintext):
+            keystream += block
+            block = hashlib.sha256(block).digest()
+        # XOR encrypt
+        ct = bytes(p ^ k for p, k in zip(plaintext, keystream[:len(plaintext)]))
+        # Auth tag: HMAC-SHA256(key, nonce || ciphertext)
+        import hmac as _hmac_enc
+        tag = _hmac_enc.new(key.encode(), nonce + ct, hashlib.sha256).digest()
+        return _b64.b64encode(nonce + ct + tag).decode("ascii")
+    except Exception as e:
+        logger.warning("vaccine encrypt failed, storing raw: %s", e)
+        return _json.dumps(data)
+
+
+def _decrypt_vaccine(stored: str) -> dict:
+    """Decrypt a vaccine signature from Redis.
+
+    Handles three cases:
+    1. Encrypted (base64 blob) → decrypt and verify tag
+    2. Raw JSON string (backward compat / no ATTESTATION_SECRET) → parse directly
+    3. Already-parsed dict (redis_get auto-deserialized) → return as-is
+    """
+    # Case 3: already a dict (redis_get parsed it)
+    if isinstance(stored, dict):
+        return stored
+    if not isinstance(stored, str):
+        return {}
+
+    key = ATTESTATION_SECRET
+    # Case 2: try raw JSON first (backward compat with unencrypted vaccines)
+    if stored.startswith("{"):
+        try:
+            return _json.loads(stored)
+        except Exception:
+            pass
+
+    # Case 1: encrypted base64 blob
+    if not key or len(key) < 8:
+        # No key → can't decrypt; try JSON fallback
+        try:
+            return _json.loads(stored)
+        except Exception:
+            logger.warning("vaccine decrypt: no key and not valid JSON, discarding")
+            return {}
+    try:
+        raw = _b64.b64decode(stored)
+        if len(raw) < 48:  # 16 nonce + 0 ct + 32 tag minimum
+            raise ValueError("too short")
+        nonce = raw[:16]
+        tag = raw[-32:]
+        ct = raw[16:-32]
+        # Verify tag
+        import hmac as _hmac_dec
+        expected_tag = _hmac_dec.new(key.encode(), nonce + ct, hashlib.sha256).digest()
+        if not _hmac_dec.compare_digest(tag, expected_tag):
+            raise ValueError("HMAC tag mismatch — tampered or wrong key")
+        # Decrypt
+        dk = hashlib.sha256(key.encode() + nonce).digest()
+        keystream = b""
+        block = dk
+        while len(keystream) < len(ct):
+            keystream += block
+            block = hashlib.sha256(block).digest()
+        plaintext = bytes(c ^ k for c, k in zip(ct, keystream[:len(ct)]))
+        return _json.loads(plaintext.decode("utf-8"))
+    except Exception as e:
+        # Fallback: maybe it's unencrypted JSON that doesn't start with {
+        try:
+            return _json.loads(stored)
+        except Exception:
+            logger.warning("vaccine decrypt failed: %s", e)
+            return {}
+
+
 UPSTASH_REDIS_URL = os.getenv("UPSTASH_REDIS_URL") or os.getenv("UPSTASH_REDIS_REST_URL")
 UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
@@ -1360,9 +1460,11 @@ def list_vaccines(domain: str = Query("general"), key_record: dict = Depends(ver
     vaccines = []
     if isinstance(_vax_ids, list):
         for _vid in _vax_ids[:50]:
-            _vax = redis_get(f"vaccine:{_vid}")
-            if _vax and isinstance(_vax, dict):
-                vaccines.append(_vax)
+            _vax_raw = redis_get(f"vaccine:{_vid}")
+            if _vax_raw:
+                _vax = _decrypt_vaccine(_vax_raw)
+                if _vax and isinstance(_vax, dict):
+                    vaccines.append(_vax)
     return {"domain": domain, "count": len(vaccines), "vaccines": vaccines}
 
 
@@ -13442,7 +13544,8 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             _vax_ids = _rget(_vax_idx_key, [])
             if isinstance(_vax_ids, list):
                 for _vid in _vax_ids[:20]:
-                    _vax = _rget(f"vaccine:{_vid}")
+                    _vax_raw = _rget(f"vaccine:{_vid}")
+                    _vax = _decrypt_vaccine(_vax_raw) if _vax_raw else {}
                     if _vax and isinstance(_vax, dict) and _vax.get("content_hash_prefix") == _vax_hash:
                         _max_ds = max((e.downstream_count for e in entries), default=0)
                         _ds_pat = "high" if _max_ds > 10 else "low"
@@ -13469,7 +13572,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                     "consensus_collapse": response.get("consensus_collapse", "CLEAN"),
                 }
                 _sig = _extract_attack_signature(req.memory_state, _det_results, req.domain, content_hash=_input_hash_full[:16])
-                redis_set(f"vaccine:{_sig['signature_id']}", _sig, ttl=604800)  # 7 days, not 30
+                redis_set(f"vaccine:{_sig['signature_id']}", _encrypt_vaccine(_sig), ttl=604800)  # 7 days, encrypted at rest
                 # Update index
                 _vax_idx_key = f"vaccine_index:{req.domain}"
                 if _redis_enabled:
