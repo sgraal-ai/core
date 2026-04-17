@@ -12435,16 +12435,23 @@ def propagation_trace(req: PropagationTraceRequest, key_record: dict = Depends(v
 
 
 @app.post("/v1/preflight")
-def preflight(req: PreflightRequest, request: Request, key_record: dict = Depends(verify_api_key)):
+def preflight(req: PreflightRequest, request: Optional[Request] = None, key_record: dict = Depends(verify_api_key)):
     _t_start = _time.monotonic()
 
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
-    # #34: Track key activity for anomaly detection (stolen/cloned key)
+    # #34: Track key activity for anomaly detection (stolen/cloned key).
+    # `request` is None when preflight() is called internally by other
+    # endpoints (migrate, heal_counterfactual, etc.) — skip IP tracking.
     _pf_kh = _safe_key_hash(key_record)
-    _pf_client_ip = request.client.host if request.client else "unknown"
-    _key_anomaly = _track_key_activity(_pf_kh, _pf_client_ip)
+    if request is not None and hasattr(request, "client") and request.client:
+        _pf_client_ip = request.client.host
+        _key_anomaly = _track_key_activity(_pf_kh, _pf_client_ip)
+    else:
+        _pf_client_ip = "internal"
+        _key_anomaly = {"suspicious": False, "reason": None, "unique_ips": 0,
+                        "calls_last_hour": 0, "calls_last_minute": 0, "avg_rpm": 0}
 
     # #1: Scoring warnings — every bare `except Exception: pass` now captures
     # the error instead of silently swallowing it. The list is exposed in the
