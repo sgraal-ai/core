@@ -91,37 +91,57 @@ _AUDIT_RETENTION_DAYS = int(os.getenv("SGRAAL_AUDIT_RETENTION_DAYS", "90"))
 # ---------------------------------------------------------------------------
 # Vaccine encryption helpers — encrypt at rest in Redis so a Redis breach
 # does not expose the full list of known attack signatures (#35).
-# Uses HMAC-SHA256 key derivation + XOR stream cipher + HMAC auth tag.
-# Pure stdlib — no external crypto library required.
+# FIX 1: upgraded from homebrew XOR to AES-256-GCM via cryptography library.
+# Backward compat: _decrypt_vaccine tries AES-GCM first, falls back to old XOR.
 # ---------------------------------------------------------------------------
 import base64 as _b64
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from cryptography.hazmat.primitives import hashes
+    _AES_AVAILABLE = True
+except ImportError:
+    _AES_AVAILABLE = False
+    logger.warning("cryptography library not installed — vaccine encryption falls back to XOR")
+
+
+def _derive_aes_key(secret: str) -> bytes:
+    """Derive a 32-byte AES key from ATTESTATION_SECRET via HKDF-SHA256."""
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=b"sgraal-vaccine-v2", info=b"vaccine-encryption").derive(secret.encode())
+
 
 def _encrypt_vaccine(data: dict) -> str:
     """Encrypt a vaccine signature dict for Redis storage.
 
-    Returns a base64-encoded string: nonce(16) || ciphertext || tag(32).
-    If ATTESTATION_SECRET is missing, returns raw JSON (fail-open for dev).
+    Uses AES-256-GCM when cryptography library is available.
+    Format: base64("AES1" || nonce(12) || ciphertext+tag)
+    Falls back to raw JSON if ATTESTATION_SECRET is missing.
     """
     key = ATTESTATION_SECRET
     if not key or len(key) < 8:
         return _json.dumps(data)
     try:
         plaintext = _json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        nonce = secrets.token_bytes(16)
-        # KDF: HMAC-SHA256(key, nonce) → 32-byte keystream seed
-        dk = hashlib.sha256(key.encode() + nonce).digest()
-        # Generate keystream by chaining SHA-256: dk, sha256(dk), sha256(sha256(dk)), ...
-        keystream = b""
-        block = dk
-        while len(keystream) < len(plaintext):
-            keystream += block
-            block = hashlib.sha256(block).digest()
-        # XOR encrypt
-        ct = bytes(p ^ k for p, k in zip(plaintext, keystream[:len(plaintext)]))
-        # Auth tag: HMAC-SHA256(key, nonce || ciphertext)
-        import hmac as _hmac_enc
-        tag = _hmac_enc.new(key.encode(), nonce + ct, hashlib.sha256).digest()
-        return _b64.b64encode(nonce + ct + tag).decode("ascii")
+        if _AES_AVAILABLE:
+            aes_key = _derive_aes_key(key)
+            nonce = secrets.token_bytes(12)  # 96-bit nonce for GCM
+            aesgcm = AESGCM(aes_key)
+            ct_tag = aesgcm.encrypt(nonce, plaintext, None)
+            return _b64.b64encode(b"AES1" + nonce + ct_tag).decode("ascii")
+        else:
+            # Fallback: old XOR stream cipher (for envs without cryptography)
+            nonce = secrets.token_bytes(16)
+            dk = hashlib.sha256(key.encode() + nonce).digest()
+            keystream = b""
+            block = dk
+            while len(keystream) < len(plaintext):
+                keystream += block
+                block = hashlib.sha256(block).digest()
+            ct = bytes(p ^ k for p, k in zip(plaintext, keystream[:len(plaintext)]))
+            import hmac as _hmac_enc
+            tag = _hmac_enc.new(key.encode(), nonce + ct, hashlib.sha256).digest()
+            return _b64.b64encode(nonce + ct + tag).decode("ascii")
     except Exception as e:
         logger.warning("vaccine encrypt failed, storing raw: %s", e)
         return _json.dumps(data)
@@ -151,7 +171,6 @@ def _decrypt_vaccine(stored: str) -> dict:
 
     # Case 1: encrypted base64 blob
     if not key or len(key) < 8:
-        # No key → can't decrypt; try JSON fallback
         try:
             return _json.loads(stored)
         except Exception:
@@ -159,12 +178,22 @@ def _decrypt_vaccine(stored: str) -> dict:
             return {}
     try:
         raw = _b64.b64decode(stored)
-        if len(raw) < 48:  # 16 nonce + 0 ct + 32 tag minimum
+
+        # Try AES-256-GCM first (format: "AES1" + 12-byte nonce + ciphertext+tag)
+        if raw[:4] == b"AES1" and _AES_AVAILABLE:
+            aes_key = _derive_aes_key(key)
+            nonce = raw[4:16]
+            ct_tag = raw[16:]
+            aesgcm = AESGCM(aes_key)
+            plaintext = aesgcm.decrypt(nonce, ct_tag, None)
+            return _json.loads(plaintext.decode("utf-8"))
+
+        # Fallback: old XOR format (16-byte nonce + ciphertext + 32-byte HMAC tag)
+        if len(raw) < 48:
             raise ValueError("too short")
         nonce = raw[:16]
         tag = raw[-32:]
         ct = raw[16:-32]
-        # Verify tag
         import hmac as _hmac_dec
         expected_tag = _hmac_dec.new(key.encode(), nonce + ct, hashlib.sha256).digest()
         if not _hmac_dec.compare_digest(tag, expected_tag):
@@ -727,15 +756,28 @@ def _stripe_retry_load_from_redis() -> None:
         pass  # Redis unavailable — start with empty queue
 
 
+_stripe_retry_last_sync = 0.0
+_STRIPE_RETRY_SYNC_INTERVAL = 5.0  # seconds
+
+
 def _stripe_retry_sync_to_redis() -> None:
-    """Persist current retry queue to Redis (best-effort)."""
+    """Persist current retry queue to Redis (best-effort, rate-limited).
+
+    FIX 9: only writes if ≥5 seconds since last write, to avoid hammering
+    Redis on burst modifications.
+    """
+    global _stripe_retry_last_sync
+    now = _time.time()
+    if now - _stripe_retry_last_sync < _STRIPE_RETRY_SYNC_INTERVAL:
+        return  # throttled
     try:
         from api.redis_state import redis_set
         with _stripe_retry_lock:
             snapshot = list(_stripe_retry_queue)
-        redis_set(_STRIPE_RETRY_REDIS_KEY, snapshot, ttl=0)  # permanent
+        redis_set(_STRIPE_RETRY_REDIS_KEY, snapshot, ttl=0)
+        _stripe_retry_last_sync = now
     except Exception:
-        pass  # Redis unavailable — queue stays in memory only
+        pass
 
 
 # Load on module init (will be empty if Redis has nothing or is unavailable)
@@ -1384,6 +1426,7 @@ import collections as _collections
 # key_hash → deque of (timestamp, ip_address) tuples; auto-pruned to last 1 hour
 _key_activity: dict[str, _collections.deque] = {}
 _key_activity_lock = threading.Lock()
+_KEY_ACTIVITY_MAX_KEYS = 10000  # FIX 10: cap total tracked keys to prevent OOM
 
 _KEY_ACTIVITY_WINDOW_S = 3600  # 1 hour
 _KEY_ACTIVITY_IP_THRESHOLD = 3  # 3+ unique IPs → suspicious
@@ -1421,6 +1464,10 @@ def _track_key_activity(key_hash: str, client_ip: str) -> dict:
     with _key_activity_lock:
         dq = _key_activity.get(key_hash)
         if dq is None:
+            # FIX 10: evict oldest-accessed key when cap reached
+            if len(_key_activity) >= _KEY_ACTIVITY_MAX_KEYS:
+                _oldest_key = next(iter(_key_activity))
+                del _key_activity[_oldest_key]
             dq = _collections.deque()
             _key_activity[key_hash] = dq
 
@@ -1462,6 +1509,61 @@ def _track_key_activity(key_hash: str, client_ip: str) -> dict:
         "calls_last_minute": calls_last_minute,
         "avg_rpm": round(avg_rpm, 2),
     }
+
+
+# FIX 13: email notification on suspicious key activity
+_key_anomaly_email_sent: dict[str, float] = {}  # key_hash → last_email_timestamp
+_KEY_ANOMALY_EMAIL_INTERVAL = 3600  # max 1 email per key per hour
+
+
+def _send_key_anomaly_email(key_hash: str, anomaly: dict, key_record: dict) -> None:
+    """Send an email alert to the key owner when suspicious activity is detected.
+    Rate-limited to 1 email per key per hour. Fail-safe: never crashes preflight."""
+    now = _time.time()
+    last_sent = _key_anomaly_email_sent.get(key_hash, 0)
+    if now - last_sent < _KEY_ANOMALY_EMAIL_INTERVAL:
+        return  # rate-limited
+    customer_email = key_record.get("email")
+    if not customer_email:
+        # Try to look up email from Supabase
+        try:
+            _sb = supabase_service_client or supabase_client
+            if _sb:
+                _cid = key_record.get("customer_id")
+                if _cid:
+                    # Best-effort lookup — not all tables have email
+                    pass  # skip lookup if customer_id doesn't map to email
+        except Exception:
+            pass
+        if not customer_email:
+            return  # no email address available
+    _resend_key = os.getenv("RESEND_API_KEY", "")
+    if not _resend_key:
+        return  # Resend not configured
+    try:
+        import requests as _req_email
+        _req_email.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {_resend_key}", "Content-Type": "application/json"},
+            json={
+                "from": "Sgraal Security <security@sgraal.com>",
+                "to": [customer_email],
+                "subject": "Suspicious activity detected on your Sgraal API key",
+                "text": (
+                    f"Suspicious activity detected on your Sgraal API key (prefix: {key_hash[:16]}).\n\n"
+                    f"Reason: {anomaly.get('reason', 'unknown')}\n"
+                    f"Unique IPs: {anomaly.get('unique_ips', 0)}\n"
+                    f"Calls last hour: {anomaly.get('calls_last_hour', 0)}\n\n"
+                    f"If this was not you, regenerate your key at https://app.sgraal.com\n\n"
+                    f"— Sgraal Security Team"
+                ),
+            },
+            timeout=5,
+        )
+        _key_anomaly_email_sent[key_hash] = now
+        logger.info("KEY_ANOMALY_EMAIL sent for key=%s to=%s", key_hash[:16], customer_email)
+    except Exception as e:
+        logger.warning("KEY_ANOMALY_EMAIL failed for key=%s: %s", key_hash[:16], e)
 
 
 @app.get("/v1/security/key-activity")
@@ -1727,8 +1829,8 @@ def destroy_entries(req: DestroyRequest, key_record: dict = Depends(verify_api_k
     _total_bits = 0
     for eid in req.entry_ids:
         # Estimate bits per entry: 256 bits (SHA-256 id) + 2048 bits content proxy (256 bytes)
-        _eid_bits = len(str(eid)) * 8
-        _total_bits += _eid_bits + 2048
+        # FIX 3: use same bits-per-entry formula as preflight for consistency
+        _total_bits += LANDAUER_BITS_PER_ENTRY
     _landauer_joules = _total_bits * _LANDAUER_PER_BIT
 
     _d_redis_enabled = bool(UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN)
@@ -6879,7 +6981,10 @@ def get_twin_result(job_id: str, key_record: dict = Depends(verify_api_key)):
 
 
 # ---- #14/#26 Memory Inheritance & Genome ----
-_clone_history: list[dict] = []
+# FIX 11: per-tenant clone history, each capped at 500 entries
+_clone_history_by_tenant: dict[str, list[dict]] = {}
+# Backward compat alias — older code references _clone_history
+_clone_history: list = []  # unused; kept to avoid import errors in tests
 
 class CloneRequest(BaseModel):
     source_agent_id: str
@@ -6932,19 +7037,21 @@ def clone_memory(req: CloneRequest, key_record: dict = Depends(verify_api_key)):
               "clone_omega_avg": round(sum(omegas) / max(len(omegas), 1), 1)}
     # FIX 13: tenant-scope clone history entries
     _clone_kh = _safe_key_hash(key_record)
-    _clone_history.append({"source": req.source_agent_id, "target": req.target_agent_id,
-                           "timestamp": datetime.now(timezone.utc).isoformat(),
-                           "_tenant": _clone_kh, **result})
-    if len(_clone_history) > 5000:
-        _clone_history[:] = _clone_history[-5000:]
+    # FIX 11: per-tenant sharded clone history
+    if _clone_kh not in _clone_history_by_tenant:
+        _clone_history_by_tenant[_clone_kh] = []
+    _tenant_hist = _clone_history_by_tenant[_clone_kh]
+    _tenant_hist.append({"source": req.source_agent_id, "target": req.target_agent_id,
+                          "timestamp": datetime.now(timezone.utc).isoformat(), **result})
+    if len(_tenant_hist) > 500:
+        _clone_history_by_tenant[_clone_kh] = _tenant_hist[-500:]
     return result
 
 @app.get("/v1/memory/clone/history")
 def clone_history(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
-    # FIX 13: filter by tenant — one tenant must not see another's clone history
     _ch_kh = _safe_key_hash(key_record)
-    _ch_filtered = [c for c in _clone_history if c.get("_tenant") == _ch_kh]
-    relevant = [c for c in _ch_filtered if c.get("source") == agent_id or c.get("target") == agent_id] if agent_id else _ch_filtered[-50:]
+    _ch_hist = _clone_history_by_tenant.get(_ch_kh, [])
+    relevant = [c for c in _ch_hist if c.get("source") == agent_id or c.get("target") == agent_id] if agent_id else _ch_hist[-50:]
     return {"history": relevant}
 
 
@@ -10196,7 +10303,7 @@ def cross_agent_check(req: CrossAgentRequest, key_record: dict = Depends(verify_
 # ---- Audit Log + SIEM Export ----
 
 @app.get("/v1/audit-log")
-def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, offset: int = 0,
+def get_audit_log(request: Request, key_record: dict = Depends(verify_api_key), limit: int = 50, offset: int = 0,
                    decision: Optional[str] = None, agent_id: Optional[str] = None, domain: Optional[str] = None,
                    range: Optional[str] = None):
     if key_record.get("demo"):
@@ -10217,7 +10324,6 @@ def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, o
             q = q.range(offset, offset + limit - 1)
             result = q.execute()
             raw = result.data or []
-            # Map Supabase column names to dashboard-expected field names
             for row in raw:
                 row["timestamp"] = row.get("created_at", "")
                 row["omega"] = row.get("omega_mem_final", 0)
@@ -10225,7 +10331,18 @@ def get_audit_log(key_record: dict = Depends(verify_api_key), limit: int = 50, o
             total = result.count if hasattr(result, "count") and result.count is not None else len(entries)
         except Exception as e:
             logger.warning("AUDIT_LOG_READ_ERROR: %s", e)
-    return {"entries": entries, "count": total}
+    # FIX 2: ETag for cache optimization — dashboard polls every 60s
+    _etag_src = f"{_safe_key_hash(key_record)}:{total}:{entries[0].get('created_at', '') if entries else 'empty'}"
+    _etag = hashlib.md5(_etag_src.encode()).hexdigest()
+    _client_etag = request.headers.get("if-none-match", "").strip('"')
+    if _client_etag and _client_etag == _etag:
+        return Response(status_code=304)
+    resp = {"entries": entries, "count": total}
+    return Response(
+        content=_json.dumps(resp, default=str),
+        media_type="application/json",
+        headers={"ETag": f'"{_etag}"'},
+    )
 
 @app.get("/v1/audit-log/export")
 def export_audit_log(format: str = "splunk", key_record: dict = Depends(verify_api_key), limit: int = 100,
@@ -13454,10 +13571,11 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # NEW: knowledge_age_days — trust-weighted mean age of memory entries
     # -----------------------------------------------------------------------
     if entries:
-        _trust_sum = sum(max(e.source_trust, 0.01) for e in entries)
-        _ka_mean = sum(e.timestamp_age_days * max(e.source_trust, 0.01) for e in entries) / _trust_sum
+        # FIX 8: safe coercion — handles None source_trust
+        _trust_sum = sum(max(float(getattr(e, "source_trust", 0) or 0), 0.01) for e in entries)
+        _ka_mean = sum(e.timestamp_age_days * max(float(getattr(e, "source_trust", 0) or 0), 0.01) for e in entries) / _trust_sum
         if len(entries) > 1:
-            _ka_var = sum(max(e.source_trust, 0.01) * (e.timestamp_age_days - _ka_mean) ** 2 for e in entries) / _trust_sum
+            _ka_var = sum(max(float(getattr(e, "source_trust", 0) or 0), 0.01) * (e.timestamp_age_days - _ka_mean) ** 2 for e in entries) / _trust_sum
             _ka_std = round(math.sqrt(max(_ka_var, 0.0)), 1)
         else:
             _ka_std = 0.0
@@ -14133,6 +14251,23 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 boost = (pe.mean_entropy / max_h) * 10
                 old_prov = response["component_breakdown"].get("s_provenance", 0)
                 response["component_breakdown"]["s_provenance"] = round(min(100, old_prov + boost), 2)
+
+    # FIX 4: Trust oscillation detector — if trust variance across entries with
+    # similar content is high (>0.05), it suggests adaptive provenance layering
+    # (attacker oscillates trust to evade flat-trust heuristics). Boost s_provenance.
+    try:
+        if len(entries) >= 2 and "component_breakdown" in response:
+            _trusts = [float(getattr(e, "source_trust", 0) or 0) for e in entries]
+            _trust_mean = sum(_trusts) / len(_trusts)
+            _trust_var = sum((t - _trust_mean) ** 2 for t in _trusts) / len(_trusts)
+            if _trust_var > 0.05:
+                _osc_boost = min(20.0, _trust_var * 100)  # up to +20 points
+                _old = float(response["component_breakdown"].get("s_provenance", 0))
+                response["component_breakdown"]["s_provenance"] = round(min(100, _old + _osc_boost), 2)
+                response["trust_oscillation_detected"] = True
+                response["trust_oscillation_variance"] = round(_trust_var, 4)
+    except Exception as _e:
+        _scoring_warnings.append({"module": "trust_oscillation_detector", "error": str(_e)[:200]})
 
             # Push to Redis for trend (skip for demo/dry_run — read-only)
             if _redis_enabled:
@@ -16465,6 +16600,8 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             "SUSPICIOUS_KEY_ACTIVITY: key=%s ip=%s reason=%s",
             _pf_kh[:16], _pf_client_ip, _key_anomaly.get("reason"),
         )
+        # FIX 13: email notification to key owner (rate-limited: 1 per key per hour)
+        _send_key_anomaly_email(_pf_kh, _key_anomaly, key_record)
     if response.get("degraded_mode"):
         response["_headers"]["X-Sgraal-Degraded"] = "true"
     if response.get("sla_status", {}).get("breached"):
@@ -16670,6 +16807,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         response["days_until_block_contributing_models"] = []
         response["days_until_block_model_dissent"] = False
         response["days_until_block_no_block_signals"] = []
+        response["days_until_block_confidence_available"] = True  # confidence=1.0 is a real value
     elif not _is_dry_run and len(_te_history_cache) >= 3:
         # Each real model contributes (name, estimate, weight). BOCPD is handled
         # separately as a multiplicative adjustment, not a "fourth estimate" —
@@ -16780,6 +16918,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 # with current weights, but populate the full schema regardless.
                 response["days_until_block"] = None
                 response["days_until_block_confidence"] = None
+                response["days_until_block_confidence_available"] = False
                 response["days_until_block_ci"] = None
                 response["days_until_block_ci_method"] = "degenerate_weights"
                 response["days_until_block_n_models"] = len(_dub_sources)
@@ -16793,6 +16932,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             # that fired voted no-block. Models that didn't fire are silent.
             response["days_until_block"] = None
             response["days_until_block_confidence"] = None
+            response["days_until_block_confidence_available"] = False
             response["days_until_block_ci"] = None
             response["days_until_block_ci_method"] = "no_block_votes_only_no_real_estimates"
             response["days_until_block_n_models"] = 0
@@ -16803,6 +16943,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             # No sources, no sentinel votes — insufficient data.
             response["days_until_block"] = None
             response["days_until_block_confidence"] = None
+            response["days_until_block_confidence_available"] = False
             response["days_until_block_ci"] = None
             response["days_until_block_ci_method"] = "insufficient_data"
             response["days_until_block_n_models"] = 0
@@ -16813,6 +16954,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         # dry_run, or history < 3 calls — no trend models can fire
         response["days_until_block"] = None
         response["days_until_block_confidence"] = None
+        response["days_until_block_confidence_available"] = False
         response["days_until_block_ci"] = None
         response["days_until_block_ci_method"] = "dry_run_or_insufficient_history"
         response["days_until_block_n_models"] = 0

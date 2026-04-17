@@ -284,17 +284,24 @@ def edge_preflight(
     )
     explanation = _explain(aggregate, dominant_type, omega)
 
+    five_signals = {
+        "risk": round(aggregate["risk"], 2),
+        "decay": round(aggregate["decay"], 2),
+        "trust": round(aggregate["trust"], 2),
+        "corruption": round(aggregate["corruption"], 2),
+        "belief": round(aggregate["belief"], 2),
+    }
+
+    # Early warning: any signal > 80% of the per-type threshold for dominant type
+    _dominant_threshold = PER_TYPE_THRESHOLDS.get(dominant_type, 70)
+    early_warning = any(v > 0.8 * _dominant_threshold for v in five_signals.values())
+
     return {
         "omega": round(omega, 2),
         "decision": decision,
         "explanation": explanation,
-        "five_signals": {
-            "risk": round(aggregate["risk"], 2),
-            "decay": round(aggregate["decay"], 2),
-            "trust": round(aggregate["trust"], 2),
-            "corruption": round(aggregate["corruption"], 2),
-            "belief": round(aggregate["belief"], 2),
-        },
+        "five_signals": five_signals,
+        "early_warning": early_warning,
         "per_type_threshold_applied": per_type_applied,
         "dominant_type": dominant_type,
         "edge_mode": True,
