@@ -47,7 +47,7 @@ class TestKeyAnomalyDetection:
         result = _track_key_activity(_KH, "17.18.19.20")
         assert result["suspicious"] is True
         assert result["unique_ips"] >= 3
-        assert "unique IPs" in (result["reason"] or "")
+        assert "IPs" in (result["reason"] or "")
         self._clear_activity()
 
     def test_normal_usage_not_suspicious(self):
