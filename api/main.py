@@ -333,7 +333,17 @@ app = FastAPI(
     description="Memory governance protocol for AI agents. Quickstart: /docs/quickstart | Compliance: /v1/compliance/docs | Batch scoring: up to 100 entries per call, <10ms p95.",
     lifespan=_lifespan,
 )
-_ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://sgraal.com,https://www.sgraal.com,https://app.sgraal.com,https://api.sgraal.com,http://localhost:3000").split(",")
+# #54: CORS allowed origins. localhost is included ONLY in dev/test mode —
+# in production (ENV=production), it is stripped to prevent credential-theft
+# via XSS from any local dev server running on port 3000.
+_CORS_DEFAULT = "https://sgraal.com,https://www.sgraal.com,https://app.sgraal.com,https://api.sgraal.com"
+_ENV = os.getenv("ENV", "").lower()
+if _ENV != "production":
+    _CORS_DEFAULT += ",http://localhost:3000"
+_ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", _CORS_DEFAULT).split(",")
+# Even if ALLOWED_ORIGINS is explicitly set, strip localhost in production
+if _ENV == "production":
+    _ALLOWED_ORIGINS = [o for o in _ALLOWED_ORIGINS if "localhost" not in o and "127.0.0.1" not in o]
 app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -696,6 +706,21 @@ if os.getenv("SGRAAL_TEST_MODE", "").lower() in ("1", "true", "yes"):
     logger.warning(
         "SGRAAL_TEST_MODE is ENABLED — test API keys are active. "
         "This must not be set in production deployments."
+    )
+
+# #52: Startup guard — refuse to start if ENV=production AND test mode is on.
+# Runs at import time (module load), not at first request. This prevents the
+# window where a misconfigured production deploy accepts test-key requests
+# before any request-level check can fire.
+if (
+    os.getenv("ENV", "").lower() == "production"
+    and os.getenv("SGRAAL_TEST_MODE", "").lower() in ("1", "true", "yes")
+):
+    raise RuntimeError(
+        "FATAL: SGRAAL_TEST_MODE=1 is incompatible with ENV=production. "
+        "Test API keys (sg_test_key_001, sg_test_key_002) would be active in "
+        "production, allowing anyone who reads the source code to authenticate. "
+        "Either unset SGRAAL_TEST_MODE or set ENV to something other than 'production'."
     )
 
 bearer_scheme = HTTPBearer()
