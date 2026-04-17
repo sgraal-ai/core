@@ -12299,6 +12299,11 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state cannot be empty")
 
+    # #1: Scoring warnings — every bare `except Exception: pass` now captures
+    # the error instead of silently swallowing it. The list is exposed in the
+    # response so callers can see which modules failed gracefully.
+    _scoring_warnings: list[dict] = []
+
     # #9: Decision trail — single source of truth for recommended_action.
     # All code paths that change the decision MUST use _set_action() instead of
     # directly assigning response["recommended_action"]. This records a trail
@@ -12324,12 +12329,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     def _finalize_decision() -> str:
         """Bless the final decision. Must be called exactly once, at the end.
 
-        Returns the final action (for audit_log). Adds decision_trail to the
-        response so callers can see every override that fired.
+        Returns the final action (for audit_log). Adds decision_trail and
+        scoring_warnings to the response.
         """
         final = response.get("recommended_action", "USE_MEMORY")
         response["decision_trail"] = _decision_trail
         response["decision_trail_length"] = len(_decision_trail)
+        response["scoring_warnings"] = _scoring_warnings
+        response["scoring_warnings_count"] = len(_scoring_warnings)
         return final
 
     # --- Plugin hook: on_preflight_start ---------------------------------
@@ -12379,7 +12386,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 )
         except HTTPException:
             raise
-        except Exception:
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown", "error": str(_e)[:200]})
             # Redis unavailable — fall back to Supabase count (stale but safe)
             calls = key_record.get("calls_this_month", 0)
             if calls >= limit:
@@ -12407,8 +12415,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _first_pf_key = f"first_preflight:{key_record.get('key_hash', 'default')}"
         if _redis_enabled:
             _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SETNX/{_first_pf_key}/{datetime.now(timezone.utc).isoformat()}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Thread-aware sampling
     thread_bucket_id = None
@@ -12459,8 +12467,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             if _redis_enabled:
                 _get_redis_session().post(f"{UPSTASH_REDIS_URL}/INCR/{_type_k}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
                 _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_type_k}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #126 Auto-route: filter entries by context before scoring
     _routing_applied = False
@@ -12528,7 +12536,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         from api.redis_snapshot import RedisSnapshot
         _snapshot = RedisSnapshot([] if _is_dry_run else _snapshot_keys)
         _snapshot_taken = _snapshot.keys_loaded > 0
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         _snapshot = None
         _snapshot_taken = False
 
@@ -12599,8 +12608,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _te_cache_h = _te_cache_r.json().get("result", [])
                 if _te_cache_h:
                     _te_history_cache = [float(x) for x in _te_cache_h]
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Auto-populate from audit_log if Redis has insufficient history
     if len(_te_history_cache) < 5:
@@ -12616,8 +12625,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _audit_scores = [float(r["omega_mem_final"]) for r in _hist_r.data if r.get("omega_mem_final") is not None]
                     if len(_audit_scores) > len(_te_history_cache):
                         _te_history_cache = list(reversed(_audit_scores))  # oldest first
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Make history available to downstream modules that check req.score_history
     if _te_history_cache and not req.score_history:
@@ -12945,8 +12954,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 # Normalize to 0-1 via sigmoid
                 _fhd = round(min(1.0, 2.0 / (1.0 + math.exp(-_mah_dist / 5.0)) - 1.0), 3)
                 _fhd_available = True
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         # Store current vector for future fleet health computation (only USE_MEMORY)
         if _final_action == "USE_MEMORY":
             try:
@@ -12959,8 +12968,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _fh_existing.append(_fh_vec)
                 _fh_existing = _fh_existing[-500:]  # Keep last 500
                 _persist_store_bg("fleet_health_vectors", _fh_existing, ttl=604800)  # 7 days
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     response = {
         "omega_mem_final": omega_out,
@@ -13027,7 +13036,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "projected_improvement": 0,
                 "success_probability": 1.0 if _ts_check["timestamp_integrity"] == "MANIPULATED" else 0.8,
             })
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["timestamp_integrity"] = "VALID"
         response["timestamp_flags"] = []
 
@@ -13044,7 +13054,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "projected_improvement": 0,
                 "success_probability": 1.0 if _id_check["identity_drift"] == "MANIPULATED" else 0.8,
             })
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["identity_drift"] = "CLEAN"
         response["identity_drift_flags"] = []
 
@@ -13065,7 +13076,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "projected_improvement": 0,
                 "success_probability": 1.0 if _cc_check["consensus_collapse"] == "MANIPULATED" else 0.8,
             })
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["consensus_collapse"] = "CLEAN"
         response["consensus_collapse_flags"] = []
         response["collapse_ratio"] = 0.0
@@ -13098,7 +13110,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "projected_improvement": 0,
                 "success_probability": 1.0 if _pc_check["provenance_chain_integrity"] == "MANIPULATED" else 0.8,
             })
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["provenance_chain_integrity"] = "CLEAN"
         response["provenance_chain_flags"] = []
         response["chain_depth"] = 0
@@ -13119,7 +13132,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "reason": "Multiple attack vectors detected simultaneously. Treat as coordinated attack.",
                 "priority": "critical", "projected_improvement": 0, "success_probability": 1.0,
             })
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["attack_surface_score"] = 0.0
         response["attack_surface_level"] = "NONE"
         response["active_detection_layers"] = []
@@ -13137,7 +13151,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "reason": "Memory state shows synthetic patterns. Verify entries originate from independent real sources.",
                 "priority": "high", "projected_improvement": 0, "success_probability": 0.8,
             })
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["naturalness_score"] = 1.0
         response["naturalness_level"] = "ORGANIC"
         response["naturalness_flags"] = []
@@ -13160,7 +13175,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _s_fairness = max(0, round(100 - _unfairness, 1))
         response["component_breakdown"]["s_fairness"] = _s_fairness
         response["fairness_flags"] = _fairness_flags
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["fairness_flags"] = []
 
     # Memory location metadata + URI analysis
@@ -13235,8 +13251,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                             response["vaccination_match"] = True
                             response["matched_signature_id"] = _vid
                             break
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Memory vaccination — store signature on MANIPULATED BLOCK (Fix 2: require 2+ layers + omega>60)
     if _redis_enabled and response.get("recommended_action") == "BLOCK":
@@ -13262,8 +13278,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key}/{_urlp.quote(_sig['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                     _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                     _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)  # Match vaccine TTL: 7 days
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Compromised agent registry — add agents from provenance chains on MANIPULATED BLOCK
     if _redis_enabled and response.get("recommended_action") == "BLOCK":
@@ -13287,8 +13303,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         _get_redis_session().post(
                             f"{UPSTASH_REDIS_URL}/RPUSH/compromised_agents/{urllib.parse.quote(_ca_id, safe='')}",
                             headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
                 if _new_agents:
                     # Cap list at 500 and set TTL
                     try:
@@ -13296,10 +13312,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                             headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
                         _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/compromised_agents/604800",
                             headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as _e:
+                        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Enrich outcome dict with compliance + repair for downstream /v1/outcome learning
     with _outcomes_lock:
@@ -13398,8 +13414,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "current_run_length": bocpd.current_run_length,
                     "merkle_reset_triggered": bocpd.merkle_reset_triggered,
                 }
-        except Exception:
-            pass  # graceful degradation
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         # Page-Hinkley change detection
         _ph_alert = False
@@ -13422,8 +13438,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         "lambda_used": ph.lambda_used,
                     }
                     _ph_alert = ph.alert
-        except Exception:
-            pass  # graceful degradation
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         response["trend_detection"] = td
 
@@ -13459,8 +13475,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 )
                 if _r.ok and _r.json().get("result") is not None:
                     fe_max = float(_r.json()["result"])
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         fe = compute_free_energy(omega_out, cal.meta_score, result.component_breakdown, fe_max)
         if fe:
@@ -13483,10 +13499,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                             headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
                             timeout=2,
                         )
-                except Exception:
-                    pass
-    except Exception:
-        pass  # graceful degradation
+                except Exception as _e:
+                    _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Wire surprise into at_risk_warnings: entries with surprise > 0.8 get elevated
     if fe_surprise > 0.8 and at_risk_warnings:
@@ -13515,8 +13531,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "reversibility": it.reversibility,
                 }
                 _it_max_flow = it.max_flow
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Mahalanobis multivariate anomaly detection (I-06)
     try:
@@ -13542,8 +13558,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 new_interf = min(100, old_interf + boost)
                 if "component_breakdown" in response:
                     response["component_breakdown"]["s_interference"] = round(new_interf, 2)
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Provenance entropy (P-03)
     try:
@@ -13562,8 +13578,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _peh = _per.json().get("result", [])
                     if _peh:
                         _pe_history = [float(x) for x in _peh]
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         pe = compute_provenance_entropy(_pe_entries, history=_pe_history)
         if pe:
@@ -13599,10 +13615,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
                         timeout=2,
                     )
-                except Exception:
-                    pass
-    except Exception:
-        pass  # graceful degradation
+                except Exception as _e:
+                    _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Subjective Logic (P-04) — clamp trust + conflict ≤ 1.0
     try:
@@ -13631,8 +13647,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             if sl.fused_opinion and "component_breakdown" in response:
                 fused_risk = (1.0 - sl.fused_opinion.projected_prob) * 100
                 response["component_breakdown"]["s_provenance"] = round(min(100, fused_risk), 2)
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Fréchet distance for encoding degradation (R-05)
     try:
@@ -13655,8 +13671,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         _fd_data = _json.loads(_fdr.json()["result"])
                         _fd_ref = _fd_data.get("vectors")
                         _fd_age = _fd_data.get("age", 0) + 1
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
             if _fd_ref is None:
                 # First call or reset: store current as reference (skip for demo)
@@ -13668,8 +13684,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                             headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
                             timeout=2,
                         )
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
             else:
                 fd = compute_frechet(_fd_vectors, _fd_ref, reference_age_steps=_fd_age)
                 if fd:
@@ -13694,10 +13710,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                                 headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
                                 timeout=2,
                             )
-                        except Exception:
-                            pass
-    except Exception:
-        pass  # graceful degradation
+                        except Exception as _e:
+                            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Mutual Information encoding efficiency (R-06/R-07)
     try:
@@ -13717,8 +13733,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 boost = (1.0 - mi.nmi_score) * 20
                 old_enc = response["component_breakdown"].get("r_encode", 0)
                 response["component_breakdown"]["r_encode"] = round(min(100, old_enc + boost), 2)
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # MDP optimal healing strategy (REC-02)
     try:
@@ -13734,8 +13750,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 )
                 if _mdpr.ok and _mdpr.json().get("result"):
                     _mdp_data = _json.loads(_mdpr.json()["result"])
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         mdp = compute_mdp(omega_out, transition_data=_mdp_data)
         if mdp:
@@ -13755,8 +13771,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "projected_improvement": round(mdp.expected_value * 10, 1),
                     "priority": "high" if mdp.state in ("DEGRADED", "CRITICAL") else "medium",
                 })
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # MTTR Weibull estimation (REC-03)
     try:
@@ -13773,8 +13789,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _mttrh = _mttrr.json().get("result", [])
                     if _mttrh:
                         _mttr_durations = [float(x) for x in _mttrh]
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         mttr = compute_mttr(_mttr_durations)
         if mttr:
@@ -13795,8 +13811,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "projected_improvement": 0,
                     "priority": "high",
                 })
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # CTL branching-time verification (FV-07)
     try:
@@ -13825,8 +13841,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     response["compliance_result"]["warnings"].append(
                         "CTL_WARNING: healing convergence not guaranteed on all paths"
                     )
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Lyapunov Exponent chaos detection (S-03)
     _lyap_lambda = None
@@ -13886,8 +13902,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         "projected_improvement": 0,
                         "priority": "high",
                     })
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Banach Fixed-Point contraction (S-04)
     try:
@@ -13910,8 +13926,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         "projected_improvement": 0,
                         "priority": "high",
                     })
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Hotelling T-squared control chart (S-05)
     try:
@@ -13926,8 +13942,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 )
                 if _hr.ok and _hr.json().get("result"):
                     _hot_ref = _json.loads(_hr.json()["result"])
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         hot = compute_hotelling_t2(result.component_breakdown, reference_data=_hot_ref)
         if hot:
@@ -13947,8 +13963,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         "warning": "hotelling_out_of_control",
                         "signal_breakdown": {},
                     })
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Fisher-Rao metric (IG-02)
     _fr_diag = None
@@ -13961,8 +13977,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "geometry": fr.geometry,
             }
             _fr_diag = fr.metric_diagonal
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Geodesic Flow (IG-04) + Natural Gradient flag (IG-03)
     try:
@@ -13982,8 +13998,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             # IG-03: flag natural gradient usage in unified_loss
             if _fr_diag and "unified_loss" in response:
                 response["unified_loss"]["natural_gradient_used"] = True
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Koopman Operator (OP-01)
     try:
@@ -13998,8 +14014,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "prediction_5": koop.prediction_5,
                     "stable": koop.stable,
                 }
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Ergodicity (ET-01)
     try:
@@ -14016,8 +14032,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "ergodic": erg.ergodic,
                     "interpretation": erg.interpretation,
                 }
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Extended Freshness models (W-03/04/05)
     try:
@@ -14045,8 +14061,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             if "component_breakdown" in response:
                 fresh_score = (1.0 - ef.ensemble_freshness) * 100  # lower freshness = higher risk
                 response["component_breakdown"]["s_freshness"] = round(min(100, fresh_score), 2)
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Persistent Homology (TDA-01)
     try:
@@ -14064,8 +14080,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "structural_drift": ph.structural_drift,
                     "topology_summary": ph.topology_summary,
                 }
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Ollivier-Ricci Curvature (TDA-04)
     try:
@@ -14093,8 +14109,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                             "warning": "ricci_fragile_connection",
                             "signal_breakdown": {"kappa": kappa, "connected_to": to_id},
                         })
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Recursive Colimit (Category Theory)
     _colimit_state = None
@@ -14117,8 +14133,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _cl_iter = _cl_data.get("iteration", 0)
                     _cl_min = _cl_data.get("min")
                     _cl_max = _cl_data.get("max")
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         _omega_scores = list(result.component_breakdown.values())
         _h1 = response.get("consistency_analysis", {}).get("h1_rank", 0)
@@ -14147,10 +14163,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
                         timeout=2,
                     )
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as _e:
+                    _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Cohomological Learning Gradient
     try:
@@ -14172,8 +14188,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             }
             if cg.cohomological_update_used and "unified_loss" in response:
                 response["unified_loss"]["cohomological_update_used"] = True
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Cox Proportional Hazard (W-06)
     try:
@@ -14184,8 +14200,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["cox_hazard"] = {"hazard_rate": cox.hazard_rate, "survival_probability": cox.survival_probability, "high_risk": cox.high_risk}
             if cox.high_risk and "component_breakdown" in response:
                 response["component_breakdown"]["s_freshness"] = round(min(100, response["component_breakdown"].get("s_freshness", 0) + 10), 2)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Arrhenius Degradation (W-07)
     try:
@@ -14193,8 +14209,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         arr = compute_arrhenius(_arr_entries)
         if arr:
             response["arrhenius"] = {"degradation_rate": arr.degradation_rate, "effective_lifetime": arr.effective_lifetime, "heat_index": arr.heat_index}
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "OWA Provenance (P-05)", "error": str(_e)[:200]})
 
     # OWA Provenance (P-05)
     try:
@@ -14204,8 +14220,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["owa_provenance"] = {"owa_score": owa.owa_score, "weights_used": owa.weights_used, "orness": owa.orness}
             if "component_breakdown" in response:
                 response["component_breakdown"]["s_provenance"] = round(min(100, (1.0 - owa.owa_score) * 100), 2)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Poisson Recall (R-03)
     try:
@@ -14217,16 +14233,16 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if _prr.ok and _prr.json().get("result") is not None:
                     _pr_lam = float(_prr.json()["result"])
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         pr = compute_poisson_recall(_pr_lam)
         if pr:
             response["poisson_recall"] = {"lambda_rate": pr.lambda_rate, "expected_errors_10": pr.expected_errors_10, "error_probability": pr.error_probability}
             if "component_breakdown" in response:
                 old_recall = response["component_breakdown"].get("r_recall", 0)
                 response["component_breakdown"]["r_recall"] = round(min(100, old_recall + pr.error_probability * 20), 2)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # ROC AUC Monitoring (R-04)
     try:
@@ -14242,10 +14258,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     roc = compute_roc_auc(_preds, _acts)
                     if roc:
                         response["roc_monitoring"] = {"auc_estimate": roc.auc_estimate, "model_degraded": roc.model_degraded, "retrain_recommended": roc.retrain_recommended}
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Front-door criterion (REC-04)
     try:
@@ -14257,14 +14273,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if _fdr.ok and _fdr.json().get("result"):
                     _fd_data = _json.loads(_fdr.json()["result"])
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         _mem_types = list(set(e.type for e in entries))
         fd = compute_frontdoor(omega_out, req.domain, req.action_type, _mem_types, _fd_data)
         if fd:
             response["frontdoor_effect"] = {"causal_effect": fd.causal_effect, "confounders_controlled": fd.confounders_controlled, "do_calculus_estimate": fd.do_calculus_estimate}
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Expected Utility (C-03)
     try:
@@ -14280,8 +14296,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         eu = compute_expected_utility(_eu_q, _eu_eps)
         response["expected_utility"] = {"utilities": eu.utilities, "optimal_action": eu.optimal_action,
                                         "utility_margin": eu.utility_margin, "utility_using_prior_probabilities": eu.utility_using_prior_probabilities}
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # CVaR Risk (C-04)
     try:
@@ -14293,8 +14309,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 if cv.tail_risk == "high":
                     repair_plan_out.append({"action": "CVAR_WARNING", "entry_id": "*",
                         "reason": "CVaR WARNING: worst-case memory risk is high", "projected_improvement": 0, "priority": "high"})
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Gumbel-Softmax (ML-07)
     try:
@@ -14307,8 +14323,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             gs = compute_gumbel_softmax(_log_probs, _gs_temp, seed=request_id)
             if gs:
                 response["gumbel_softmax"] = {"relaxed_probs": gs.relaxed_probs, "temperature": gs.temperature, "straight_through": gs.straight_through}
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # FIM Extended (ML-08)
     try:
@@ -14318,8 +14334,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "top_interactions": [{"param_i": t.param_i, "param_j": t.param_j, "interaction": t.interaction} for t in fim_ext.top_interactions],
                 "most_sensitive": fim_ext.most_sensitive,
             }
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Simulated Annealing (ML-09)
     try:
@@ -14334,8 +14350,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 if _sar.ok and _sar.json().get("result"):
                     _sa_prev = _json.loads(_sar.json()["result"])
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         sa = compute_simulated_annealing(_sa_loss, _sa_gc, _sa_prev)
         if sa:
             response["simulated_annealing"] = {"current_temperature": sa.current_temperature, "accepted_moves": sa.accepted_moves, "best_loss": sa.best_loss, "sa_active": sa.sa_active}
@@ -14344,10 +14360,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _sa_store = _json.dumps({"temperature": sa.current_temperature, "accepted": sa.accepted_moves, "best_loss": sa.best_loss, "iteration": _sa_prev.get("iteration", 0) + 1 if _sa_prev else 1})
                     _get_redis_session().post(f"{UPSTASH_REDIS_URL}/SET/{_sa_key}/{_sa_store}/EX/86400",
                         headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as _e:
+                    _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # LQR + Persistence Landscape + Topological Entropy (ML-10, TDA-02, TDA-03)
     # A1 parallel zone: 3 pure-compute modules, no shared state, no Redis I/O.
@@ -14361,7 +14377,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     def _a1_run_lqr():
         try:
             return compute_lqr(_a1_lqr_input)
-        except Exception:
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
             return None
 
     def _a1_run_pl():
@@ -14369,7 +14386,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             if not _a1_b1_data:
                 return None
             return compute_persistence_landscape(_a1_b1_data)
-        except Exception:
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
             return None
 
     def _a1_run_te():
@@ -14377,7 +14395,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             if not _a1_te_ready:
                 return None
             return compute_topological_entropy(_a1_te_history, omega_out)
-        except Exception:
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
             return None
 
     _a1_parallel = bool(req.parallel_scoring)
@@ -14388,7 +14407,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             lqr, pl, te = _a1_results[0], _a1_results[1], _a1_results[2]
             response["parallel_scoring_applied"] = True
             response["parallel_scoring_modules"] = ["lqr_control", "persistence_landscape", "topological_entropy"]
-        except Exception:
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
             # Fallback to sequential on any failure — preserves determinism guarantee
             lqr, pl, te = _a1_run_lqr(), _a1_run_pl(), _a1_run_te()
             response["parallel_scoring_applied"] = False
@@ -14415,8 +14435,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 response["original_recommended_action"] = _orig_action
                 _set_action("ASK_USER", "homology_torsion", "hallucination risk high")
                 response["hallucination_override"] = True
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Dirichlet Process (ADV-02)
     try:
@@ -14549,8 +14569,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "noise_interference_count": rmt_result.noise_interference_count,
                 "signal_ratio": rmt_result.signal_ratio,
             }
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Causal graph discovery (LiNGAM)
     try:
@@ -14565,8 +14585,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "causal_chain": cg.causal_chain,
                 "causal_explanation": cg.causal_explanation,
             }
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Spectral graph Laplacian analysis
     try:
@@ -14580,8 +14600,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "cheeger_bound": sp.cheeger_bound,
                 "mixing_time_estimate": sp.mixing_time_estimate,
             }
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Memory consolidation (Hopfield + MI)
     try:
@@ -14596,8 +14616,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "fragile_entries": cons.fragile_entries,
                 "replay_priority": cons.replay_priority,
             }
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Rate-Distortion optimal retention (RD-01)
     try:
@@ -14629,8 +14649,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                         "projected_improvement": round(r.distortion_cost * 0.5, 1),
                         "priority": "medium",
                     })
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Jump-Diffusion process (DS-04)
     jump_diffusion_result = None
@@ -14646,8 +14666,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "flash_crash_risk": jump_diffusion_result.flash_crash_risk,
                     "expected_next_jump": jump_diffusion_result.expected_next_jump,
                 }
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Lévy Flight tail analysis (DS-07)
     levy_result = None
@@ -14664,8 +14684,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "extreme_event_probability": levy_result.extreme_event_probability,
                     "tail_index": levy_result.tail_index,
                 }
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Cascade risk: jump_detected AND burst_detected, OR all three (jump + burst + heavy tail)
     cascade_risk = False
@@ -14674,8 +14694,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             cascade_risk = True
         if levy_result and levy_result.heavy_tail_risk and jump_diffusion_result and jump_diffusion_result.jump_detected and hawkes.burst_detected:
             cascade_risk = True
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
     response["cascade_risk"] = cascade_risk
 
     # Wire Lévy into repair_plan
@@ -14700,8 +14720,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "transition_probs": hmm_result.transition_probs,
                     "regime_duration": hmm_result.regime_duration,
                 }
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Regime collapse risk: HMM CRITICAL AND BOCPD regime_change simultaneously
     regime_collapse_risk = False
@@ -14711,8 +14731,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             bocpd_data = td.get("bocpd", {})
             if bocpd_data.get("regime_change", False):
                 regime_collapse_risk = True
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
     response["regime_collapse_risk"] = regime_collapse_risk
 
     # Ornstein-Uhlenbeck mean-reversion (DS-06)
@@ -14747,10 +14767,10 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
                     timeout=2,
                 )
-            except Exception:
-                pass
-    except Exception:
-        pass  # graceful degradation
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Wire OU into repair_plan
     if ou_result:
@@ -14794,8 +14814,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             # Wire into compliance: EU AI Act gets zk_consistency_proof when valid
             if zk_sheaf.proof_valid and "compliance_result" in response:
                 response["compliance_result"]["zk_consistency_proof"] = True
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # RL Q-learning adjustment
     rl = None
@@ -14807,8 +14827,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "learning_episodes": rl.learning_episodes,
             "confidence": rl.confidence,
         }
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Policy Gradient with Advantage (RL-02)
     try:
@@ -14831,8 +14851,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 )
                 if _ptr.ok and _ptr.json().get("result") is not None:
                     _pg_temp = float(_ptr.json()["result"])
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         _current_idx = ACTION_MAP.get(result.recommended_action, 0)
         pg = compute_policy_gradient(_qv, _current_idx, _pg_temp)
@@ -14854,8 +14874,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             if "rl_adjustment" in response:
                 response["rl_adjustment"]["rl_adjusted_action"] = pg.best_action
             response["pg_override"] = True
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     if req.thread_id:
         response["thread_id"] = req.thread_id
@@ -14939,8 +14959,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "interpretation": ss.interpretation,
             "component_count": ss.component_count,
         }
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Unified Loss L_v4
     try:
@@ -14960,8 +14980,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _lv4_data = _lv4_json.loads(_lv4r.json()["result"])
                     _lv4_weights = _lv4_data.get("weights")
                     _lv4_update_count = _lv4_data.get("update_count", 0)
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
         # Gather loss components from response
         _fe = response.get("free_energy", {})
@@ -14995,8 +15015,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "dominant_loss": ul.dominant_loss,
             "geodesic_update_count": ul.geodesic_update_count,
         }
-    except Exception:
-        pass  # graceful degradation
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # FIX 9: dry_run skips audit log and webhooks.
     # Issue R/S fix: audit_log is now deferred to the VERY END of preflight
@@ -15025,8 +15045,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             best = max(_patterns, key=lambda p: p[1])
             response["detected_pattern"] = best[0]
             response["pattern_confidence"] = round(best[1], 2)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Memory Poisoning Detection
     try:
@@ -15035,8 +15055,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["poisoning_analysis"] = poison
             # Emit webhook
             _dispatch_webhooks("POISONING_SUSPECTED", request_id, omega_out, [e.id for e in entries])
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Aging rules (graceful — never crashes preflight)
     try:
@@ -15047,8 +15067,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _set_action("BLOCK", "aging_rule", "aging force BLOCK")
             elif aging.get("force_action") == "WARN" and response.get("recommended_action") == "USE_MEMORY":
                 _set_action("WARN", "aging_rule", "aging force WARN")
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #23 Confidence Intervals
     try:
@@ -15066,8 +15086,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "sample_size": _ci_n,
                 "reliable": _ci_std < 20,
             }
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #39 Auto Explain
     if req.auto_explain and response.get("recommended_action") == "BLOCK":
@@ -15085,8 +15105,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "language": _ae_lang,
             }
             response["quota_used"] = 2
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #121 Trust Decay per Source
     try:
@@ -15109,8 +15129,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 prov_boost = max(0, (1.0 - avg_adj) * 10)
                 old_prov = response["component_breakdown"].get("s_provenance", 0)
                 response["component_breakdown"]["s_provenance"] = round(min(100, old_prov + prov_boost), 2)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #122 Goal Drift Detector
     try:
@@ -15131,8 +15151,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             if _drift > 0.3:
                 repair_plan_out.append({"action": "GOAL_DRIFT_WARNING", "entry_id": "*",
                     "reason": f"Agent goal drift detected ({_drift:.2f}). Review memory alignment.", "projected_improvement": 0, "priority": "medium"})
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #141 Meta-Learning Rate
     try:
@@ -15155,8 +15175,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             redis_set(_ml_key, {"eta": round(eta, 6), "ewc_strength": round(ewc, 4)}, ttl=86400)
         response["meta_learning"] = {"current_eta": round(eta, 6), "consistency_score": round(_cons_score, 4),
             "eta_adjusted": eta_adjusted, "ewc_strength": round(ewc, 4), "ewc_at_maximum": ewc_at_max}
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #130 Auto outcome inference
     # FIX 8: Suppress auto-inference when outcome_context is "refresh"
@@ -15186,12 +15206,12 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "status": auto_inferred,
                     "domain": req.domain,
                 }, ttl=3600)
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         if not _is_dry_run:
             redis_set(_last_pf_key, omega_out, ttl=300)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # FIX 2: Ensure all repair_plan items have success_probability + re-sort
     _rp = response.get("repair_plan", [])
@@ -15242,7 +15262,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             response["decision_based_on"] = "omega_raw"
         # Recompute Shapley from FINAL breakdown
         response["shapley_values"] = compute_shapley_values(_final_cb, req.action_type, req.domain, req.custom_weights)
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["omega_adjusted"] = omega_out
         response["omega_delta"] = 0.0
         response["score_version"] = "v2_reconciled"
@@ -15296,7 +15317,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         else:
             response["assurance_score"] = 50
             response["assurance_basis"] = "insufficient_data"
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["assurance_score"] = 50
         response["assurance_basis"] = "insufficient_data"
     response["assurance_score_v2"] = True
@@ -15343,8 +15365,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 response.get("compliance_result", {}),
                 _override_chain, response.get("repair_plan", []))
             response["black_box_capsule_id"] = _bb_cid
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # FIX 7: Entry-level Shapley (leave-one-out)
     try:
@@ -15372,7 +15394,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         response["entry_shapley"] = _entry_shapley
         if _truncated or _n_entries > 20:
             response["entry_shapley_truncated"] = True
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["entry_shapley"] = []
 
     # FIX 9: Dry run — no webhooks, no audit, no quota
@@ -15423,8 +15446,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "detection_states": {dl: response.get(dl, "CLEAN") for dl in ["timestamp_integrity", "identity_drift", "consensus_collapse", "provenance_chain_integrity"]},
                 "n_entries": len(req.memory_state), "ts": _time.time()
             }, ttl=3600)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # FIX 11: Track outcomes per bucket for calibrated thresholds
     try:
@@ -15434,8 +15457,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _outcome_buckets[_ob_key].append({"omega": omega_out, "action": response.get("recommended_action")})
         if len(_outcome_buckets[_ob_key]) > 200:
             _outcome_buckets[_ob_key] = _outcome_buckets[_ob_key][-200:]
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #2 Sleeper scan integration — check if scan found sleepers for this agent
     try:
@@ -15451,8 +15474,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     if _se.id in _sl_ids:
                         response["sleeper_warning"] = f"Entry {_se.id} matches known sleeper pattern from scan {_sleeper_sid}"
                         break
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # FIX 12: Privacy layer + repair_plan actionability
     if req.detail_level == "obfuscated":
@@ -15527,8 +15550,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _fc_sev = min(_SEVERITY[_base] + 1, 2)  # cap at ASK_USER
                 _forecast = _SEV_TO_ACTION[max(_SEVERITY[_base], _fc_sev)]
                 response["preventive_action"] = _forecast
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # Step 3 — Sticky floor (ONLY ASK_USER and BLOCK are sticky, stateful calls only)
     _sticky = _base  # default: no sticky effect
@@ -15540,8 +15563,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _prev_sum = _rget(_diff_key_hyst)
             if _prev_sum and isinstance(_prev_sum, dict):
                 _prev_decision = _prev_sum.get("action")
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
     if _prev_decision is not None:
         # Only ASK_USER and BLOCK are sticky, and only if omega >= 30
         if _prev_decision in ("ASK_USER", "BLOCK") and _omega_now >= 30:
@@ -15654,7 +15677,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _cb["s_interference"] = min(100.0, round(_cb.get("s_interference", 0) + 40, 2)); _dfb_applied = True
         response["component_breakdown"] = _cb
         response["detection_feedback_applied"] = _dfb_applied
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["detection_feedback_applied"] = False
 
     response["response_profile_used"] = _profile
@@ -15721,8 +15745,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 "failure_risk_10_steps": round(max(0, (p10 - 50) / 50), 4) if p10 > 50 else 0,
                 "predicted_failure_steps": int(50 / max(abs(p5 - omega_out), 0.1)) if p5 > omega_out else None,
             }
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     response["per_module_latency"] = _module_times
     response["pipeline_ms"] = round((_time.monotonic() - _t_start) * 1000, 1)
@@ -15812,7 +15836,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         # #136 Push circuit_open event
         if _cb_state["state"] == "OPEN":
             _push_event(_ev_kh, {"type": "circuit_open", "omega": omega_out, "domain": req.domain, "request_id": request_id, "cross_domain": _cross_domain})
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["circuit_breaker_state"] = "CLOSED"
         response["cross_domain_block"] = False
 
@@ -15966,8 +15991,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _twin_jobs[_twin_jid] = {"status": "complete", "result": _cf_result, "created_at": _time.time()}
                 response["twin_auto_triggered"] = True
                 response["twin_job_id"] = _twin_jid
-            except Exception:
-                pass
+            except Exception as _e:
+                _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #13 Counterfactual always available
     response["counterfactual_available"] = True
@@ -16001,8 +16026,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 repair_plan_out.append({"action": "PERSONA_REVIEW", "entry_id": "*",
                     "reason": _pc.get("persona_violation", ""), "projected_improvement": 0,
                     "priority": "high", "success_probability": 0.5, "expected_omega_after": omega_out})
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #18 Prune recommendation
     if len(entries) > 1000 and omega_out > 60:
@@ -16011,14 +16036,14 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
     # #43 Cleanup expired ATC holds (piggyback on preflight — most frequent call)
     try:
         _cleanup_expired_holds()
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #22 Check predictive alerts
     try:
         _check_predictive_alert(_safe_key_hash(key_record), req.agent_id or "anonymous", None)
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #137 Shadow preflight (async — never blocks)
     if req.profile:
@@ -16043,13 +16068,13 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                                 "subject": "Sgraal: Human approval required for agent action",
                                 "text": f"Your AI agent needs human approval before proceeding.\n\nAgent: {_notif_agent}\nDomain: {req.domain}\nAction type: {req.action_type}\nOmega score: {omega_out}\n\nReason: {response.get('explainability_note', '')}\n\nReview in dashboard: app.sgraal.com\n\nThis is an automated notification from Sgraal.",
                             })
-                        except Exception:
-                            pass
+                        except Exception as _e:
+                            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
                     threading.Thread(target=_send_notif, daemon=True).start()
                     redis_set(_notif_key, True, ttl=3600)
                     response["notification_sent"] = True
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # ── Grok Compatibility Mode ──
     if req.grok_context and isinstance(req.grok_context, dict):
@@ -16332,11 +16357,11 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _get_redis_session().post(
                         f"{UPSTASH_REDIS_URL}/LTRIM/signal_vectors:recent/-10000/-1",
                         headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
             _sv_logged = True
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
     response["signal_vector_logged"] = _sv_logged
 
     # NEW: heal_roi — ROI per repair plan entry (voi_score / healing_cost)
@@ -16472,7 +16497,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         else:
             response["knowledge_age_summary"] = None
             response["knowledge_age_oldest_trusted_days"] = None
-    except Exception:
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["knowledge_age_summary"] = None
         response["knowledge_age_oldest_trusted_days"] = None
     response["fleet_health_distance"] = _fhd
@@ -16511,8 +16537,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     _mct = "CONSOLIDATING"
                 else:
                     _mct = "STABLE"
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
     response["memory_complexity_trend"] = _mct
 
     # -----------------------------------------------------------------------
@@ -16652,8 +16678,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                     "heal_roi": round(_cf_top_improvement, 2),
                     "counterfactual_source": True,
                 })
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
     response["counterfactual_heal_suggested"] = _cf_heal_suggested
     response["counterfactual_top_entry_id"] = _cf_top_entry if _cf_heal_suggested else None
 
@@ -16838,8 +16864,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 _br_warnings.append("s_drift and r_recall are 95% correlated — consider consolidation")
             if _br_warnings:
                 response["component_redundancy_warning"] = _br_warnings
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # T3: Leniency bias ratio — safety-positive asymmetry
     # From error analysis of the 109 benchmark error cases (Rounds 1-4):
@@ -16880,7 +16906,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             for rule in _ewc_rules:
                 try:
                     mod_val = float(_ewc_cb.get(rule["module"], 0) or 0)
-                except Exception:
+                except Exception as _e:
+                    _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
                     continue
                 if mod_val > rule["threshold"]:
                     _ewc_signals.append({
@@ -16914,8 +16941,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
                 })
         if _ewc_signals:
             response["early_warning_signals"] = _ewc_signals
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #397: Governance Score — composite 0-100 metric combining 5 inverted risk signals
     # Weights equal (0.20 each). Higher score = better memory governance.
@@ -16954,8 +16981,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             "confidence_calibration": round(_gs_cal_score, 2),
             "weights": {"omega": 0.2, "fleet_health": 0.2, "stability": 0.2, "monoculture": 0.2, "calibration": 0.2},
         }
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # #406: Thermodynamic cost — Landauer bound per call
     # Every preflight call erases information: entries processed × bits per entry.
@@ -16974,8 +17001,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         # On BLOCK calls, expose the cost as an explicit audit marker
         if response.get("recommended_action") == "BLOCK":
             response["thermodynamic_cost"]["logged_to_audit"] = True
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # T5: Memory usable lifetime (days until F reaches 95% of F∞ = 2.27).
     # Measured empirically via /Users/zsobrakpeter/core/scripts/t5_memory_halflife.py.
@@ -17000,8 +17027,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         _dom = max(_type_counts, key=_type_counts.get) if _type_counts else "semantic"
         response["memory_usable_lifetime_days"] = _T5_LIFETIMES.get(_dom, 30)
         response["memory_usable_lifetime_type"] = _dom
-    except Exception:
-        pass
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # A3: Expected savings per BLOCK
     # Only populated for BLOCK/WARN/ASK_USER decisions. Uses P(failure|omega) from
@@ -17018,7 +17045,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
         try:
             _es_omega = float(response.get("omega_mem_final", 0) or 0)
             _es_p_fail = 1.0 / (1.0 + math.exp(-0.15 * (_es_omega - 46.0)))
-        except Exception:
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
             _es_p_fail = 0.0
         _es_if_blocked = round(_es_p_fail * _es_tx_value, 2)
         # actual_savings_this_call is realized only on BLOCK (we prevented the action)
@@ -17060,8 +17088,8 @@ def preflight(req: PreflightRequest, key_record: dict = Depends(verify_api_key))
             _redis_pool.submit(lambda: http_requests.post(
                 f"{_otlp_endpoint}/v1/traces", json=_otlp_span,
                 headers={"Content-Type": "application/json"}, timeout=2))
-        except Exception:
-            pass
+        except Exception as _e:
+            _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
     # --- Plugin hooks: on_component_score / on_omega_computed / on_preflight_complete ---
     # Tenant-scoped: only plugins this tenant activated will run.
