@@ -68,3 +68,33 @@ The Dockerfile runs as non-root user. The Helm chart enforces:
 - runAsNonRoot: true
 - readOnlyRootFilesystem: false (needed for tmp files)
 - drop ALL capabilities
+
+## Staging vs Production
+
+### Deploy to staging
+```bash
+# Create or switch to staging environment on Railway
+railway environment staging
+railway up
+```
+
+### Deploy to production
+Production auto-deploys from `main` branch. Manual deploy:
+```bash
+railway environment production
+railway up
+```
+
+### Promote staging to production
+After verifying staging is healthy:
+```bash
+git push origin main  # Railway auto-deploys production from main
+```
+
+### Environment variables for staging
+Staging should use separate credentials where possible:
+- `ENVIRONMENT=staging` (CORS restricts localhost)
+- Separate `SUPABASE_URL` / `SUPABASE_KEY` (staging project)
+- Separate `UPSTASH_REDIS_URL` / `UPSTASH_REDIS_TOKEN` (staging Redis)
+- Same `ATTESTATION_SECRET` / `PASSPORT_SIGNING_KEY_V1` (if you want VCs to be cross-environment verifiable)
+- `SGRAAL_TEST_MODE` must NOT be set in staging

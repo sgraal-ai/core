@@ -79,6 +79,10 @@ const safeSendEmail = withPreflight(
 );
 ```
 
+## Compatibility
+
+Tested with @modelcontextprotocol/sdk 1.x. Breaking changes in 2.x are not guaranteed to be compatible.
+
 ## License
 
 Apache 2.0
