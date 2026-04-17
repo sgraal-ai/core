@@ -975,7 +975,17 @@ if (
 bearer_scheme = HTTPBearer()
 
 
-_DEMO_ALLOWED_PATHS = {"/v1/preflight", "/v1/explain", "/v1/preflight/batch"}
+# Demo key is blocked from sensitive admin/data endpoints. Everything else is allowed.
+_DEMO_BLOCKED_PATHS = {
+    "/v1/audit-log", "/v1/audit-log/export",
+    "/v1/destroy",
+    "/v1/api-keys/generate",
+    "/v1/config/thresholds",
+    "/v1/governance-score",  # prefix-matched below
+    "/v1/research/production-validation",
+    "/v1/research/constants",
+}
+_DEMO_BLOCKED_PREFIXES = ("/v1/governance-score/", "/v1/team", "/v1/sla/")
 
 
 def verify_api_key(
@@ -985,12 +995,13 @@ def verify_api_key(
     """Validate Bearer token and return the key record with tier/usage info."""
     api_key = credentials.credentials
 
-    # Demo playground key — scope-enforced here, not just in _check_rate_limit
+    # Demo playground key — blocked from sensitive admin endpoints only
     if api_key == "sg_demo_playground":
-        if request.url.path not in _DEMO_ALLOWED_PATHS:
+        _path = request.url.path
+        if _path in _DEMO_BLOCKED_PATHS or any(_path.startswith(p) for p in _DEMO_BLOCKED_PREFIXES):
             raise HTTPException(
                 status_code=403,
-                detail=f"Demo key (sg_demo_playground) is restricted to {sorted(_DEMO_ALLOWED_PATHS)}. "
+                detail=f"Demo key (sg_demo_playground) is not allowed on {_path}. "
                        f"Sign up at /v1/signup for a full API key.",
             )
         return {"customer_id": "demo", "tier": "demo", "calls_this_month": 0, "key_hash": "demo", "demo": True}

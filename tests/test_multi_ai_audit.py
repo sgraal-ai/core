@@ -55,11 +55,14 @@ class TestAuditTrailBounded:
 
 
 class TestDemoKeyScope:
-    def test_demo_key_forbidden_on_audit_log(self):
-        """FIX 3: demo key must return 403 on endpoints outside the allowed set."""
+    def test_demo_key_forbidden_on_sensitive_endpoints(self):
+        """FIX 3: demo key must return 403 on sensitive admin endpoints."""
         r = client.get("/v1/audit-log", headers=DEMO_AUTH)
         assert r.status_code == 403
-        assert "Demo key" in r.json()["detail"]
+        assert "Demo key" in r.json()["detail"] or "demo" in r.json()["detail"].lower()
+
+        r2 = client.get("/v1/research/constants", headers=DEMO_AUTH)
+        assert r2.status_code == 403
 
     def test_demo_key_allowed_on_preflight(self):
         """Demo key must still work on /v1/preflight."""

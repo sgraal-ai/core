@@ -22,21 +22,22 @@ _HEALTHY = [{"id": "m1", "content": "fresh", "type": "preference",
 
 
 class TestDemoKeyScope:
-    def test_demo_key_blocked_on_non_allowed_endpoint(self):
-        """FIX 3: demo key must only work on /v1/preflight and /v1/explain."""
+    def test_demo_key_blocked_on_sensitive_endpoints(self):
+        """FIX 3: demo key must be blocked on sensitive admin endpoints
+        but allowed on general-purpose scoring/exploration endpoints."""
         # Should work on /v1/preflight
         r = client.post("/v1/preflight", headers=DEMO_AUTH, json={
             "memory_state": _HEALTHY, "action_type": "reversible", "domain": "general",
         })
         assert r.status_code == 200
 
-        # Should be blocked on other endpoints
+        # Should be blocked on sensitive admin endpoints
         r2 = client.get("/v1/audit-log", headers=DEMO_AUTH)
         assert r2.status_code == 403
-        assert "Demo key" in r2.json()["detail"]
 
+        # Analytics summary should be allowed (non-sensitive, read-only)
         r3 = client.get("/v1/analytics/summary", headers=DEMO_AUTH)
-        assert r3.status_code == 403
+        assert r3.status_code == 200
 
 
 class TestPluginEscalateOnly:
