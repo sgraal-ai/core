@@ -1192,10 +1192,13 @@ def _track_key_activity(key_hash: str, client_ip: str) -> dict:
         dq.append((now, client_ip))
 
         calls_last_hour = len(dq)
-        # Only count non-whitelisted IPs for the anomaly signal.
-        # Railway LB IPs (100.64.0.0/10), private-network IPs, and loopback
-        # are excluded — they represent infrastructure, not distinct clients.
-        unique_ips = len(set(ip for _, ip in dq if not _is_whitelisted_ip(ip)))
+        # unique_ips: total distinct IPs seen (for reporting)
+        all_ips = set(ip for _, ip in dq)
+        unique_ips = len(all_ips)
+        # suspicious_ips: only non-whitelisted IPs count toward the anomaly
+        # threshold. Railway LB, private-network, and loopback IPs represent
+        # infrastructure, not distinct suspicious clients.
+        suspicious_ips = len(set(ip for ip in all_ips if not _is_whitelisted_ip(ip)))
 
         # Peak RPM: count calls in the busiest 60-second window (last 60s as proxy)
         one_min_ago = now - 60
@@ -1205,8 +1208,8 @@ def _track_key_activity(key_hash: str, client_ip: str) -> dict:
         avg_rpm = max(calls_last_hour / 60.0, 0.1)
 
     reasons = []
-    if unique_ips >= _KEY_ACTIVITY_IP_THRESHOLD:
-        reasons.append(f"{unique_ips} unique IPs in last hour (threshold: {_KEY_ACTIVITY_IP_THRESHOLD})")
+    if suspicious_ips >= _KEY_ACTIVITY_IP_THRESHOLD:
+        reasons.append(f"{suspicious_ips} non-whitelisted IPs in last hour (threshold: {_KEY_ACTIVITY_IP_THRESHOLD})")
     if calls_last_minute > _KEY_ACTIVITY_RPM_MULTIPLIER * avg_rpm and calls_last_hour > 10:
         reasons.append(f"{calls_last_minute} RPM vs {avg_rpm:.1f} avg (>{_KEY_ACTIVITY_RPM_MULTIPLIER}x)")
 
