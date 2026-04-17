@@ -91,105 +91,91 @@ _AUDIT_RETENTION_DAYS = int(os.getenv("SGRAAL_AUDIT_RETENTION_DAYS", "90"))
 # ---------------------------------------------------------------------------
 # Vaccine encryption helpers — encrypt at rest in Redis so a Redis breach
 # does not expose the full list of known attack signatures (#35).
-# FIX 1: upgraded from homebrew XOR to AES-256-GCM via cryptography library.
-# Backward compat: _decrypt_vaccine tries AES-GCM first, falls back to old XOR.
+# AES-256-GCM via cryptography library when available; XOR fallback otherwise.
+# ALL imports are LAZY (inside functions) to avoid module-level crashes.
 # ---------------------------------------------------------------------------
 import base64 as _b64
-
-try:
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-    from cryptography.hazmat.primitives import hashes
-    _AES_AVAILABLE = True
-except ImportError:
-    _AES_AVAILABLE = False
-    # logger is not yet defined at this point in module load — use logging directly
-    logging.getLogger(__name__).warning("cryptography library not installed — vaccine encryption falls back to XOR")
-
-
-def _derive_aes_key(secret: str) -> bytes:
-    """Derive a 32-byte AES key from ATTESTATION_SECRET via HKDF-SHA256."""
-    return HKDF(algorithm=hashes.SHA256(), length=32, salt=b"sgraal-vaccine-v2", info=b"vaccine-encryption").derive(secret.encode())
 
 
 def _encrypt_vaccine(data: dict) -> str:
     """Encrypt a vaccine signature dict for Redis storage.
 
-    Uses AES-256-GCM when cryptography library is available.
-    Format: base64("AES1" || nonce(12) || ciphertext+tag)
-    Falls back to raw JSON if ATTESTATION_SECRET is missing.
+    Tries AES-256-GCM first (if cryptography installed), falls back to XOR.
+    Returns raw JSON if ATTESTATION_SECRET is missing.
     """
     key = ATTESTATION_SECRET
     if not key or len(key) < 8:
         return _json.dumps(data)
     try:
         plaintext = _json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        if _AES_AVAILABLE:
-            aes_key = _derive_aes_key(key)
-            nonce = secrets.token_bytes(12)  # 96-bit nonce for GCM
-            aesgcm = AESGCM(aes_key)
-            ct_tag = aesgcm.encrypt(nonce, plaintext, None)
+        # Try AES-256-GCM
+        try:
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+            from cryptography.hazmat.primitives import hashes as _hashes
+            aes_key = HKDF(algorithm=_hashes.SHA256(), length=32, salt=b"sgraal-vaccine-v2", info=b"vaccine-encryption").derive(key.encode())
+            nonce = secrets.token_bytes(12)
+            ct_tag = AESGCM(aes_key).encrypt(nonce, plaintext, None)
             return _b64.b64encode(b"AES1" + nonce + ct_tag).decode("ascii")
-        else:
-            # Fallback: old XOR stream cipher (for envs without cryptography)
-            nonce = secrets.token_bytes(16)
-            dk = hashlib.sha256(key.encode() + nonce).digest()
-            keystream = b""
-            block = dk
-            while len(keystream) < len(plaintext):
-                keystream += block
-                block = hashlib.sha256(block).digest()
-            ct = bytes(p ^ k for p, k in zip(plaintext, keystream[:len(plaintext)]))
-            import hmac as _hmac_enc
-            tag = _hmac_enc.new(key.encode(), nonce + ct, hashlib.sha256).digest()
-            return _b64.b64encode(nonce + ct + tag).decode("ascii")
-    except Exception as e:
-        logger.warning("vaccine encrypt failed, storing raw: %s", e)
+        except ImportError:
+            pass  # cryptography not installed — fall through to XOR
+        # XOR fallback
+        nonce = secrets.token_bytes(16)
+        dk = hashlib.sha256(key.encode() + nonce).digest()
+        keystream = b""
+        block = dk
+        while len(keystream) < len(plaintext):
+            keystream += block
+            block = hashlib.sha256(block).digest()
+        ct = bytes(p ^ k for p, k in zip(plaintext, keystream[:len(plaintext)]))
+        import hmac as _hmac_enc
+        tag = _hmac_enc.new(key.encode(), nonce + ct, hashlib.sha256).digest()
+        return _b64.b64encode(nonce + ct + tag).decode("ascii")
+    except Exception:
         return _json.dumps(data)
 
 
-def _decrypt_vaccine(stored: str) -> dict:
+def _decrypt_vaccine(stored) -> dict:
     """Decrypt a vaccine signature from Redis.
 
-    Handles three cases:
-    1. Encrypted (base64 blob) → decrypt and verify tag
-    2. Raw JSON string (backward compat / no ATTESTATION_SECRET) → parse directly
-    3. Already-parsed dict (redis_get auto-deserialized) → return as-is
+    Handles: AES-GCM blobs, old XOR blobs, raw JSON strings, parsed dicts.
+    Never crashes — returns {} on any failure.
     """
-    # Case 3: already a dict (redis_get parsed it)
     if isinstance(stored, dict):
         return stored
     if not isinstance(stored, str):
         return {}
 
     key = ATTESTATION_SECRET
-    # Case 2: try raw JSON first (backward compat with unencrypted vaccines)
     if stored.startswith("{"):
         try:
             return _json.loads(stored)
         except Exception:
             pass
 
-    # Case 1: encrypted base64 blob
     if not key or len(key) < 8:
         try:
             return _json.loads(stored)
         except Exception:
-            logger.warning("vaccine decrypt: no key and not valid JSON, discarding")
             return {}
     try:
         raw = _b64.b64decode(stored)
 
-        # Try AES-256-GCM first (format: "AES1" + 12-byte nonce + ciphertext+tag)
-        if raw[:4] == b"AES1" and _AES_AVAILABLE:
-            aes_key = _derive_aes_key(key)
-            nonce = raw[4:16]
-            ct_tag = raw[16:]
-            aesgcm = AESGCM(aes_key)
-            plaintext = aesgcm.decrypt(nonce, ct_tag, None)
-            return _json.loads(plaintext.decode("utf-8"))
+        # Try AES-256-GCM (format: "AES1" + 12-byte nonce + ciphertext+tag)
+        if raw[:4] == b"AES1":
+            try:
+                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+                from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+                from cryptography.hazmat.primitives import hashes as _hashes
+                aes_key = HKDF(algorithm=_hashes.SHA256(), length=32, salt=b"sgraal-vaccine-v2", info=b"vaccine-encryption").derive(key.encode())
+                plaintext = AESGCM(aes_key).decrypt(raw[4:16], raw[16:], None)
+                return _json.loads(plaintext.decode("utf-8"))
+            except ImportError:
+                pass  # can't decrypt AES without library — try XOR below
+            except Exception:
+                pass  # AES decrypt failed — try XOR below
 
-        # Fallback: old XOR format (16-byte nonce + ciphertext + 32-byte HMAC tag)
+        # Old XOR format (16-byte nonce + ciphertext + 32-byte HMAC tag)
         if len(raw) < 48:
             raise ValueError("too short")
         nonce = raw[:16]
@@ -198,7 +184,7 @@ def _decrypt_vaccine(stored: str) -> dict:
         import hmac as _hmac_dec
         expected_tag = _hmac_dec.new(key.encode(), nonce + ct, hashlib.sha256).digest()
         if not _hmac_dec.compare_digest(tag, expected_tag):
-            raise ValueError("HMAC tag mismatch — tampered or wrong key")
+            raise ValueError("HMAC tag mismatch")
         # Decrypt
         dk = hashlib.sha256(key.encode() + nonce).digest()
         keystream = b""
