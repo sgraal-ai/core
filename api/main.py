@@ -10950,33 +10950,67 @@ def _dispatch_security_event(event_type: str, details: dict, key_hash: str):
             pass
 
 
+def _audit_log_sync(event_type: str, request_id: str, key_record: dict, decision: str, omega: float, extra: dict = None):
+    """Synchronous Supabase audit write with retry. Called from a thread pool."""
+    _sb = supabase_service_client or supabase_client
+    if not _sb:
+        return
+    record = {
+        "event_type": event_type,
+        "request_id": request_id,
+        "api_key_id": _safe_key_hash(key_record),
+        "decision": decision,
+        "omega_mem_final": omega,
+    }
+    if extra:
+        record.update(extra)
+    last_err = None
+    for attempt in range(3):
+        try:
+            _sb.table("audit_log").insert(record).execute()
+            return  # success
+        except Exception as e:
+            last_err = e
+    logger.error("AUDIT_LOG_FAILED after 3 attempts: %s", last_err)
+
+
+# #3: Thread pool + timeout for audit_log writes. Supabase calls are
+# synchronous and can block indefinitely on outage. Running them in a
+# separate thread with a 5-second timeout ensures a Supabase outage
+# cannot freeze the preflight response.
+from concurrent.futures import ThreadPoolExecutor as _AuditPoolClass, TimeoutError as _AuditTimeout
+_audit_pool = _AuditPoolClass(max_workers=4, thread_name_prefix="sgraal-audit")
+
+_AUDIT_TIMEOUT_S = 5.0
+
+
 def _audit_log(event_type: str, request_id: str, key_record: dict, decision: str, omega: float, extra: dict = None):
-    """Log audit event to Supabase (requires service role for RLS)."""
+    """Non-blocking audit log write with 5-second timeout.
+
+    Submits the Supabase insert to a thread pool. If the write takes longer
+    than _AUDIT_TIMEOUT_S, the preflight response is NOT delayed — the write
+    continues in the background but the caller moves on. Best-effort:
+    audit_log is important for compliance but must never block decisions.
+    """
     _sb = supabase_service_client or supabase_client
     if not _sb:
         logger.debug("AUDIT_LOG_DISABLED: no Supabase client configured")
         return
     try:
-        record = {
-            "event_type": event_type,
-            "request_id": request_id,
-            "api_key_id": _safe_key_hash(key_record),
-            "decision": decision,
-            "omega_mem_final": omega,
-        }
-        if extra:
-            record.update(extra)
-        _sb.table("audit_log").insert(record).execute()
+        future = _audit_pool.submit(
+            _audit_log_sync, event_type, request_id, key_record, decision, omega, extra
+        )
+        # Wait up to _AUDIT_TIMEOUT_S. If it takes longer, log a warning
+        # and let the thread continue in the background (fire-and-forget).
+        future.result(timeout=_AUDIT_TIMEOUT_S)
+    except _AuditTimeout:
+        logger.warning(
+            "AUDIT_LOG_TIMEOUT: write for request %s exceeded %ss — "
+            "continuing in background. Supabase may be degraded.",
+            request_id, _AUDIT_TIMEOUT_S,
+        )
     except Exception as e:
-        # Retry up to 2 more times
-        for _retry in range(2):
-            try:
-                _sb.table("audit_log").insert(record).execute()
-                break
-            except Exception:
-                pass
-        else:
-            logger.error("AUDIT_LOG_FAILED after 3 attempts: %s", e)
+        logger.warning("AUDIT_LOG_SUBMIT_FAILED: %s", e)
 
 
 # In-memory healing counter store (per entry_id)
