@@ -42,7 +42,7 @@ pip install -r requirements.txt
 # Run API server locally
 uvicorn api.main:app --reload
 
-# Run tests (2,449+ tests across 25 test files)
+# Run tests (2,533+ tests across 25 test files)
 pip install pytest httpx
 python3 -m pytest tests/ -v
 
@@ -86,7 +86,7 @@ python3 tests/corpus/run_all.py
 ```
 
 ### Baseline — do not drop below:
-- pytest: 2,449+ passing
+- pytest: 2,533+ passing
 - Corpus total: 614 baseline (Rounds 1-8) + 216 adversarial + 120 Round 9 + 240 Rounds 10-11 = 1,190+ adversarial cases
   - Rounds 1-4: 329/329 (Joint: 60, Sponsored: 60, Subtle: 59, Hallucination: 60, Propagation: 90)
   - Round 5 — Consensus Poisoning: 45/45
@@ -111,7 +111,7 @@ python3 tests/corpus/run_all.py
 - **corpus**: only when scoring logic changes
 - **NEVER run for**: frontend, docs, SDK, README changes
 
-### Test files (33 files, 2,449+ tests):
+### Test files (33 files, 2,533+ tests):
 - `test_scoring.py` — Core scoring engine (1840+ tests)
 - `test_security_audit.py` — Cross-tenant isolation, SSRF, secrets, quota enforcement (27 tests)
 - `test_batch3_audit.py` — Weight bounds, determinism, untested modules + endpoints (35 tests)
