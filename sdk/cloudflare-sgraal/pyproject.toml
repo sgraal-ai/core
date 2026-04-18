@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloudflare-sgraal"
+version = "0.1.0"
+description = "Sgraal preflight guard for Cloudflare Agent Memory — validate recalled memories before every action."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [{ name = "Sgraal", email = "hello@sgraal.com" }]
+keywords = ["sgraal", "cloudflare", "agent-memory", "ai", "memory-safety", "preflight", "ai-agents", "governance", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Security",
+]
+dependencies = ["requests>=2.28.0"]
+
+[project.urls]
+Homepage = "https://sgraal.com"
+Repository = "https://github.com/sgraal-ai/core"
+Documentation = "https://docs.sgraal.com"
+
+[tool.setuptools.packages.find]
+include = ["cloudflare_sgraal*"]
