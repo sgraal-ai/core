@@ -663,7 +663,7 @@ _DICT_TTL = {
     "_predictive_alerts": 3600,    # 1h
     "_court_verdicts": 86400,      # 24h
     "_commons": 604800,            # 7d
-    "_federation_registry": 86400, # 24h
+    "_federation_registry": 604800, # 7d
     "_truth_subs": 86400,          # 24h
     "_async_preflight_jobs": 3600, # 1h
     "_webhook_configs": 604800,    # 7d
@@ -699,6 +699,7 @@ def _run_periodic_cleanup():
             "_predictive_alerts": _predictive_alerts,
             "_court_verdicts": _court_verdicts,
             "_commons": _commons,
+            "_federation_registry": _federation_registry,
             "_truth_subs": _truth_subs,
             "_async_preflight_jobs": _async_preflight_jobs,
             "_webhook_configs": _webhook_configs,
@@ -3127,13 +3128,14 @@ def export_lineage(format: str = Query("graphml"), agent_id: Optional[str] = Non
                 edges.append({"source": chain[i], "target": chain[i + 1], "propagation_type": "direct"})
 
     if format == "graphml":
+        from xml.sax.saxutils import escape as _xml_esc, quoteattr as _xml_qa
         xml_nodes = "\n".join(
-            f'    <node id="{n["id"]}">\n      <data key="content_hash">{n["content_hash"]}</data>\n'
-            f'      <data key="decision">{n["decision"]}</data>\n      <data key="omega">{n["omega"]}</data>\n'
-            f'      <data key="timestamp">{n["timestamp"]}</data>\n    </node>' for n in nodes)
+            f'    <node id={_xml_qa(str(n["id"]))}>\n      <data key="content_hash">{_xml_esc(str(n["content_hash"]))}</data>\n'
+            f'      <data key="decision">{_xml_esc(str(n["decision"]))}</data>\n      <data key="omega">{_xml_esc(str(n["omega"]))}</data>\n'
+            f'      <data key="timestamp">{_xml_esc(str(n["timestamp"]))}</data>\n    </node>' for n in nodes)
         xml_edges = "\n".join(
-            f'    <edge source="{e["source"]}" target="{e["target"]}">\n'
-            f'      <data key="propagation_type">{e["propagation_type"]}</data>\n    </edge>' for e in edges)
+            f'    <edge source={_xml_qa(str(e["source"]))} target={_xml_qa(str(e["target"]))}>\n'
+            f'      <data key="propagation_type">{_xml_esc(str(e["propagation_type"]))}</data>\n    </edge>' for e in edges)
         graphml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <graphml>
   <graph id="memory_lineage" edgedefault="directed">
@@ -3143,8 +3145,9 @@ def export_lineage(format: str = Query("graphml"), agent_id: Optional[str] = Non
 </graphml>'''
         return Response(content=graphml, media_type="application/xml")
     elif format == "dot":
-        dot_nodes = "\n".join(f'  "{n["id"]}" [label="{n["decision"]}\\nomega={n["omega"]}"];' for n in nodes)
-        dot_edges = "\n".join(f'  "{e["source"]}" -> "{e["target"]}";' for e in edges)
+        def _dot_esc(s): return str(s).replace('\\', '\\\\').replace('"', '\\"')
+        dot_nodes = "\n".join(f'  "{_dot_esc(n["id"])}" [label="{_dot_esc(n["decision"])}\\nomega={_dot_esc(str(n["omega"]))}"];' for n in nodes)
+        dot_edges = "\n".join(f'  "{_dot_esc(e["source"])}" -> "{_dot_esc(e["target"])}";' for e in edges)
         dot = f"digraph memory_lineage {{\n{dot_nodes}\n{dot_edges}\n}}"
         return PlainTextResponse(content=dot, media_type="text/plain")
     else:
@@ -3179,6 +3182,8 @@ def subscribe_feed(req: FeedSubscribeRequest, key_record: dict = Depends(verify_
     """Subscribe to a trusted memory feed."""
     if req.feed_id not in _feeds:
         raise HTTPException(status_code=404, detail=f"Feed '{req.feed_id}' not found")
+    if req.webhook_url:
+        _validate_webhook_url(req.webhook_url)
     _kh = _safe_key_hash(key_record)
     _feed_subscribers[f"{_kh}:{req.feed_id}"] = {"feed_id": req.feed_id, "domain": req.domain,
                                                     "webhook_url": req.webhook_url, "subscribed_at": _time.time()}
@@ -3445,7 +3450,7 @@ def analytics_sankey(key_record: dict = Depends(verify_api_key)):
 
 # ---- Federated Vaccination ----
 
-_federation_registry: list = []
+_federation_registry: dict = {}
 
 
 class FederationContributeRequest(BaseModel):
@@ -3596,18 +3601,18 @@ def get_insights(agent_id: str = Query(""), domain: str = Query("general"), key_
 @app.post("/v1/federation/contribute")
 def federation_contribute(req: FederationContributeRequest, key_record: dict = Depends(verify_api_key)):
     """Contribute anonymized vaccine to shared federation."""
-    entry = {"signature": req.vaccine_signature[:16], "attack_type": req.attack_type,
+    _sig = req.vaccine_signature[:16]
+    entry = {"signature": _sig, "attack_type": req.attack_type,
              "domain": req.domain, "contributed_by": "anonymous", "contributed_at": _time.time()}
-    _federation_registry.append(entry)
-    if len(_federation_registry) > 10000:
-        _federation_registry[:] = _federation_registry[-5000:]
+    _evict_if_full(_federation_registry, "_federation_registry")
+    _federation_registry[_sig] = entry
     return {"contributed": True, "federation_size": len(_federation_registry)}
 
 
 @app.get("/v1/federation/vaccines")
 def federation_list(key_record: dict = Depends(verify_api_key)):
     """List all federated vaccine signatures."""
-    return {"vaccines": _federation_registry[-100:], "total": len(_federation_registry)}
+    return {"vaccines": list(_federation_registry.values())[-100:], "total": len(_federation_registry)}
 
 
 class FederationCheckRequest(BaseModel):
@@ -3622,10 +3627,10 @@ def federation_check(req: FederationCheckRequest, key_record: dict = Depends(ver
     for e in req.memory_state:
         content = e.get("content", "") if isinstance(e, dict) else str(e)
         _hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-        for vax in _federation_registry:
-            if vax["signature"] == _hash:
-                matched += 1
-                matched_types.add(vax["attack_type"])
+        vax = _federation_registry.get(_hash)
+        if vax:
+            matched += 1
+            matched_types.add(vax["attack_type"])
     return {"federated_matches": matched, "matched_attack_types": list(matched_types),
             "federation_protected": matched > 0}
 
@@ -5069,6 +5074,8 @@ def create_alert_rule(req: AlertRuleRequest, key_record: dict = Depends(verify_a
     _check_rate_limit(key_record)
     if req.operator not in ("gt", "lt", "gte", "lte"):
         raise HTTPException(status_code=400, detail="operator must be gt, lt, gte, or lte")
+    if req.webhook_url:
+        _validate_webhook_url(req.webhook_url)
     rule_id = str(uuid.uuid4())
     _alert_rules[rule_id] = {"id": rule_id, **req.model_dump(), "key_hash": _safe_key_hash(key_record)}
     return {"id": rule_id, "name": req.name, "created": True}
@@ -5732,6 +5739,7 @@ def run_retention(policy_id: str, key_record: dict = Depends(verify_api_key)):
 @app.post("/v1/webhooks/test")
 def test_webhook(url: str = "https://httpbin.org/post", key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    _validate_webhook_url(url)
     return {"url": url, "status": "sent", "test": True}
 
 # ---- #47 API Versioning ----
