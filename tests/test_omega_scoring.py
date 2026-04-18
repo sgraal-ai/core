@@ -1,4 +1,4 @@
-"""Tests for omega_adjusted and detection_omega_contribution."""
+"""Tests for omega_adjusted, omega_detection_adjusted, and detection_omega_contribution."""
 import pytest
 
 
@@ -18,8 +18,8 @@ AUTH = {"Authorization": "Bearer sg_demo_playground"}
 
 
 class TestOmegaAdjusted:
-    def test_omega_adjusted_on_manipulated(self):
-        """MANIPULATED detection → omega_adjusted > omega_mem_final."""
+    def test_omega_detection_adjusted_on_manipulated(self):
+        """MANIPULATED detection → omega_detection_adjusted > omega_mem_final."""
         c = _client()
         resp = c.post("/v1/preflight", json={
             "memory_state": [_e(id="m1", type="identity",
@@ -28,11 +28,12 @@ class TestOmegaAdjusted:
             "domain": "fintech", "action_type": "irreversible",
         }, headers=AUTH)
         data = resp.json()
-        assert "omega_adjusted" in data
-        # Detection should fire → omega_adjusted should be higher than omega_mem_final
+        assert "omega_detection_adjusted" in data
+        assert "omega_adjusted" in data  # reconciliation field still present
+        # Detection should fire → omega_detection_adjusted should be higher than omega_mem_final
         if data.get("timestamp_integrity") == "MANIPULATED" or data.get("identity_drift") == "MANIPULATED":
-            # omega_adjusted >= omega_mem_final (may be capped at 100)
-            assert data["omega_adjusted"] >= data["omega_mem_final"]
+            # omega_detection_adjusted >= omega_mem_final (may be capped at 100)
+            assert data["omega_detection_adjusted"] >= data["omega_mem_final"]
             # detection_omega_contribution should have non-zero values
             assert sum(data["detection_omega_contribution"].values()) > 0
 

@@ -761,7 +761,7 @@ def _stripe_retry_sync_to_redis() -> None:
         from api.redis_state import redis_set
         with _stripe_retry_lock:
             snapshot = list(_stripe_retry_queue)
-        redis_set(_STRIPE_RETRY_REDIS_KEY, snapshot, ttl=0)
+        redis_set(_STRIPE_RETRY_REDIS_KEY, snapshot, ttl=604800)  # 7 days
         _stripe_retry_last_sync = now
     except Exception:
         pass
@@ -1331,7 +1331,7 @@ def well_known_sgraal():
         "name": "Sgraal",
         "description": "Memory governance protocol for AI agents",
         "api_version": "v1",
-        "sdk_version": "0.3.1",
+        "sdk_version": "0.3.2",
         "capabilities": [
             "preflight",
             "healing",
@@ -16403,7 +16403,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                          "consensus_detection_method", "memory_location_analysis",
                          "proof_signature", "attestation_version", "attestable", "cloud_events",
                          "otel", "fairness_flags", "action_checkpoint", "zk_proof", "federation_check", "omega_adjusted",
-                         "omega_adjustment_reason", "detection_omega_contribution",
+                         "omega_detection_adjusted", "omega_adjustment_reason", "detection_omega_contribution",
                          "provenance_signature", "provenance_signed", "replay_available",
                          "content_independence_score", "content_too_similar",
                          "domain_naturalness_baseline"}
@@ -16539,7 +16539,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     response["replay_available"] = True
 
     # Feature 4: OpenTelemetry trace IDs
-    _trace_id = hashlib.md5(f"{request_id}:{_time.time()}".encode()).hexdigest()
+    _trace_id = hashlib.md5(f"{request_id}:{_input_hash_full}".encode()).hexdigest()
     _span_id = _trace_id[:16]
     # Feature 5: Three scoring tracks integration — omega_adjusted
     _det_contrib = {
@@ -16550,9 +16550,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         "naturalness": 15 if response.get("naturalness_level") == "FABRICATED" else (5 if response.get("naturalness_level") == "SYNTHETIC" else 0),
     }
     _total_det = sum(_det_contrib.values())
-    _omega_adj = min(100.0, round(omega_out + _total_det, 1))
+    _omega_det_adj = min(100.0, round(omega_out + _total_det, 1))
     _adj_reasons = [f"{k}={v}" for k, v in _det_contrib.items() if v > 0]
-    response["omega_adjusted"] = _omega_adj
+    response["omega_detection_adjusted"] = _omega_det_adj
     response["omega_adjustment_reason"] = ", ".join(_adj_reasons) if _adj_reasons else "no detection adjustments"
     response["detection_omega_contribution"] = _det_contrib
 
