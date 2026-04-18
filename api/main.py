@@ -1411,9 +1411,10 @@ def research_constants(key_record: dict = Depends(verify_api_key)):
 import collections as _collections
 
 # key_hash → deque of (timestamp, ip_address) tuples; auto-pruned to last 1 hour
-_key_activity: dict[str, _collections.deque] = {}
+# FIX 5: use OrderedDict for true LRU eviction (move_to_end on access)
+_key_activity: _collections.OrderedDict = _collections.OrderedDict()
 _key_activity_lock = threading.Lock()
-_KEY_ACTIVITY_MAX_KEYS = 10000  # FIX 10: cap total tracked keys to prevent OOM
+_KEY_ACTIVITY_MAX_KEYS = 10000
 
 _KEY_ACTIVITY_WINDOW_S = 3600  # 1 hour
 _KEY_ACTIVITY_IP_THRESHOLD = 3  # 3+ unique IPs → suspicious
@@ -1451,12 +1452,14 @@ def _track_key_activity(key_hash: str, client_ip: str) -> dict:
     with _key_activity_lock:
         dq = _key_activity.get(key_hash)
         if dq is None:
-            # FIX 10: evict oldest-accessed key when cap reached
+            # FIX 5: LRU eviction — evict least-recently-accessed key when cap reached
             if len(_key_activity) >= _KEY_ACTIVITY_MAX_KEYS:
-                _oldest_key = next(iter(_key_activity))
-                del _key_activity[_oldest_key]
+                _key_activity.popitem(last=False)  # pop oldest (LRU)
             dq = _collections.deque()
             _key_activity[key_hash] = dq
+        else:
+            # FIX 5: move to end on access (marks as most-recently-used)
+            _key_activity.move_to_end(key_hash)
 
         # Prune old entries
         while dq and dq[0][0] < cutoff:
@@ -1512,14 +1515,14 @@ def _send_key_anomaly_email(key_hash: str, anomaly: dict, key_record: dict) -> N
         return  # rate-limited
     customer_email = key_record.get("email")
     if not customer_email:
-        # Try to look up email from Supabase
+        # FIX 4: look up email from Supabase api_keys table via customer_id
         try:
             _sb = supabase_service_client or supabase_client
-            if _sb:
-                _cid = key_record.get("customer_id")
-                if _cid:
-                    # Best-effort lookup — not all tables have email
-                    pass  # skip lookup if customer_id doesn't map to email
+            _cid = key_record.get("customer_id")
+            if _sb and _cid:
+                _email_result = _sb.table("api_keys").select("email").eq("customer_id", _cid).limit(1).execute()
+                if _email_result.data and _email_result.data[0].get("email"):
+                    customer_email = _email_result.data[0]["email"]
         except Exception:
             pass
         if not customer_email:
@@ -8214,7 +8217,7 @@ def preflight_zk(req: dict, key_record: dict = Depends(verify_api_key)):
         for i, e in enumerate(zk_entries)]
     result = compute(entries, req.get("action_type", "reversible"), req.get("domain", "general"))
     return {"omega_mem_final": result.omega_mem_final, "recommended_action": result.recommended_action,
-            "assurance_score": result.assurance_score, "component_breakdown": result.component_breakdown,
+            "assurance_score": result.assurance_score, "component_breakdown": dict(result.component_breakdown),  # FIX 1: shallow copy prevents mutation of result
             "zk_mode": True, "hash_algorithm": hash_algo,
             "zk_limitations": ["entry_shapley unavailable", "conflict detection hash-based only",
                                "explainability reduced to metadata-level"]}
@@ -8307,16 +8310,11 @@ def check_divergence(req: DivergenceRequest, key_record: dict = Depends(verify_a
             "recommendation": "VERIFY diverged entries against reference" if diverged else "Memory aligned with reference"}
 
 
-# ---- FIX 5: Scheduler status ----
 _scheduler_jobs = {
     "truth_subscription_check": {"interval": "per check_interval_hours", "last_run": None, "runs": 0, "failures": 0},
     "sleeper_scan_daily": {"interval": "24h", "last_run": None, "runs": 0, "failures": 0},
     "daily_snapshot": {"interval": "00:00 UTC", "last_run": None, "runs": 0, "failures": 0},
 }
-
-@app.get("/v1/scheduler/status", operation_id="scheduler_status_legacy")
-def scheduler_status_legacy(key_record: dict = Depends(verify_api_key)):
-    return {"jobs": _scheduler_jobs, "scheduler_active": True}
 
 def _run_truth_subscriptions():
     """Scheduled: check truth subscriptions."""
@@ -12440,7 +12438,7 @@ def preflight_batch(req: BatchRequest, key_record: dict = Depends(verify_api_key
             "recommended_action": result.recommended_action,
             "assurance_score": result.assurance_score,
             "explainability_note": result.explainability_note,
-            "component_breakdown": result.component_breakdown,
+            "component_breakdown": dict(result.component_breakdown),  # FIX 1: shallow copy prevents mutation of result
             "shapley_values": compute_shapley_values(
                 result.component_breakdown, req.action_type, req.domain, req.custom_weights,
             ),
@@ -13057,6 +13055,11 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             return {
                 "sampled": False,
                 "recommended_action": "USE_MEMORY",
+                "omega_mem_final": 0.0,
+                "component_breakdown": {},
+                "governance_score": None,
+                "thermodynamic_cost": {"bits_erased": 0, "landauer_joules": 0, "temperature_kelvin": 300, "method": "sampled_out"},
+                "enrichment_applied": False,
                 "reason": "sampled_out",
                 "thread_id": req.thread_id,
                 "bucket_id": thread_bucket_id,
@@ -13128,6 +13131,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         if _policy_result and _policy_result.get("override") == "BLOCK":
             # FIX 2: include decision_trail + scoring_warnings for schema consistency
             return {"omega_mem_final": 100, "recommended_action": "BLOCK",
+                    "component_breakdown": {},
+                    "governance_score": 0.0,
+                    "thermodynamic_cost": {"bits_erased": 0, "landauer_joules": 0, "temperature_kelvin": 300, "method": "policy_override"},
+                    "enrichment_applied": False,
                     "policy_applied": _policy_result, "request_id": str(uuid.uuid4()),
                     "decision_trail": [{"seq": 0, "action": "BLOCK", "source": "policy_override", "reason": f"policy {req.policy_id} forced BLOCK"}],
                     "decision_trail_length": 1,
@@ -13576,6 +13583,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # -----------------------------------------------------------------------
     _fhd = None
     _fhd_available = False
+    _fh_vec_for_fleet = []  # FIX 3: defensive init — may not be set if try block fails
     if not _is_dry_run and _redis_enabled:
         try:
             _fh_raw = redis_get("fleet_health_vectors", None)
@@ -13621,7 +13629,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         "recommended_action": _final_action,
         "assurance_score": result.assurance_score,
         "explainability_note": result.explainability_note,
-        "component_breakdown": result.component_breakdown,
+        "component_breakdown": dict(result.component_breakdown),  # FIX 1: shallow copy prevents mutation of result
         "repair_plan": repair_plan_out,
         "healing_counter": result.healing_counter,
         "gsv": gsv,
@@ -14262,18 +14270,40 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     except Exception as _e:
         _scoring_warnings.append({"module": "provenance_entropy", "error": str(_e)[:200]})
 
-    # FIX 4: Trust oscillation detector
+    # FIX 4 + FIX 2: Trust oscillation detector — PER-SOURCE variance.
+    # Only flags if the SAME source shows oscillating trust. Different sources
+    # with different trust levels (human=0.95, AI=0.6) is legitimate diversity.
     try:
         if len(entries) >= 2 and "component_breakdown" in response:
-            _trusts = [float(getattr(e, "source_trust", 0) or 0) for e in entries]
-            _trust_mean = sum(_trusts) / len(_trusts)
-            _trust_var = sum((t - _trust_mean) ** 2 for t in _trusts) / len(_trusts)
-            if _trust_var > 0.05:
-                _osc_boost = min(20.0, _trust_var * 100)
+            # Group entries by provenance source (first provenance entry or entry id prefix)
+            _by_source: dict[str, list[float]] = {}
+            for e in entries:
+                _src = "default"
+                _prov = getattr(e, "provenance", None)
+                if isinstance(_prov, list) and _prov:
+                    _src = str(_prov[0]) if not isinstance(_prov[0], dict) else str(_prov[0].get("agent_id", "default"))
+                elif hasattr(e, "source") and e.source:
+                    _src = str(e.source)
+                _trust_val = float(getattr(e, "source_trust", 0) or 0)
+                _by_source.setdefault(_src, []).append(_trust_val)
+            # Check each source independently — oscillation = variance within ONE source
+            _max_var = 0.0
+            _osc_source = None
+            for _src_id, _src_trusts in _by_source.items():
+                if len(_src_trusts) < 2:
+                    continue
+                _sm = sum(_src_trusts) / len(_src_trusts)
+                _sv = sum((t - _sm) ** 2 for t in _src_trusts) / len(_src_trusts)
+                if _sv > _max_var:
+                    _max_var = _sv
+                    _osc_source = _src_id
+            if _max_var > 0.05:
+                _osc_boost = min(20.0, _max_var * 100)
                 _old = float(response["component_breakdown"].get("s_provenance", 0))
                 response["component_breakdown"]["s_provenance"] = round(min(100, _old + _osc_boost), 2)
                 response["trust_oscillation_detected"] = True
-                response["trust_oscillation_variance"] = round(_trust_var, 4)
+                response["trust_oscillation_variance"] = round(_max_var, 4)
+                response["trust_oscillation_source"] = _osc_source
     except Exception as _e:
         _scoring_warnings.append({"module": "trust_oscillation_detector", "error": str(_e)[:200]})
 

@@ -53,3 +53,33 @@ class TestVaccineEncryption:
         # Case 3: empty/None
         assert _decrypt_vaccine("") == {}
         assert _decrypt_vaccine({}) == {}
+
+    def test_xor_encrypted_vaccine_decryptable(self):
+        """FIX 10: XOR-encrypted vaccines (pre-AES upgrade) must still decrypt.
+
+        Simulates a vaccine encrypted with the XOR path by manually constructing
+        an XOR blob and verifying _decrypt_vaccine handles it.
+        """
+        import hashlib, secrets, hmac, base64, json
+        original = {"signature_id": "xor_legacy_001", "domain": "general"}
+        att_secret = os.getenv("ATTESTATION_SECRET", "")
+        if not att_secret or len(att_secret) < 8:
+            # Without ATTESTATION_SECRET, encryption produces raw JSON
+            return
+
+        # Manually build an XOR blob (same algorithm as _encrypt_vaccine XOR path)
+        plaintext = json.dumps(original, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        nonce = secrets.token_bytes(16)
+        dk = hashlib.sha256(att_secret.encode() + nonce).digest()
+        keystream = b""
+        block = dk
+        while len(keystream) < len(plaintext):
+            keystream += block
+            block = hashlib.sha256(block).digest()
+        ct = bytes(p ^ k for p, k in zip(plaintext, keystream[:len(plaintext)]))
+        tag = hmac.new(att_secret.encode(), nonce + ct, hashlib.sha256).digest()
+        xor_blob = base64.b64encode(nonce + ct + tag).decode("ascii")
+
+        # Must decrypt successfully
+        result = _decrypt_vaccine(xor_blob)
+        assert result == original, f"XOR backward compat failed: {result}"
