@@ -13888,8 +13888,8 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     response["vaccination_match"] = False
     # Feature 1: Federation check
     _fed_matched = 0
-    for _fe in _federation_registry[-100:]:
-        if _fe["signature"] == _input_hash_full[:16]:
+    for _fe in list(_federation_registry.values())[-100:]:
+        if _fe.get("signature") == _input_hash_full[:16]:
             _fed_matched += 1
     response["federation_check"] = {"matched": _fed_matched > 0, "matched_count": _fed_matched}
     response["matched_signature_id"] = None
