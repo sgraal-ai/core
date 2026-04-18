@@ -1,7 +1,7 @@
 {
   "name": "@sgraal/mcp",
-  "version": "0.2.0",
-  "description": "Sgraal memory governance MCP server for Claude Desktop and LangGraph",
+  "version": "0.2.1",
+  "description": "AI agent memory governance MCP server — preflight validation before every action. Works with Claude Desktop, LangGraph, and any MCP-compatible client.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -32,8 +32,22 @@
     "memory",
     "governance",
     "claude",
-    "langgraph"
+    "langgraph",
+    "memory-safety",
+    "hallucination",
+    "preflight",
+    "ai-safety",
+    "agent-memory",
+    "model-context-protocol",
+    "claude-desktop",
+    "ai-agents",
+    "llm"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sgraal-ai/core"
+  },
+  "homepage": "https://sgraal.com",
   "license": "Apache-2.0",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
