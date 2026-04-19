@@ -17994,6 +17994,214 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     return response
 
 
+# ---------------------------------------------------------------------------
+# /v1/check — the simple door into Sgraal
+# No MemCube format. No action_type. No domain. Just: "are these strings safe?"
+# ---------------------------------------------------------------------------
+
+_SECRET_PATTERNS = [
+    (re.compile(r'sk-[a-zA-Z0-9]{20,}'), "API key (sk-...)"),
+    (re.compile(r'sk_live_[a-zA-Z0-9]{20,}'), "Stripe live key"),
+    (re.compile(r'sk_test_[a-zA-Z0-9]{20,}'), "Stripe test key"),
+    (re.compile(r'Bearer\s+[a-zA-Z0-9_\-\.]{20,}'), "Bearer token"),
+    (re.compile(r'ghp_[a-zA-Z0-9]{36,}'), "GitHub personal access token"),
+    (re.compile(r'AKIA[A-Z0-9]{16}'), "AWS access key"),
+    (re.compile(r'xox[bpras]-[a-zA-Z0-9\-]{20,}'), "Slack token"),
+    (re.compile(r'[a-zA-Z0-9_\-]{40,64}', re.ASCII), "likely secret or API key"),
+]
+
+
+class CheckRequest(BaseModel):
+    memories: list[str]
+    action_type: Optional[str] = "reversible"
+    domain: Optional[str] = "general"
+
+
+@app.post("/v1/check")
+def check_memories(req: CheckRequest, key_record: dict = Depends(verify_api_key)):
+    """Simple memory safety check — plain strings in, plain English out.
+
+    No MemCube format required. Pass a list of strings your agent is about
+    to act on. Returns whether they're safe, a human-readable reason, and
+    a concrete next step.
+
+    Demo key (sg_demo_playground) works.
+    """
+    if not req.memories:
+        raise HTTPException(status_code=400, detail="memories list cannot be empty")
+    if len(req.memories) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 memories per check")
+
+    n = len(req.memories)
+    request_id = str(uuid.uuid4())
+
+    # --- Pre-check: secret detection (instant BLOCK, no preflight needed) ---
+    secret_hits = []
+    for i, mem in enumerate(req.memories):
+        for pattern, label in _SECRET_PATTERNS:
+            if pattern.search(mem):
+                secret_hits.append({"index": i, "type": label, "preview": mem[:40] + "..." if len(mem) > 40 else mem})
+                break  # one match per memory is enough
+
+    if secret_hits:
+        n_secrets = len(secret_hits)
+        types_found = list(set(h["type"] for h in secret_hits))
+        _check_response = {
+            "safe": False,
+            "reason": f"{n_secrets} of {n} memories contain{'s' if n_secrets == 1 else ''} "
+                      f"a likely secret ({', '.join(types_found)}). "
+                      f"Secrets in agent memory can be exfiltrated via prompt injection.",
+            "action": "Remove secrets from memory before proceeding. Use environment variables or a secret manager instead.",
+            "omega": 100.0,
+            "decision": "BLOCK",
+            "request_id": request_id,
+            "secret_detected": True,
+            "secrets_found": n_secrets,
+        }
+        # Store details for details_url
+        _persist_store_bg(f"check_details:{request_id}", {
+            "request_id": request_id,
+            "check_response": _check_response,
+            "secret_hits": secret_hits,
+            "memories_count": n,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }, ttl=3600)
+        _check_response["details_url"] = f"https://api.sgraal.com/v1/check/{request_id}/details"
+        return _check_response
+
+    # --- Convert plain strings to MemCube entries ---
+    memory_state = [
+        MemoryEntryRequest(
+            id=f"check_{i:03d}",
+            content=mem[:2000],
+            type="semantic",
+            timestamp_age_days=0,
+            source_trust=0.8,
+            source_conflict=0.05,
+            downstream_count=1,
+        )
+        for i, mem in enumerate(req.memories)
+    ]
+
+    # --- Run preflight ---
+    pf_req = PreflightRequest(
+        memory_state=memory_state,
+        action_type=req.action_type or "reversible",
+        domain=req.domain or "general",
+        dry_run=True,
+    )
+    try:
+        pf_result = _preflight_internal(pf_req, key_record)
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {
+            "safe": True,
+            "reason": "Sgraal preflight unavailable — memories allowed by default.",
+            "action": "No action needed. Retry later for full validation.",
+            "omega": 0.0,
+            "decision": "USE_MEMORY",
+            "request_id": request_id,
+            "error": str(e)[:200],
+        }
+
+    decision = pf_result.get("recommended_action", "USE_MEMORY")
+    omega = float(pf_result.get("omega_mem_final", 0))
+    cb = pf_result.get("component_breakdown", {})
+
+    # --- Translate to plain English ---
+    if decision == "USE_MEMORY":
+        reason = f"All {n} memories passed validation."
+        action = "Safe to proceed."
+    elif decision == "WARN":
+        # Find top issue
+        top_component = max(cb, key=lambda k: cb.get(k, 0), default="unknown") if cb else "unknown"
+        _issue_map = {
+            "s_freshness": "memory freshness is declining",
+            "s_drift": "content has drifted from its original meaning",
+            "s_provenance": "source trust is uncertain",
+            "s_propagation": "downstream propagation risk detected",
+            "s_interference": "conflicting information across memories",
+            "r_recall": "recall reliability is low",
+            "r_encode": "encoding quality is degraded",
+            "s_recovery": "recovery options are limited",
+            "r_belief": "model confidence divergence detected",
+            "s_relevance": "intent-drift detected between memories and goal",
+        }
+        issue = _issue_map.get(top_component, f"{top_component} score is elevated")
+        reason = f"Memory is usable but flagged: {issue} (omega={omega:.1f})."
+        action = f"Proceed with caution. Consider refreshing entries with high {top_component}."
+    elif decision == "ASK_USER":
+        reason = f"Uncertain: omega score is {omega:.1f}, indicating moderate risk across {n} memories."
+        action = "Human review recommended before acting on these memories."
+    else:  # BLOCK
+        # Determine the primary reason
+        ts_integrity = pf_result.get("timestamp_integrity", "VALID")
+        id_drift = pf_result.get("identity_drift", "CLEAN")
+        cc_collapse = pf_result.get("consensus_collapse", "CLEAN")
+        pc_integrity = pf_result.get("provenance_chain_integrity", "CLEAN")
+        naturalness = pf_result.get("naturalness_level", "ORGANIC")
+
+        if id_drift == "MANIPULATED":
+            reason = "Memory content shows signs of manipulation — authority claims or identity attributes appear injected."
+            action = "Do not act on these memories. Verify the original source and re-ingest from a trusted provider."
+        elif cc_collapse == "MANIPULATED":
+            reason = "Multiple memories agree on the same fact using suspiciously similar wording — possible consensus fabrication."
+            action = "Do not act. Check whether these memories originate from independent sources."
+        elif ts_integrity == "MANIPULATED":
+            reason = f"{n} memories contain timestamp anomalies — ages appear artificially set to bypass freshness checks."
+            action = "Reject these memories. Re-fetch from the original source with authentic timestamps."
+        elif pc_integrity == "MANIPULATED":
+            reason = "Memory provenance chain cannot be verified — entries may have been injected without proper attribution."
+            action = "Do not act. Trace the provenance of each memory back to its original source."
+        elif naturalness == "FABRICATED":
+            reason = "Memory state appears statistically fabricated — trust values and conflict patterns are too uniform to be natural."
+            action = "Reject these memories. Natural memory states show variance across entries."
+        else:
+            # Generic high-omega BLOCK
+            top_components = sorted(cb.items(), key=lambda x: x[1], reverse=True)[:2] if cb else []
+            if top_components:
+                issues = [_issue_map.get(k, k) for k, _ in top_components if _ > 20]
+                if issues:
+                    reason = f"Memory blocked: {'; '.join(issues)} (omega={omega:.1f})."
+                else:
+                    reason = f"Memory risk score is too high to proceed safely (omega={omega:.1f})."
+            else:
+                reason = f"Memory risk score is too high to proceed safely (omega={omega:.1f})."
+            action = "Review the repair plan in the details response. Heal or refresh the flagged entries before retrying."
+
+    safe = decision in ("USE_MEMORY", "WARN")
+
+    # Store full preflight result for details endpoint
+    _persist_store_bg(f"check_details:{request_id}", {
+        "request_id": request_id,
+        "check_response": {"safe": safe, "reason": reason, "action": action, "omega": omega, "decision": decision},
+        "preflight_result": pf_result,
+        "memories_count": n,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }, ttl=3600)
+
+    return {
+        "safe": safe,
+        "reason": reason,
+        "action": action,
+        "details_url": f"https://api.sgraal.com/v1/check/{request_id}/details",
+        "omega": round(omega, 1),
+        "decision": decision,
+        "request_id": request_id,
+    }
+
+
+@app.get("/v1/check/{request_id}/details")
+def check_details(request_id: str, key_record: dict = Depends(verify_api_key)):
+    """Retrieve the full preflight response for a /v1/check call.
+    Available for 1 hour after the check was made."""
+    details = _load_store(f"check_details:{request_id}")
+    if not details:
+        raise HTTPException(status_code=404, detail="Check details not found or expired (TTL: 1 hour)")
+    return details
+
+
 @app.post("/v1/preflight")
 def preflight(req: PreflightRequest, request: Request, key_record: dict = Depends(verify_api_key)):
     """HTTP-facing preflight endpoint. Extracts client IP for anomaly detection
