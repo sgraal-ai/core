@@ -71,7 +71,9 @@ def _preprocess_entries(memory_state: list) -> list:
                  "source_trust": getattr(e, "source_trust", 0.5), "source_conflict": getattr(e, "source_conflict", 0),
                  "downstream_count": getattr(e, "downstream_count", 0),
                  "provenance_chain": getattr(e, "provenance_chain", None) or [],
-                 "prompt_embedding": getattr(e, "prompt_embedding", None)}
+                 "prompt_embedding": getattr(e, "prompt_embedding", None),
+                 "source": getattr(e, "source", None),
+                 "path": getattr(e, "path", None)}
         content = d.get("content", "")
         content_lower = content.lower()
         tokens = set(w for w in content_lower.split() if len(w) >= 4 and w not in _STOPWORDS)
@@ -84,6 +86,8 @@ def _preprocess_entries(memory_state: list) -> list:
             "downstream_count": d.get("downstream_count", 0),
             "provenance_chain": d.get("provenance_chain") or [],
             "prompt_embedding": d.get("prompt_embedding"),
+            "source": d.get("source"),
+            "path": d.get("path"),
         })
     return result
 
@@ -499,7 +503,10 @@ def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rge
     _max_depth = max((len(c) for c in _chains), default=0)
 
     if not _has_chains:
-        return {"provenance_chain_integrity": "CLEAN", "provenance_chain_flags": [], "chain_depth": 0}
+        return {"provenance_chain_integrity": "CLEAN", "provenance_chain_flags": [], "chain_depth": 0,
+                "pa_signals": {"max_single_hop_jump": 0.0, "origin_mismatch_ratio": 0.0,
+                               "echo_ratio": 1.0, "trust_endpoint_delta": 0.0},
+                "pa_primary_gate": False, "pa_supplementary_count": 0}
 
     # PATTERN 1 — Chain length vs downstream mismatch
     for i, e in enumerate(_entries):
@@ -529,6 +536,85 @@ def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rge
     if len(_nonempty) >= 3 and len(set(_nonempty)) == 1:
         _flags.append("identical_chains:suspicious")
 
+    # ---- Round 12 PA detector: provenance asymmetry signals ----
+    # Requires entries with provenance_chain length >= 2 (multi-hop)
+
+    _pa_primary_gate = False
+    _pa_supplementary_count = 0
+    _pa_signals = {}
+
+    # Sort entries by chain length for trust evolution analysis
+    _entries_by_chain_len = sorted(
+        [(len(e.get("provenance_chain") or []), e) for e in _entries],
+        key=lambda x: x[0]
+    )
+    _multi_hop_entries = [(cl, e) for cl, e in _entries_by_chain_len if cl >= 1]
+
+    # PA SIGNAL 1: max_single_hop_jump — trust delta between consecutive chain lengths
+    # Compares source_trust of entries at chain_length N vs chain_length N+1
+    _max_hop_jump = 0.0
+    if len(_multi_hop_entries) >= 2:
+        for i in range(len(_multi_hop_entries) - 1):
+            t_curr = _multi_hop_entries[i][1].get("source_trust", 0.5)
+            t_next = _multi_hop_entries[i + 1][1].get("source_trust", 0.5)
+            _max_hop_jump = max(_max_hop_jump, abs(t_next - t_curr))
+    _pa_signals["max_single_hop_jump"] = round(_max_hop_jump, 4)
+
+    if _max_hop_jump > 0.07:
+        _pa_primary_gate = True
+
+    # PA SIGNAL 2: origin_mismatch_ratio — declared_origin vs actual_origin
+    _origin_total = 0
+    _origin_mismatches = 0
+    for e in _entries:
+        src = e.get("source")
+        if isinstance(src, dict) and "declared_origin" in src and "actual_origin" in src:
+            _origin_total += 1
+            if src["declared_origin"] != src["actual_origin"]:
+                _origin_mismatches += 1
+    _origin_ratio = round(_origin_mismatches / max(_origin_total, 1), 4)
+    _pa_signals["origin_mismatch_ratio"] = _origin_ratio
+    if _origin_ratio > 0:
+        _pa_supplementary_count += 1
+        _flags.append("provenance_origin_mismatch:suspicious")
+
+    # PA SIGNAL 3: echo_ratio — unique actual_origins / unique declared_origins
+    _declared_origins = set()
+    _actual_origins = set()
+    for e in _entries:
+        src = e.get("source")
+        if isinstance(src, dict):
+            if src.get("declared_origin"):
+                _declared_origins.add(src["declared_origin"])
+            if src.get("actual_origin"):
+                _actual_origins.add(src["actual_origin"])
+    _echo_ratio = round(len(_actual_origins) / max(len(_declared_origins), 1), 4) if _declared_origins else 1.0
+    _pa_signals["echo_ratio"] = _echo_ratio
+    if _echo_ratio < 1.0:
+        _pa_supplementary_count += 1
+        _flags.append("echo_amplification:suspicious")
+
+    # PA SIGNAL 4: trust_endpoint_delta — first-hop vs last-hop trust
+    _trust_endpoint_delta = 0.0
+    if len(_multi_hop_entries) >= 2:
+        _trust_first = _multi_hop_entries[0][1].get("source_trust", 0.5)
+        _trust_last = _multi_hop_entries[-1][1].get("source_trust", 0.5)
+        _trust_endpoint_delta = round(abs(_trust_last - _trust_first), 4)
+    _pa_signals["trust_endpoint_delta"] = _trust_endpoint_delta
+    if _trust_endpoint_delta > 0.1:
+        _pa_supplementary_count += 1
+        _flags.append("trust_evolution_anomaly:suspicious")
+
+    # PA classification: primary gate + supplementary → severity
+    if _pa_primary_gate and _pa_supplementary_count >= 1:
+        _flags.append("provenance_asymmetry:manipulated")
+    elif _pa_primary_gate:
+        _flags.append("provenance_asymmetry:suspicious")
+    elif _pa_supplementary_count >= 2:
+        # Multiple supplementary signals without primary — still suspicious
+        _flags.append("provenance_asymmetry:suspicious")
+
+    # Final integrity classification (existing + PA signals)
     if any("manipulated" in f for f in _flags):
         _integrity = "MANIPULATED"
     elif _flags:
@@ -536,7 +622,14 @@ def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rge
     else:
         _integrity = "CLEAN"
 
-    return {"provenance_chain_integrity": _integrity, "provenance_chain_flags": _flags, "chain_depth": _max_depth}
+    return {
+        "provenance_chain_integrity": _integrity,
+        "provenance_chain_flags": _flags,
+        "chain_depth": _max_depth,
+        "pa_signals": _pa_signals,
+        "pa_primary_gate": _pa_primary_gate,
+        "pa_supplementary_count": _pa_supplementary_count,
+    }
 
 
 _NATURALNESS_BASELINES = {
