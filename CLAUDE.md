@@ -14,17 +14,17 @@ Sgraal is a memory governance protocol for AI agents. It provides a preflight sc
 api/
 ├── main.py              16,824 lines  — preflight orchestration, endpoint handlers, Pydantic models
 ├── detection.py            676 lines  — 4 detection layers, naturalness, secret patterns, attack surface
-├── helpers.py              310 lines  — dict management, SSRF validation, anomaly detection, rate limiting
+├── helpers.py              354 lines  — dict management, SSRF validation, anomaly detection, rate limiting
 ├── webhooks.py             147 lines  — webhook dispatch, Slack/PagerDuty formatters, HMAC signing
 ├── vaccination.py          143 lines  — AES-256-GCM + XOR vaccine encryption/decryption
 ├── fleet.py                139 lines  — Redis circuit breaker, PagerDuty/OpsGenie incident alerting
 ├── redis_state.py                    — Redis REST client (Upstash)
 └── routers/
     ├── guard.py                      — /v1/guard/* function-calling endpoints
-    ├── vaccines.py          65 lines — /v1/vaccines/*, /v1/compromised-agents/*
-    ├── sla_feeds.py        193 lines — /v1/sla/*, /v1/feed/*, /v1/sla-rules/*
-    ├── registry.py          69 lines — /v1/registry/*
-    └── federation.py        56 lines — /v1/federation/*
+    ├── vaccines.py          62 lines — /v1/vaccines/*, /v1/compromised-agents/*
+    ├── sla_feeds.py        188 lines — /v1/sla/*, /v1/feed/*, /v1/sla-rules/*
+    ├── registry.py          66 lines — /v1/registry/*
+    └── federation.py        53 lines — /v1/federation/*
 
 scoring_engine/                       — Pure Python scoring (no dependencies on api/)
 ├── omega_mem.py                      — 10-component weighted scoring formula + Weibull decay
