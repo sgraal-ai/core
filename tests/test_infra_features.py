@@ -4,9 +4,9 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient
-from api.main import (app, _redis_cb_state, _redis_cb_failures, _redis_cb_record_failure,
-                       _redis_cb_record_success, _redis_cb_should_skip,
-                       _block_rate_window, _track_block_rate)
+from api.main import app
+from api.fleet import (_redis_cb_record_failure, _redis_cb_record_success,
+                       _redis_cb_should_skip, _track_block_rate)
 
 client = TestClient(app)
 AUTH = {"Authorization": "Bearer sg_test_key_001"}
@@ -28,14 +28,14 @@ def _entry(**overrides):
 
 class TestRedisCircuitBreaker:
     def test_starts_closed(self):
-        import api.main as m
+        import api.fleet as m
         # Reset state
         m._redis_cb_state = "CLOSED"
         m._redis_cb_failures.clear()
         assert not _redis_cb_should_skip()
 
     def test_opens_after_failures(self):
-        import api.main as m
+        import api.fleet as m
         m._redis_cb_state = "CLOSED"
         m._redis_cb_failures.clear()
         for _ in range(4):
@@ -52,7 +52,7 @@ class TestRedisCircuitBreaker:
         assert "state" in j["redis_circuit_breaker"]
 
     def test_success_closes_half_open(self):
-        import api.main as m
+        import api.fleet as m
         m._redis_cb_state = "HALF_OPEN"
         _redis_cb_record_success()
         assert m._redis_cb_state == "CLOSED"
@@ -100,14 +100,14 @@ class TestBlockRateTracking:
 
     def test_no_incident_below_threshold(self):
         """Should not trigger with < 10 calls."""
-        import api.main as m
+        import api.fleet as m
         m._block_rate_window.clear()
         for _ in range(5):
             _track_block_rate(True, "test", 80.0)
         # Less than 10 calls — no incident
 
     def test_window_contains_entries(self):
-        import api.main as m
+        import api.fleet as m
         m._block_rate_window.clear()
         _track_block_rate(True, "test", 80.0)
         assert len(m._block_rate_window) >= 1

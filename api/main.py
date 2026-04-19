@@ -447,107 +447,14 @@ from api.helpers import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Redis circuit breaker (#386)
-# ---------------------------------------------------------------------------
-
-_redis_cb_failures: list[float] = []  # timestamps of recent failures
-_redis_cb_state = "CLOSED"  # CLOSED | OPEN | HALF_OPEN
-_redis_cb_open_until = 0.0
-_REDIS_CB_THRESHOLD = 3  # failures to open
-_REDIS_CB_WINDOW = 30  # seconds to count failures
-_REDIS_CB_RECOVERY = 60  # seconds before half-open
-
-
-def _redis_cb_record_failure():
-    global _redis_cb_state, _redis_cb_open_until
-    now = _time.time()
-    _redis_cb_failures.append(now)
-    # Prune old failures
-    _redis_cb_failures[:] = [t for t in _redis_cb_failures if now - t < _REDIS_CB_WINDOW]
-    if len(_redis_cb_failures) >= _REDIS_CB_THRESHOLD and _redis_cb_state != "OPEN":
-        _redis_cb_state = "OPEN"
-        _redis_cb_open_until = now + _REDIS_CB_RECOVERY
-        logger.warning("Redis circuit breaker OPEN — %d failures in %ds. Skipping Redis for %ds.",
-                        len(_redis_cb_failures), _REDIS_CB_WINDOW, _REDIS_CB_RECOVERY)
-
-
-def _redis_cb_record_success():
-    global _redis_cb_state
-    if _redis_cb_state == "HALF_OPEN":
-        _redis_cb_state = "CLOSED"
-        _redis_cb_failures.clear()
-        logger.info("Redis circuit breaker CLOSED — recovery successful.")
-
-
-def _redis_cb_should_skip() -> bool:
-    global _redis_cb_state, _redis_cb_open_until
-    now = _time.time()
-    if _redis_cb_state == "CLOSED":
-        return False
-    if _redis_cb_state == "OPEN" and now >= _redis_cb_open_until:
-        _redis_cb_state = "HALF_OPEN"
-        return False  # Allow one probe
-    if _redis_cb_state == "OPEN":
-        return True  # Skip
-    return False  # HALF_OPEN — allow probe
-
-
-# ---------------------------------------------------------------------------
-# PagerDuty / OpsGenie auto-incident (#395)
-# ---------------------------------------------------------------------------
-
-_block_rate_window: list[tuple] = []  # (timestamp, is_block)
-_last_incident_time = 0.0
-_INCIDENT_DEDUP_SECONDS = 1800  # 30 minutes
-
-PAGERDUTY_ROUTING_KEY = os.getenv("PAGERDUTY_ROUTING_KEY")
-OPSGENIE_API_KEY = os.getenv("OPSGENIE_API_KEY")
-
-
-def _track_block_rate(is_block: bool, agent_id: str = "", omega: float = 0):
-    global _last_incident_time
-    now = _time.time()
-    _block_rate_window.append((now, is_block, agent_id, omega))
-    # Prune older than 5 minutes
-    _block_rate_window[:] = [e for e in _block_rate_window if now - e[0] < 300]
-
-    total = len(_block_rate_window)
-    if total < 10:
-        return
-    blocks = sum(1 for e in _block_rate_window if e[1])
-    rate = blocks / total
-
-    if rate > 0.5 and now - _last_incident_time > _INCIDENT_DEDUP_SECONDS:
-        _last_incident_time = now
-        # Top 3 affected agents
-        agent_scores = {}
-        for _, is_b, aid, om in _block_rate_window:
-            if is_b and aid:
-                agent_scores[aid] = max(agent_scores.get(aid, 0), om)
-        top3 = sorted(agent_scores.items(), key=lambda x: x[1], reverse=True)[:3]
-        title = f"Sgraal BLOCK rate spike: {rate*100:.0f}% in last 5 minutes ({len(agent_scores)} agents affected)"
-        body = "Top affected agents:\n" + "\n".join(f"  {a}: omega={o:.1f}" for a, o in top3)
-
-        if PAGERDUTY_ROUTING_KEY:
-            try:
-                http_requests.post("https://events.pagerduty.com/v2/enqueue", json={
-                    "routing_key": PAGERDUTY_ROUTING_KEY,
-                    "event_action": "trigger",
-                    "payload": {"summary": title, "source": "sgraal-api", "severity": "critical",
-                                "custom_details": {"block_rate": rate, "agents": dict(top3)}},
-                }, timeout=5)
-            except Exception as e:
-                logger.error("PagerDuty incident creation failed: %s", e)
-        elif OPSGENIE_API_KEY:
-            try:
-                http_requests.post("https://api.opsgenie.com/v2/alerts", json={
-                    "message": title, "description": body, "priority": "P1",
-                }, headers={"Authorization": f"GenieKey {OPSGENIE_API_KEY}"}, timeout=5)
-            except Exception as e:
-                logger.error("OpsGenie alert creation failed: %s", e)
-        else:
-            logger.warning("BLOCK RATE SPIKE: %s — no PagerDuty/OpsGenie configured", title)
+# Circuit breaker + block rate alerting extracted to api/fleet.py
+import api.fleet as _fleet_mod
+from api.fleet import (
+    _redis_cb_record_failure, _redis_cb_record_success, _redis_cb_should_skip,
+    _REDIS_CB_THRESHOLD, _REDIS_CB_WINDOW, _REDIS_CB_RECOVERY,
+    _track_block_rate,
+    PAGERDUTY_ROUTING_KEY, OPSGENIE_API_KEY,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1411,9 +1318,9 @@ def scheduler_status(key_record: dict = Depends(verify_api_key)):
         },
         "scoring_drift_alert": _scheduler_status.get("scoring_drift_alert") == "true",
         "redis_circuit_breaker": {
-            "state": _redis_cb_state,
-            "failures_last_30s": len([t for t in _redis_cb_failures if _time.time() - t < _REDIS_CB_WINDOW]),
-            "open_until": datetime.fromtimestamp(_redis_cb_open_until, tz=timezone.utc).isoformat() if _redis_cb_open_until > _time.time() else None,
+            "state": _fleet_mod._redis_cb_state,
+            "failures_last_30s": len([t for t in _fleet_mod._redis_cb_failures if _time.time() - t < _REDIS_CB_WINDOW]),
+            "open_until": datetime.fromtimestamp(_fleet_mod._redis_cb_open_until, tz=timezone.utc).isoformat() if _fleet_mod._redis_cb_open_until > _time.time() else None,
         },
         "rl_persistence": _rl_persistence_status(),
     }
