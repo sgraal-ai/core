@@ -969,6 +969,75 @@ logger.info("Signal vector logging: %s", "ENABLED" if _SIGNAL_LOGGING_ENABLED el
 logger.info("Audit log retention: %d days (set SGRAAL_AUDIT_RETENTION_DAYS to change)", _AUDIT_RETENTION_DAYS)
 
 
+# ---------------------------------------------------------------------------
+# IP-based rate limiting for public (unauthenticated) endpoints
+# ---------------------------------------------------------------------------
+_PUBLIC_RL_LIMIT = 60  # requests per minute per IP per endpoint
+_PUBLIC_RL_WINDOW = 60  # seconds
+
+def _extract_client_ip(request: Request) -> str:
+    """Extract client IP from request, respecting X-Forwarded-For."""
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    xri = request.headers.get("x-real-ip", "")
+    if xri:
+        return xri
+    return request.client.host if request.client else "unknown"
+
+def _check_public_rate_limit(request: Request, endpoint_name: str) -> dict:
+    """IP-based rate limit for public endpoints. 60 req/min per IP.
+
+    Returns {"count": N, "remaining": N} on success.
+    Raises HTTPException(429) when limit exceeded.
+    Graceful fallback: if Redis unavailable, allows the request.
+    """
+    client_ip = _extract_client_ip(request)
+    # Skip rate limiting for localhost (testing)
+    if client_ip in ("127.0.0.1", "::1", "testclient", "unknown"):
+        return {"count": 0, "remaining": _PUBLIC_RL_LIMIT}
+
+    rl_key = f"public_rl:{endpoint_name}:{client_ip}"
+    try:
+        if not UPSTASH_REDIS_URL or not UPSTASH_REDIS_TOKEN:
+            return {"count": 0, "remaining": _PUBLIC_RL_LIMIT}
+        # Atomic INCR + conditional EXPIRE
+        incr_r = http_requests.post(
+            f"{UPSTASH_REDIS_URL}/INCR/{rl_key}",
+            headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+            timeout=2,
+        )
+        if not incr_r.ok:
+            return {"count": 0, "remaining": _PUBLIC_RL_LIMIT}
+        count = int(incr_r.json().get("result", 0))
+        if count == 1:
+            # First request in window — set TTL
+            http_requests.post(
+                f"{UPSTASH_REDIS_URL}/EXPIRE/{rl_key}/{_PUBLIC_RL_WINDOW}",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"},
+                timeout=1,
+            )
+        remaining = max(0, _PUBLIC_RL_LIMIT - count)
+        if count > _PUBLIC_RL_LIMIT:
+            reset_ts = int(_time.time()) + _PUBLIC_RL_WINDOW
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded: {_PUBLIC_RL_LIMIT} requests per minute. Retry after {_PUBLIC_RL_WINDOW}s.",
+                headers={
+                    "Retry-After": str(_PUBLIC_RL_WINDOW),
+                    "X-RateLimit-Limit": str(_PUBLIC_RL_LIMIT),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(reset_ts),
+                },
+            )
+        return {"count": count, "remaining": remaining}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.debug("Public rate limit check failed (allowing request): %s", e)
+        return {"count": 0, "remaining": _PUBLIC_RL_LIMIT}
+
+
 # In-memory API key store: api_key -> stripe_customer_id
 API_KEYS: dict[str, str] = {}
 
@@ -3036,8 +3105,9 @@ class VerifyAttestationRequest(BaseModel):
 
 
 @app.post("/v1/verify-attestation")
-def verify_attestation(req: VerifyAttestationRequest):
-    """Verify a portable safety attestation. No auth required."""
+def verify_attestation(req: VerifyAttestationRequest, request: Request):
+    """Verify a portable safety attestation. No auth required. Rate limited: 60/min per IP."""
+    _check_public_rate_limit(request, "verify_attestation")
     import hmac as _hmac_mod
     _msg = f"{req.input_hash}:{req.omega}:{req.decision}:{req.request_id}"
     _expected = _hmac_mod.new(ATTESTATION_SECRET.encode(), _msg.encode(), hashlib.sha256).hexdigest()
@@ -3085,8 +3155,10 @@ def register_memory(req: RegistryRegisterRequest, key_record: dict = Depends(ver
 
 
 @app.get("/v1/registry/{agent_id}")
-def get_registry_entry(agent_id: str):
-    """Public: check if an agent has verified memory (no auth)."""
+def get_registry_entry(agent_id: str, request: Request):
+    """Public: check if an agent has verified memory (no auth). Rate limited: 60/min per IP."""
+    _check_public_rate_limit(request, "registry_lookup")
+
     entry = _registry.get(agent_id) or redis_get(f"registry:{agent_id}")
     if not entry:
         raise HTTPException(status_code=404, detail="Agent not registered or registration expired")
@@ -3676,8 +3748,9 @@ class ProvenanceVerifyRequest(BaseModel):
 
 
 @app.post("/v1/provenance/verify")
-def verify_provenance(req: ProvenanceVerifyRequest):
-    """Verify a signed provenance chain. No auth required."""
+def verify_provenance(req: ProvenanceVerifyRequest, request: Request):
+    """Verify a signed provenance chain. No auth required. Rate limited: 60/min per IP."""
+    _check_public_rate_limit(request, "provenance_verify")
     import hmac as _hm
     _msg = ":".join(sorted(req.provenance_chain)) + ":" + req.input_hash
     _expected = _hm.new(ATTESTATION_SECRET.encode(), _msg.encode(), hashlib.sha256).hexdigest()
@@ -3743,8 +3816,9 @@ class ZKVerifyRequest(BaseModel):
 
 
 @app.post("/v1/zk/verify")
-def zk_verify(req: ZKVerifyRequest):
-    """Verify a ZK governance proof. No auth required."""
+def zk_verify(req: ZKVerifyRequest, request: Request):
+    """Verify a ZK governance proof. No auth required. Rate limited: 60/min per IP."""
+    _check_public_rate_limit(request, "zk_verify")
     _expected = hashlib.sha256(f"{req.input_hash}:{req.omega}:{req.decision}".encode()).hexdigest()
     _valid = _expected == req.proof_hash
     return {"valid": _valid, "message": "ZK proof verified" if _valid else "Invalid ZK proof"}
