@@ -1374,62 +1374,7 @@ def warmup(key_record: dict = Depends(verify_api_key)):
 # Extracted to api/routers/guard.py — included via app.include_router() at end of file.
 
 
-# ---- Memory Vaccination endpoints ----
-
-@app.get("/v1/vaccines")
-def list_vaccines(domain: str = Query("general"), key_record: dict = Depends(verify_api_key)):
-    """List stored vaccine signatures for a domain."""
-    _vax_idx_key = f"vaccine_index:{domain}"
-    _vax_ids = redis_get(_vax_idx_key, [])
-    vaccines = []
-    if isinstance(_vax_ids, list):
-        for _vid in _vax_ids[:50]:
-            _vax_raw = redis_get(f"vaccine:{_vid}")
-            if _vax_raw:
-                _vax = _decrypt_vaccine(_vax_raw)
-                if _vax and isinstance(_vax, dict):
-                    vaccines.append(_vax)
-    return {"domain": domain, "count": len(vaccines), "vaccines": vaccines}
-
-
-@app.delete("/v1/vaccines/{signature_id}")
-def delete_vaccine(signature_id: str, key_record: dict = Depends(verify_api_key)):
-    """Remove a vaccine signature."""
-    redis_delete(f"vaccine:{signature_id}")
-    return {"deleted": signature_id}
-
-
-@app.get("/v1/compromised-agents")
-def list_compromised_agents(key_record: dict = Depends(verify_api_key)):
-    """List currently flagged compromised agent_ids."""
-    agents = []
-    if UPSTASH_REDIS_URL:
-        try:
-            r = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/LRANGE/compromised_agents/0/499",
-                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
-            if r.ok:
-                result = r.json().get("result", [])
-                if isinstance(result, list):
-                    agents = list(set(result))  # deduplicate
-        except Exception:
-            pass
-    if not agents:
-        # Fallback to old format (redis_get for backward compat)
-        agents = redis_get("compromised_agents", [])
-        if not isinstance(agents, list):
-            agents = []
-    return {"count": len(agents), "agents": agents}
-
-
-@app.delete("/v1/compromised-agents/{agent_id}")
-def remove_compromised_agent(agent_id: str, key_record: dict = Depends(verify_api_key)):
-    """Remove an agent from the compromised set."""
-    agents = redis_get("compromised_agents", [])
-    if isinstance(agents, list) and agent_id in agents:
-        agents.remove(agent_id)
-        redis_set("compromised_agents", agents, ttl=604800)
-    return {"removed": agent_id}
-
+# ---- Memory Vaccination endpoints — moved to api/routers/vaccines.py ----
 
 # ---- Destroy pipeline (D2) ----
 
@@ -17164,4 +17109,6 @@ def preflight(req: PreflightRequest, request: Request, key_record: dict = Depend
 # globals (verify_api_key, _check_rate_limit, API_KEYS, app) are fully defined
 # before the router modules import them.
 from api.routers import guard as _guard_router  # noqa: E402
+from api.routers import vaccines as _vaccines_router  # noqa: E402
 app.include_router(_guard_router.router)
+app.include_router(_vaccines_router.router)
