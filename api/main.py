@@ -11073,98 +11073,24 @@ _metrics = _Metrics()
 _webhooks: list[dict] = []
 
 
-def _sign_payload(payload: str, secret: str) -> str:
-    return _hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-
-
-def _format_slack(payload: dict) -> dict:
-    decision = payload["decision"]
-    emoji = ":red_circle:" if decision == "BLOCK" else ":warning:"
-    return {
-        "text": f"{emoji} Sgraal {decision}: Ω={payload['omega_score']} | request={payload['request_id']}",
-        "blocks": [
-            {"type": "section", "text": {"type": "mrkdwn", "text": (
-                f"*{decision}* — Ω_MEM = {payload['omega_score']}\n"
-                f"Request: `{payload['request_id']}`\n"
-                f"Time: {payload['timestamp']}"
-            )}},
-        ],
-    }
-
-
-def _format_pagerduty(payload: dict) -> dict:
-    return {
-        "routing_key": "",  # user provides in webhook URL
-        "event_action": "trigger",
-        "payload": {
-            "summary": f"Sgraal {payload['decision']}: Ω={payload['omega_score']}",
-            "severity": "critical" if payload["decision"] == "BLOCK" else "warning",
-            "source": "sgraal",
-            "custom_details": payload,
-        },
-    }
+# Webhook dispatch extracted to api/webhooks.py
+from api.webhooks import (
+    _dispatch_webhooks as _dispatch_webhooks_impl,
+    _dispatch_security_event as _dispatch_security_event_impl,
+    _sign_payload,
+    _format_slack,
+    _format_pagerduty,
+)
 
 
 def _dispatch_webhooks(decision: str, request_id: str, omega: float, entry_ids: list[str]):
-    """Fire webhooks matching the decision. Runs in background thread."""
-    now = datetime.now(timezone.utc).isoformat()
-    base_payload = {
-        "request_id": request_id,
-        "decision": decision,
-        "omega_score": omega,
-        "memory_ids": entry_ids,
-        "timestamp": now,
-    }
-
-    for hook in _webhooks:
-        if decision not in hook["events"]:
-            continue
-
-        target = hook.get("target", "generic")
-        if target == "slack":
-            body = _format_slack(base_payload)
-        elif target == "pagerduty":
-            body = _format_pagerduty(base_payload)
-        else:
-            body = base_payload
-
-        payload_str = _json.dumps(body, sort_keys=True)
-        signature = _sign_payload(payload_str, hook["secret"])
-
-        def _send(url=hook["url"], data=payload_str, sig=signature):
-            try:
-                http_requests.post(
-                    url,
-                    data=data,
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-Sgraal-Signature": sig,
-                    },
-                    timeout=5,
-                )
-            except Exception:
-                pass
-
-        threading.Thread(target=_send, daemon=True).start()
+    """Fire webhooks matching the decision. Delegates to api.webhooks."""
+    _dispatch_webhooks_impl(decision, request_id, omega, entry_ids, webhooks=_webhooks)
 
 
 def _dispatch_security_event(event_type: str, details: dict, key_hash: str):
-    """Dispatch security event to registered webhooks."""
-    for wh in _webhooks:
-        events = wh.get("events", [])
-        if event_type not in events and "security" not in events:
-            continue
-        payload = {"event": event_type, "details": details, "timestamp": datetime.now(timezone.utc).isoformat()}
-        try:
-            sig = _sign_payload(_json.dumps(payload, sort_keys=True), wh.get("secret", ""))
-            def _send_sec(url=wh["url"], data=_json.dumps(payload, sort_keys=True), s=sig):
-                try:
-                    http_requests.post(url, data=data, headers={"Content-Type": "application/json", "X-Sgraal-Signature": s}, timeout=5)
-                except Exception:
-                    pass
-            threading.Thread(target=_send_sec, daemon=True).start()
-        except Exception:
-            pass
+    """Dispatch security event to registered webhooks. Delegates to api.webhooks."""
+    _dispatch_security_event_impl(event_type, details, key_hash, webhooks=_webhooks)
 
 
 def _audit_log_sync(event_type: str, request_id: str, key_record: dict, decision: str, omega: float, extra: dict = None):
