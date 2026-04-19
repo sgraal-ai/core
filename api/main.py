@@ -963,6 +963,8 @@ if (
     )
 
 # Startup feature flags
+if os.getenv("ENVIRONMENT", "").lower() == "staging":
+    logger.info("\U0001f7e1 STAGING MODE — not production")
 logger.info("Signal vector logging: %s", "ENABLED" if _SIGNAL_LOGGING_ENABLED else "DISABLED (set SGRAAL_SIGNAL_LOGGING=true to enable)")
 logger.info("Audit log retention: %d days (set SGRAAL_AUDIT_RETENTION_DAYS to change)", _AUDIT_RETENTION_DAYS)
 

@@ -1,0 +1,4 @@
+[environments.staging]
+  [environments.staging.variables]
+  ENVIRONMENT = "staging"
+  LOG_LEVEL = "debug"

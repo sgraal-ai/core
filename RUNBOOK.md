@@ -71,29 +71,48 @@ The Dockerfile runs as non-root user. The Helm chart enforces:
 
 ## Staging vs Production
 
+### Staging URL
+- `api-staging.sgraal.com` (requires DNS CNAME pointing to the Railway staging service after environment is created)
+
+### Purpose
+Every push to `main` deploys to staging first. Verify staging is healthy before promoting to production. Staging uses `railway.staging.toml` for environment-specific config (`ENVIRONMENT=staging`, `LOG_LEVEL=debug`).
+
 ### Deploy to staging
+Staging auto-deploys from `main` when the Railway staging environment is configured:
 ```bash
-# Create or switch to staging environment on Railway
+git push origin main  # staging auto-deploys from main
+```
+
+Manual deploy (first-time setup or re-deploy):
+```bash
 railway environment staging
 railway up
 ```
 
-### Deploy to production
+### Verify staging health
+```bash
+curl https://api-staging.sgraal.com/health | python3 -m json.tool
+```
+Logs will show `STAGING MODE — not production` on startup.
+
+### Promote staging to production
+After verifying staging is healthy, promote via the Railway dashboard:
+1. Open Railway dashboard → select project
+2. Switch to production environment
+3. Click "Deploy" → select the same commit that staging is running
+4. Verify: `curl https://api.sgraal.com/health`
+
+### Deploy to production (direct)
 Production auto-deploys from `main` branch. Manual deploy:
 ```bash
 railway environment production
 railway up
 ```
 
-### Promote staging to production
-After verifying staging is healthy:
-```bash
-git push origin main  # Railway auto-deploys production from main
-```
-
 ### Environment variables for staging
 Staging should use separate credentials where possible:
-- `ENVIRONMENT=staging` (CORS restricts localhost)
+- `ENVIRONMENT=staging` (set via `railway.staging.toml`; CORS restricts localhost; startup log shows staging mode)
+- `LOG_LEVEL=debug` (verbose logging for troubleshooting)
 - Separate `SUPABASE_URL` / `SUPABASE_KEY` (staging project)
 - Separate `UPSTASH_REDIS_URL` / `UPSTASH_REDIS_TOKEN` (staging Redis)
 - Same `ATTESTATION_SECRET` / `PASSPORT_SIGNING_KEY_V1` (if you want VCs to be cross-environment verifiable)
