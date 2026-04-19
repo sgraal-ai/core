@@ -18000,7 +18000,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
 # ---------------------------------------------------------------------------
 
 _SECRET_PATTERNS = [
-    (re.compile(r'sk-[a-zA-Z0-9]{20,}'), "API key (sk-...)"),
+    (re.compile(r'sk-[a-zA-Z0-9\-]{10,}'), "API key (sk-...)"),
     (re.compile(r'sk_live_[a-zA-Z0-9]{20,}'), "Stripe live key"),
     (re.compile(r'sk_test_[a-zA-Z0-9]{20,}'), "Stripe test key"),
     (re.compile(r'Bearer\s+[a-zA-Z0-9_\-\.]{20,}'), "Bearer token"),
