@@ -11400,6 +11400,7 @@ from api.detection import (
     _extract_attack_signature,
     _compute_attack_surface_score,
     _NATURALNESS_BASELINES,
+    _SECRET_PATTERNS,
 )
 
 
@@ -17118,16 +17119,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
 # No MemCube format. No action_type. No domain. Just: "are these strings safe?"
 # ---------------------------------------------------------------------------
 
-_SECRET_PATTERNS = [
-    (re.compile(r'sk-[a-zA-Z0-9\-]{10,}'), "API key (sk-...)"),
-    (re.compile(r'sk_live_[a-zA-Z0-9]{20,}'), "Stripe live key"),
-    (re.compile(r'sk_test_[a-zA-Z0-9]{20,}'), "Stripe test key"),
-    (re.compile(r'Bearer\s+[a-zA-Z0-9_\-\.]{20,}'), "Bearer token"),
-    (re.compile(r'ghp_[a-zA-Z0-9]{36,}'), "GitHub personal access token"),
-    (re.compile(r'AKIA[A-Z0-9]{16}'), "AWS access key"),
-    (re.compile(r'xox[bpras]-[a-zA-Z0-9\-]{20,}'), "Slack token"),
-    (re.compile(r'[a-zA-Z0-9_\-]{40,64}', re.ASCII), "likely secret or API key"),
-]
+# _SECRET_PATTERNS — imported from api.detection
 
 
 class CheckRequest(BaseModel):

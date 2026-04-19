@@ -15,6 +15,7 @@ Supporting:
     - _check_naturalness: statistical naturalness scoring
     - _extract_attack_signature: vaccine signature extraction
     - _compute_attack_surface_score: compound risk from all 4 layers
+    - _SECRET_PATTERNS: regex patterns for secret detection in /v1/check
 """
 
 import hashlib
@@ -34,6 +35,23 @@ __all__ = [
     "_extract_attack_signature",
     "_compute_attack_surface_score",
     "_NATURALNESS_BASELINES",
+    "_SECRET_PATTERNS",
+]
+
+
+# ---------------------------------------------------------------------------
+# Secret detection patterns for /v1/check endpoint
+# ---------------------------------------------------------------------------
+
+_SECRET_PATTERNS = [
+    (re.compile(r'sk-[a-zA-Z0-9\-]{10,}'), "API key (sk-...)"),
+    (re.compile(r'sk_live_[a-zA-Z0-9]{20,}'), "Stripe live key"),
+    (re.compile(r'sk_test_[a-zA-Z0-9]{20,}'), "Stripe test key"),
+    (re.compile(r'Bearer\s+[a-zA-Z0-9_\-\.]{20,}'), "Bearer token"),
+    (re.compile(r'ghp_[a-zA-Z0-9]{36,}'), "GitHub personal access token"),
+    (re.compile(r'AKIA[A-Z0-9]{16}'), "AWS access key"),
+    (re.compile(r'xox[bpras]-[a-zA-Z0-9\-]{20,}'), "Slack token"),
+    (re.compile(r'[a-zA-Z0-9_\-]{40,64}', re.ASCII), "likely secret or API key"),
 ]
 
 
