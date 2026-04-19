@@ -3050,11 +3050,6 @@ def analytics_sankey(key_record: dict = Depends(verify_api_key)):
 _federation_registry: dict = {}
 
 
-class FederationContributeRequest(BaseModel):
-    vaccine_signature: str
-    attack_type: str = "unknown"
-    domain: str = "general"
-
 
 @app.get("/v1/insights")
 def get_insights(agent_id: str = Query(""), domain: str = Query("general"), key_record: dict = Depends(verify_api_key)):
@@ -3195,42 +3190,7 @@ def get_insights(agent_id: str = Query(""), domain: str = Query("general"), key_
     }
 
 
-@app.post("/v1/federation/contribute")
-def federation_contribute(req: FederationContributeRequest, key_record: dict = Depends(verify_api_key)):
-    """Contribute anonymized vaccine to shared federation."""
-    _sig = req.vaccine_signature[:16]
-    entry = {"signature": _sig, "attack_type": req.attack_type,
-             "domain": req.domain, "contributed_by": "anonymous", "contributed_at": _time.time()}
-    _evict_if_full(_federation_registry, "_federation_registry")
-    _federation_registry[_sig] = entry
-    return {"contributed": True, "federation_size": len(_federation_registry)}
-
-
-@app.get("/v1/federation/vaccines")
-def federation_list(key_record: dict = Depends(verify_api_key)):
-    """List all federated vaccine signatures."""
-    return {"vaccines": list(_federation_registry.values())[-100:], "total": len(_federation_registry)}
-
-
-class FederationCheckRequest(BaseModel):
-    memory_state: list = []
-
-
-@app.post("/v1/federation/check")
-def federation_check(req: FederationCheckRequest, key_record: dict = Depends(verify_api_key)):
-    """Check memory against federated vaccine registry."""
-    matched = 0
-    matched_types = set()
-    for e in req.memory_state:
-        content = e.get("content", "") if isinstance(e, dict) else str(e)
-        _hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-        vax = _federation_registry.get(_hash)
-        if vax:
-            matched += 1
-            matched_types.add(vax["attack_type"])
-    return {"federated_matches": matched, "matched_attack_types": list(matched_types),
-            "federation_protected": matched > 0}
-
+# ---- Federation endpoints — moved to api/routers/federation.py ----
 
 # ---- Agent Timeline ----
 
@@ -17110,5 +17070,7 @@ def preflight(req: PreflightRequest, request: Request, key_record: dict = Depend
 # before the router modules import them.
 from api.routers import guard as _guard_router  # noqa: E402
 from api.routers import vaccines as _vaccines_router  # noqa: E402
+from api.routers import federation as _federation_router  # noqa: E402
 app.include_router(_guard_router.router)
 app.include_router(_vaccines_router.router)
+app.include_router(_federation_router.router)
