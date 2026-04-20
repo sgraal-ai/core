@@ -37,6 +37,7 @@ __all__ = [
     "_NATURALNESS_BASELINES",
     "_SECRET_PATTERNS",
     "_check_sync_bleed",
+    "_check_confidence_calibration",
 ]
 
 
@@ -748,6 +749,93 @@ def _check_sync_bleed(memory_state: list, _preprocessed: list = None) -> dict:
         _level = "CLEAN"
 
     return {"sync_bleed": _level, "sync_bleed_flags": _flags, "sync_signals": _signals}
+
+
+def _check_confidence_calibration(memory_state: list, _preprocessed: list = None) -> dict:
+    """Detect confidence calibration attacks — overconfident stale memories.
+
+    Requires MemCube v4 field: model_confidence (optional).
+    Signals operate on entry-level age, trust, and type-specific Weibull half-lives.
+    Returns CLEAN if no actionable signals detected.
+    """
+    _entries = _preprocessed if _preprocessed else _preprocess_entries(memory_state)
+    _flags = []
+    n = len(_entries)
+    if n < 2:
+        return {"confidence_calibration": "CLEAN", "cc_flags": [], "cc_signals": {}}
+
+    # Weibull half-lives per memory type
+    _HALFLIFE = {"tool_state": 5, "shared_workflow": 9, "episodic": 14,
+                 "preference": 23, "semantic": 69, "policy": 139, "identity": 347}
+
+    ages = [e.get("timestamp_age_days", 0) for e in _entries]
+    trusts = [e.get("source_trust", 0.5) for e in _entries]
+    conflicts = [e.get("source_conflict", 0) for e in _entries]
+    age_mean = sum(ages) / n
+    age_std = (sum((a - age_mean) ** 2 for a in ages) / n) ** 0.5
+    trust_mean = sum(trusts) / n
+    trust_std = (sum((t - trust_mean) ** 2 for t in trusts) / n) ** 0.5
+
+    # Signal 1: correlated_consensus — similar ages + similar trust + low conflict
+    _correlated = age_std < 5 and trust_std < 0.1 and max(conflicts) < 0.2
+
+    # Signal 2: stale_but_confident — entries past type-specific Weibull half-life with high trust
+    _sbc_count = 0
+    for e in _entries:
+        hl = _HALFLIFE.get(e.get("type", "semantic"), 69)
+        if e.get("timestamp_age_days", 0) > hl and e.get("source_trust", 0) > 0.8:
+            _sbc_count += 1
+
+    # Signal 3: age_cluster — 3+ entries within narrow age window, all > 10 days
+    _age_cluster = False
+    if n >= 3:
+        age_range = max(ages) - min(ages)
+        _age_cluster = age_range < 5 and min(ages) > 10
+
+    # Signal 4: model_confidence divergence — high confidence on aging entries
+    _mc_divergence = False
+    _mc_values = [e.get("model_confidence") for e in _entries if e.get("model_confidence") is not None]
+    if _mc_values:
+        mc_max = max(_mc_values)
+        avg_hl = sum(_HALFLIFE.get(e.get("type", "semantic"), 69) for e in _entries) / n
+        age_ratio = age_mean / max(avg_hl, 1)
+        _mc_divergence = mc_max > 0.8 and age_ratio > 0.3
+
+    _signals = {
+        "correlated_consensus": _correlated,
+        "stale_but_confident_count": _sbc_count,
+        "age_cluster_detected": _age_cluster,
+        "model_confidence_divergence": _mc_divergence,
+        "age_mean": round(age_mean, 2),
+        "age_std": round(age_std, 2),
+        "trust_std": round(trust_std, 4),
+    }
+
+    # Classification
+    if (_correlated or _age_cluster) and _sbc_count >= 2:
+        _flags.append("confidence_calibration:manipulated")
+    elif _mc_divergence and _sbc_count >= 2:
+        _flags.append("confidence_calibration:manipulated")
+    elif _mc_divergence and _sbc_count == 1:
+        # Single stale-but-confident entry + mc divergence → suspicious (not manipulated)
+        _flags.append("confidence_calibration:suspicious")
+    elif _mc_divergence:
+        _flags.append("confidence_calibration:suspicious")
+    elif _correlated and _sbc_count >= 1:
+        _flags.append("confidence_calibration:suspicious")
+    elif _age_cluster:
+        _flags.append("confidence_calibration:suspicious")
+    elif _sbc_count >= 1:
+        _flags.append("confidence_calibration:suspicious")
+
+    if any("manipulated" in f for f in _flags):
+        _level = "MANIPULATED"
+    elif _flags:
+        _level = "SUSPICIOUS"
+    else:
+        _level = "CLEAN"
+
+    return {"confidence_calibration": _level, "cc_flags": _flags, "cc_signals": _signals}
 
 
 _NATURALNESS_BASELINES = {

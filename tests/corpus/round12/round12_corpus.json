@@ -64,7 +64,8 @@
           "provenance_chain": [
             "agent_sales_east"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "model_confidence": 0.89
         },
         {
           "id": "cc001_e2",
@@ -77,7 +78,8 @@
           "provenance_chain": [
             "agent_sales_west"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "model_confidence": 0.89
         },
         {
           "id": "cc001_e3",
@@ -90,7 +92,8 @@
           "provenance_chain": [
             "agent_pricing_bot"
           ],
-          "r_belief": 0.92
+          "r_belief": 0.92,
+          "model_confidence": 0.89
         },
         {
           "id": "cc001_e4",
@@ -103,7 +106,8 @@
           "provenance_chain": [
             "agent_sales_east"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "model_confidence": 0.89
         }
       ],
       "sync_topology": null,
@@ -275,7 +279,8 @@
           "provenance_chain": [
             "agent_renewals_1"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.91
         },
         {
           "id": "cc002_e2",
@@ -288,7 +293,8 @@
           "provenance_chain": [
             "agent_account_mgr"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "model_confidence": 0.91
         },
         {
           "id": "cc002_e3",
@@ -301,7 +307,8 @@
           "provenance_chain": [
             "agent_billing_auto"
           ],
-          "r_belief": 0.93
+          "r_belief": 0.93,
+          "model_confidence": 0.91
         },
         {
           "id": "cc002_e4",
@@ -314,7 +321,8 @@
           "provenance_chain": [
             "agent_renewals_1"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "model_confidence": 0.91
         },
         {
           "id": "cc002_e5",
@@ -327,7 +335,8 @@
           "provenance_chain": [
             "agent_account_mgr"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "model_confidence": 0.91
         }
       ],
       "sync_topology": null,
@@ -499,7 +508,8 @@
           "provenance_chain": [
             "agent_compliance_med"
           ],
-          "r_belief": 0.92
+          "r_belief": 0.92,
+          "model_confidence": 0.92
         },
         {
           "id": "cc003_e2",
@@ -512,7 +522,8 @@
           "provenance_chain": [
             "agent_data_gov"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "model_confidence": 0.92
         },
         {
           "id": "cc003_e3",
@@ -525,7 +536,8 @@
           "provenance_chain": [
             "agent_research_coord"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "model_confidence": 0.92
         },
         {
           "id": "cc003_e4",
@@ -538,7 +550,8 @@
           "provenance_chain": [
             "agent_research_coord"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "model_confidence": 0.92
         },
         {
           "id": "cc003_e5",
@@ -551,7 +564,8 @@
           "provenance_chain": [
             "agent_data_gov"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.92
         }
       ],
       "sync_topology": null,
@@ -726,7 +740,8 @@
           "provenance_chain": [
             "agent_code_reviewer"
           ],
-          "r_belief": 0.93
+          "r_belief": 0.93,
+          "model_confidence": 0.86
         },
         {
           "id": "cc004_e2",
@@ -740,7 +755,8 @@
             "agent_code_reviewer",
             "agent_summary_bot"
           ],
-          "r_belief": 0.8
+          "r_belief": 0.8,
+          "model_confidence": 0.86
         },
         {
           "id": "cc004_e3",
@@ -755,7 +771,8 @@
             "agent_summary_bot",
             "agent_deploy_planner"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "model_confidence": 0.86
         },
         {
           "id": "cc004_e4",
@@ -768,7 +785,8 @@
           "provenance_chain": [
             "agent_ci_runner"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "model_confidence": 0.86
         },
         {
           "id": "cc004_e5",
@@ -781,7 +799,8 @@
           "provenance_chain": [
             "agent_deploy_planner"
           ],
-          "r_belief": 0.81
+          "r_belief": 0.81,
+          "model_confidence": 0.86
         }
       ],
       "sync_topology": null,
@@ -955,7 +974,8 @@
           "provenance_chain": [
             "agent_cs_alpha"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "model_confidence": 0.93
         },
         {
           "id": "cc005_e2",
@@ -968,7 +988,8 @@
           "provenance_chain": [
             "agent_cs_beta"
           ],
-          "r_belief": 0.81
+          "r_belief": 0.81,
+          "model_confidence": 0.93
         },
         {
           "id": "cc005_e3",
@@ -981,7 +1002,8 @@
           "provenance_chain": [
             "agent_cs_gamma"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "model_confidence": 0.93
         },
         {
           "id": "cc005_e4",
@@ -994,7 +1016,8 @@
           "provenance_chain": [
             "agent_cs_delta"
           ],
-          "r_belief": 0.8
+          "r_belief": 0.8,
+          "model_confidence": 0.93
         },
         {
           "id": "cc005_e5",
@@ -1007,7 +1030,8 @@
           "provenance_chain": [
             "agent_cs_epsilon"
           ],
-          "r_belief": 0.83
+          "r_belief": 0.83,
+          "model_confidence": 0.93
         },
         {
           "id": "cc005_e6",
@@ -1020,7 +1044,8 @@
           "provenance_chain": [
             "agent_cs_epsilon"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "model_confidence": 0.93
         }
       ],
       "sync_topology": null,
@@ -1187,7 +1212,8 @@
           "provenance_chain": [
             "agent_pharma_check"
           ],
-          "r_belief": 0.95
+          "r_belief": 0.95,
+          "model_confidence": 0.95
         },
         {
           "id": "cc006_e2",
@@ -1200,7 +1226,8 @@
           "provenance_chain": [
             "agent_clinical_advisor"
           ],
-          "r_belief": 0.91
+          "r_belief": 0.91,
+          "model_confidence": 0.95
         },
         {
           "id": "cc006_e3",
@@ -1213,7 +1240,8 @@
           "provenance_chain": [
             "agent_ehr_writer"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "model_confidence": 0.95
         },
         {
           "id": "cc006_e4",
@@ -1227,7 +1255,8 @@
             "agent_pharma_check",
             "agent_ehr_writer"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "model_confidence": 0.95
         }
       ],
       "sync_topology": null,
@@ -1399,7 +1428,8 @@
           "provenance_chain": [
             "agent_legal_research"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "model_confidence": 0.87
         },
         {
           "id": "cc007_e2",
@@ -1413,7 +1443,8 @@
             "agent_legal_research",
             "agent_compliance_drafting"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "model_confidence": 0.87
         },
         {
           "id": "cc007_e3",
@@ -1426,7 +1457,8 @@
           "provenance_chain": [
             "agent_policy_writer"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "model_confidence": 0.87
         },
         {
           "id": "cc007_e4",
@@ -1439,7 +1471,8 @@
           "provenance_chain": [
             "agent_compliance_drafting"
           ],
-          "r_belief": 0.8
+          "r_belief": 0.8,
+          "model_confidence": 0.87
         },
         {
           "id": "cc007_e5",
@@ -1452,7 +1485,8 @@
           "provenance_chain": [
             "agent_policy_writer"
           ],
-          "r_belief": 0.83
+          "r_belief": 0.83,
+          "model_confidence": 0.87
         }
       ],
       "sync_topology": null,
@@ -1624,7 +1658,8 @@
           "provenance_chain": [
             "agent_capacity_monitor"
           ],
-          "r_belief": 0.91
+          "r_belief": 0.91,
+          "model_confidence": 0.9
         },
         {
           "id": "cc008_e2",
@@ -1637,7 +1672,8 @@
           "provenance_chain": [
             "agent_infra_planner"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "model_confidence": 0.9
         },
         {
           "id": "cc008_e3",
@@ -1650,7 +1686,8 @@
           "provenance_chain": [
             "agent_cost_optimizer"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "model_confidence": 0.9
         },
         {
           "id": "cc008_e4",
@@ -1663,7 +1700,8 @@
           "provenance_chain": [
             "agent_ops_lead"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.9
         },
         {
           "id": "cc008_e5",
@@ -1677,7 +1715,8 @@
             "agent_ops_lead",
             "agent_infra_planner"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "model_confidence": 0.9
         },
         {
           "id": "cc008_e6",
@@ -1690,7 +1729,8 @@
           "provenance_chain": [
             "agent_capacity_monitor"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "model_confidence": 0.9
         }
       ],
       "sync_topology": null,
@@ -1863,7 +1903,8 @@
           "provenance_chain": [
             "agent_lab_integrator"
           ],
-          "r_belief": 0.8
+          "r_belief": 0.8,
+          "model_confidence": 0.52
         },
         {
           "id": "cc009_e2",
@@ -1876,7 +1917,8 @@
           "provenance_chain": [
             "agent_lab_integrator"
           ],
-          "r_belief": 0.78
+          "r_belief": 0.78,
+          "model_confidence": 0.52
         },
         {
           "id": "cc009_e3",
@@ -1889,7 +1931,8 @@
           "provenance_chain": [
             "agent_clinical_monitor"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.52
         },
         {
           "id": "cc009_e4",
@@ -1902,7 +1945,8 @@
           "provenance_chain": [
             "agent_pharmacy_advisor"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "model_confidence": 0.52
         },
         {
           "id": "cc009_e5",
@@ -1915,7 +1959,8 @@
           "provenance_chain": [
             "agent_lab_integrator"
           ],
-          "r_belief": 0.72
+          "r_belief": 0.72,
+          "model_confidence": 0.52
         }
       ],
       "sync_topology": null,
@@ -2078,7 +2123,8 @@
           "provenance_chain": [
             "agent_keyvault"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "model_confidence": 0.58
         },
         {
           "id": "cc010_e2",
@@ -2091,7 +2137,8 @@
           "provenance_chain": [
             "agent_infra_wiki"
           ],
-          "r_belief": 0.65
+          "r_belief": 0.65,
+          "model_confidence": 0.58
         },
         {
           "id": "cc010_e3",
@@ -2104,7 +2151,8 @@
           "provenance_chain": [
             "agent_deploy_history"
           ],
-          "r_belief": 0.6
+          "r_belief": 0.6,
+          "model_confidence": 0.58
         },
         {
           "id": "cc010_e4",
@@ -2117,7 +2165,8 @@
           "provenance_chain": [
             "agent_infra_wiki"
           ],
-          "r_belief": 0.7
+          "r_belief": 0.7,
+          "model_confidence": 0.58
         },
         {
           "id": "cc010_e5",
@@ -2130,7 +2179,8 @@
           "provenance_chain": [
             "agent_infra_wiki"
           ],
-          "r_belief": 0.55
+          "r_belief": 0.55,
+          "model_confidence": 0.58
         }
       ],
       "sync_topology": null,
@@ -2286,7 +2336,8 @@
           "provenance_chain": [
             "agent_gdpr_lead"
           ],
-          "r_belief": 0.93
+          "r_belief": 0.93,
+          "model_confidence": 0.62
         },
         {
           "id": "cc011_e2",
@@ -2300,7 +2351,8 @@
             "agent_gdpr_lead",
             "agent_contract_mgr"
           ],
-          "r_belief": 0.75
+          "r_belief": 0.75,
+          "model_confidence": 0.62
         },
         {
           "id": "cc011_e3",
@@ -2314,7 +2366,8 @@
             "agent_contract_mgr",
             "agent_legal_ops"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "model_confidence": 0.62
         },
         {
           "id": "cc011_e4",
@@ -2327,7 +2380,8 @@
           "provenance_chain": [
             "agent_legal_ops"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.62
         }
       ],
       "sync_topology": null,
@@ -2498,7 +2552,8 @@
           "provenance_chain": [
             "agent_k8s_monitor"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "model_confidence": 0.48
         },
         {
           "id": "cc012_e2",
@@ -2511,7 +2566,8 @@
           "provenance_chain": [
             "agent_capacity_plan"
           ],
-          "r_belief": 0.83
+          "r_belief": 0.83,
+          "model_confidence": 0.48
         },
         {
           "id": "cc012_e3",
@@ -2524,7 +2580,8 @@
           "provenance_chain": [
             "agent_deploy_bot"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "model_confidence": 0.48
         },
         {
           "id": "cc012_e4",
@@ -2537,7 +2594,8 @@
           "provenance_chain": [
             "agent_ops_engineer"
           ],
-          "r_belief": 0.78
+          "r_belief": 0.78,
+          "model_confidence": 0.48
         },
         {
           "id": "cc012_e5",
@@ -2550,7 +2608,8 @@
           "provenance_chain": [
             "agent_ops_engineer"
           ],
-          "r_belief": 0.8
+          "r_belief": 0.8,
+          "model_confidence": 0.48
         }
       ],
       "sync_topology": null,
@@ -2713,7 +2772,8 @@
           "provenance_chain": [
             "agent_cs_informal"
           ],
-          "r_belief": 0.72
+          "r_belief": 0.72,
+          "model_confidence": 0.65
         },
         {
           "id": "cc013_e2",
@@ -2726,7 +2786,8 @@
           "provenance_chain": [
             "agent_warranty_db"
           ],
-          "r_belief": 0.94
+          "r_belief": 0.94,
+          "model_confidence": 0.65
         },
         {
           "id": "cc013_e3",
@@ -2739,7 +2800,8 @@
           "provenance_chain": [
             "agent_cs_informal"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "model_confidence": 0.65
         }
       ],
       "sync_topology": null,
@@ -2896,7 +2958,8 @@
           "provenance_chain": [
             "agent_vulnscan"
           ],
-          "r_belief": 0.75
+          "r_belief": 0.75,
+          "model_confidence": 0.55
         },
         {
           "id": "cc014_e2",
@@ -2909,7 +2972,8 @@
           "provenance_chain": [
             "agent_patch_mgr"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "model_confidence": 0.55
         },
         {
           "id": "cc014_e3",
@@ -2922,7 +2986,8 @@
           "provenance_chain": [
             "agent_sec_ops"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.55
         },
         {
           "id": "cc014_e4",
@@ -2935,7 +3000,8 @@
           "provenance_chain": [
             "agent_sec_ops"
           ],
-          "r_belief": 0.78
+          "r_belief": 0.78,
+          "model_confidence": 0.55
         }
       ],
       "sync_topology": null,
@@ -3090,7 +3156,8 @@
           "provenance_chain": [
             "agent_cs_shipping"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.91
         },
         {
           "id": "cc015_e2",
@@ -3103,7 +3170,8 @@
           "provenance_chain": [
             "agent_order_mgr"
           ],
-          "r_belief": 0.92
+          "r_belief": 0.92,
+          "model_confidence": 0.91
         },
         {
           "id": "cc015_e3",
@@ -3116,7 +3184,8 @@
           "provenance_chain": [
             "agent_cs_shipping"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "model_confidence": 0.91
         }
       ],
       "sync_topology": null,
@@ -3263,7 +3332,8 @@
           "provenance_chain": [
             "agent_fx_cache"
           ],
-          "r_belief": 0.7
+          "r_belief": 0.7,
+          "model_confidence": 0.45
         },
         {
           "id": "cc016_e2",
@@ -3276,7 +3346,8 @@
           "provenance_chain": [
             "agent_treasury"
           ],
-          "r_belief": 0.75
+          "r_belief": 0.75,
+          "model_confidence": 0.45
         },
         {
           "id": "cc016_e3",
@@ -3289,7 +3360,8 @@
           "provenance_chain": [
             "agent_fx_cache"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "model_confidence": 0.45
         }
       ],
       "sync_topology": null,
@@ -3447,7 +3519,8 @@
           "provenance_chain": [
             "agent_legal_federal"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "model_confidence": 0.55
         },
         {
           "id": "cc017_e2",
@@ -3460,7 +3533,8 @@
           "provenance_chain": [
             "agent_legal_state"
           ],
-          "r_belief": 0.83
+          "r_belief": 0.83,
+          "model_confidence": 0.55
         },
         {
           "id": "cc017_e3",
@@ -3473,7 +3547,8 @@
           "provenance_chain": [
             "agent_contract_analyst"
           ],
-          "r_belief": 0.78
+          "r_belief": 0.78,
+          "model_confidence": 0.55
         },
         {
           "id": "cc017_e4",
@@ -3486,7 +3561,8 @@
           "provenance_chain": [
             "agent_contract_analyst"
           ],
-          "r_belief": 0.93
+          "r_belief": 0.93,
+          "model_confidence": 0.55
         }
       ],
       "sync_topology": null,
@@ -3652,7 +3728,8 @@
           "provenance_chain": [
             "agent_dba_senior"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "model_confidence": 0.62
         },
         {
           "id": "cc018_e2",
@@ -3665,7 +3742,8 @@
           "provenance_chain": [
             "agent_schema_tracker"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "model_confidence": 0.62
         },
         {
           "id": "cc018_e3",
@@ -3678,7 +3756,8 @@
           "provenance_chain": [
             "agent_ops_scheduler"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "model_confidence": 0.62
         }
       ],
       "sync_topology": null,
@@ -3843,7 +3922,8 @@
           "provenance_chain": [
             "agent_claims_intake"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.92
         },
         {
           "id": "cc019_e2",
@@ -3856,7 +3936,8 @@
           "provenance_chain": [
             "agent_medical_review"
           ],
-          "r_belief": 0.93
+          "r_belief": 0.93,
+          "model_confidence": 0.92
         },
         {
           "id": "cc019_e3",
@@ -3869,7 +3950,8 @@
           "provenance_chain": [
             "agent_adjuster"
           ],
-          "r_belief": 0.91
+          "r_belief": 0.91,
+          "model_confidence": 0.92
         },
         {
           "id": "cc019_e4",
@@ -3882,7 +3964,8 @@
           "provenance_chain": [
             "agent_claims_intake"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.92
         }
       ],
       "sync_topology": null,
@@ -4049,7 +4132,8 @@
           "provenance_chain": [
             "agent_devops_email"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "model_confidence": 0.93
         },
         {
           "id": "cc020_e2",
@@ -4062,7 +4146,8 @@
           "provenance_chain": [
             "agent_changelog_monitor"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "model_confidence": 0.93
         },
         {
           "id": "cc020_e3",
@@ -4075,7 +4160,8 @@
           "provenance_chain": [
             "agent_dev_portal"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "model_confidence": 0.93
         },
         {
           "id": "cc020_e4",
@@ -4088,7 +4174,8 @@
           "provenance_chain": [
             "agent_partner_api"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "model_confidence": 0.93
         },
         {
           "id": "cc020_e5",
@@ -4101,7 +4188,8 @@
           "provenance_chain": [
             "agent_devops_email"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "model_confidence": 0.93
         }
       ],
       "sync_topology": null,

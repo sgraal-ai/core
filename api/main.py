@@ -10904,6 +10904,7 @@ from api.detection import (
     _check_consensus_collapse,
     _check_provenance_chain,
     _check_sync_bleed,
+    _check_confidence_calibration,
     _check_naturalness,
     _extract_attack_signature,
     _compute_attack_surface_score,
@@ -12455,6 +12456,37 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     except Exception as _e:
         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
         response["sync_bleed"] = "CLEAN"
+
+    # Confidence calibration check (Round 12 CC detector)
+    try:
+        _cc_check = _check_confidence_calibration(req.memory_state, _preprocessed=_pp_entries)
+        response["confidence_calibration_check"] = _cc_check["confidence_calibration"]
+        response["cc_flags"] = _cc_check.get("cc_flags", [])
+        response["cc_signals"] = _cc_check.get("cc_signals", {})
+        # Corroboration gate
+        if _cc_check["confidence_calibration"] == "MANIPULATED":
+            _cc_other_layers = (
+                response.get("timestamp_integrity", "VALID") not in ("VALID", "CLEAN") or
+                response.get("identity_drift", "CLEAN") != "CLEAN" or
+                response.get("consensus_collapse", "CLEAN") != "CLEAN" or
+                response.get("provenance_chain_integrity", "CLEAN") not in ("CLEAN",) or
+                response.get("sync_bleed", "CLEAN") != "CLEAN" or
+                response.get("naturalness_level", "ORGANIC") in ("SYNTHETIC", "FABRICATED")
+            )
+            if not _cc_other_layers:
+                response["confidence_calibration_check"] = "SUSPICIOUS"
+                _cc_check["confidence_calibration"] = "SUSPICIOUS"
+        if _cc_check["confidence_calibration"] in ("MANIPULATED", "SUSPICIOUS"):
+            repair_plan_out.append({
+                "action": "VERIFY_CONFIDENCE", "entry_id": "*",
+                "reason": "Confidence calibration anomaly — model confidence may exceed actual reliability.",
+                "priority": "critical" if _cc_check["confidence_calibration"] == "MANIPULATED" else "high",
+                "projected_improvement": 0,
+                "success_probability": 0.8,
+            })
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+        response["confidence_calibration_check"] = "CLEAN"
 
     # Compound attack surface score
     try:
@@ -15020,6 +15052,16 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _sb_cur = response["recommended_action"]
         if _sb_cur in _sb_sev_map:
             _set_action(_sb_sev_map[_sb_cur], "detection_sync_bleed", "SUSPICIOUS escalation")
+
+    # Confidence calibration override — post-reconciliation
+    _cc_level = response.get("confidence_calibration_check", "CLEAN")
+    if _cc_level == "MANIPULATED":
+        _set_action(DecisionAction.BLOCK, "detection_confidence_calibration", "MANIPULATED flag")
+    elif _cc_level == "SUSPICIOUS":
+        _cc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
+        _cc_cur = response["recommended_action"]
+        if _cc_cur in _cc_sev_map:
+            _set_action(_cc_sev_map[_cc_cur], "detection_confidence_calibration", "SUSPICIOUS escalation")
 
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
