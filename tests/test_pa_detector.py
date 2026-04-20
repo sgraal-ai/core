@@ -18,11 +18,10 @@ CORPUS_PATH = os.path.join(os.path.dirname(__file__), "corpus", "round12", "roun
 
 
 def _sanitize_entries(entries):
-    """Convert R12 corpus entries to API-compatible format.
+    """Convert R12 corpus entries to API-compatible MemCube v4 format.
 
-    The corpus has source as dict {declared_origin, actual_origin} and path objects.
-    The API's MemoryEntryRequest expects source as Optional[str].
-    Strip/convert fields the Pydantic model doesn't accept.
+    Maps corpus source dict to API v4 fields (source_declared_origin,
+    source_actual_origin) so the PA detector can access origin data.
     """
     sanitized = []
     for e in entries:
@@ -39,12 +38,19 @@ def _sanitize_entries(entries):
             entry["provenance_chain"] = e["provenance_chain"]
         if e.get("r_belief") is not None:
             entry["r_belief"] = e["r_belief"]
-        # Convert source dict to string for API, but preserve original for detection
+        # Map corpus source dict → API v4 fields
         src = e.get("source")
         if isinstance(src, dict):
             entry["source"] = src.get("declared_origin", "")
+            entry["source_declared_origin"] = src.get("declared_origin")
+            entry["source_actual_origin"] = src.get("actual_origin")
         elif isinstance(src, str):
             entry["source"] = src
+        # Pass through other v4 fields
+        for f in ["sync_version", "sync_state", "sync_source_id", "model_confidence"]:
+            v = e.get(f)
+            if v is not None:
+                entry[f] = v
         sanitized.append(entry)
     return sanitized
 

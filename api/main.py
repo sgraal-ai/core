@@ -12371,6 +12371,28 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # Provenance chain check
     try:
         _pc_check = _check_provenance_chain(req.memory_state, _redis_enabled, _rget, _preprocessed=_pp_entries)
+        # Phase 2 corroboration gate: downgrade MANIPULATED to SUSPICIOUS if
+        # the PA primary gate fired alone without cross-layer corroboration.
+        # MANIPULATED stays if: origin_mismatch > 0, or any other detection
+        # layer (timestamp, identity, consensus, naturalness) is SUSPICIOUS+.
+        if _pc_check.get("provenance_chain_integrity") == "MANIPULATED" and _pc_check.get("pa_primary_gate"):
+            _pa_origin_mm = _pc_check.get("pa_signals", {}).get("origin_mismatch_ratio", 0)
+            _other_layers_fire = (
+                response.get("timestamp_integrity", "VALID") not in ("VALID", "CLEAN") or
+                response.get("identity_drift", "CLEAN") != "CLEAN" or
+                response.get("consensus_collapse", "CLEAN") != "CLEAN" or
+                response.get("naturalness_level", "ORGANIC") in ("SYNTHETIC", "FABRICATED")
+            )
+            if _pa_origin_mm <= 0 and not _other_layers_fire:
+                # No provenance-specific corroboration AND no cross-layer corroboration
+                # Downgrade from MANIPULATED to SUSPICIOUS
+                _pc_check["provenance_chain_integrity"] = "SUSPICIOUS"
+                _pc_flags = _pc_check.get("provenance_chain_flags", [])
+                _pc_check["provenance_chain_flags"] = [
+                    f.replace("provenance_asymmetry:manipulated", "provenance_asymmetry:suspicious")
+                    for f in _pc_flags
+                ]
+                _pc_check["corroboration_downgrade"] = True
         response["provenance_chain_integrity"] = _pc_check["provenance_chain_integrity"]
         response["provenance_chain_flags"] = _pc_check["provenance_chain_flags"]
         response["chain_depth"] = _pc_check["chain_depth"]
