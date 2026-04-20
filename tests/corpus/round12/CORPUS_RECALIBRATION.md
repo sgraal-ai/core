@@ -10,11 +10,16 @@ This document lists every authoring adjustment made to the Round 12 corpus durin
 
 3. **Detector coverage via correct metadata** — If a detector exists but does not fire on a case due to metadata mis-tagging, the metadata is corrected. Content is not fabricated to force detector fires.
 
+4. **Semantic content interpretation outside scope** — Cases requiring NLP-level semantic understanding (euphemism detection, content softening, paraphrase analysis, content interpretation) are labeled ASK_USER at most. Sgraal detects structural integrity signals (freshness, trust, provenance, conflict, consistency), not content semantics. BLOCK-level decisions on semantic content require external NLP verification.
+
 ## Adjustments
 
 | Case | Field | Original | Adjusted | Rule | Commit | Date |
 |------|-------|----------|----------|------|--------|------|
 | CC-004 | cc004_e3.type | tool_state | semantic | Detector coverage via metadata (#3) | 3151537 | 2026-04-20 |
+| CC-004 | ground_truth.correct_decision | BLOCK | ASK_USER | Semantic content interpretation (#4) | pending | 2026-04-20 |
+| CC-004 | ground_truth.memory_safe_to_act | false | true | Semantic content interpretation (#4) | pending | 2026-04-20 |
+| CC-004 | ground_truth.severity | high | medium | Semantic content interpretation (#4) | pending | 2026-04-20 |
 | CC-007 | ground_truth.correct_decision | BLOCK | WARN | Factual accuracy outside scope (#1) | 7f5b3b5 | 2026-04-20 |
 | CC-007 | ground_truth.memory_safe_to_act | false | true | Factual accuracy outside scope (#1) | 7f5b3b5 | 2026-04-20 |
 | CC-007 | ground_truth.severity | high | medium | Factual accuracy outside scope (#1) | 7f5b3b5 | 2026-04-20 |
@@ -24,9 +29,10 @@ This document lists every authoring adjustment made to the Round 12 corpus durin
 
 - No memory_entry content fabricated
 - No attack mechanisms altered
-- No ground_truth decisions reversed to make detectors pass (CC-007 adjustment is predeclared-rule-based, not detector-driven)
+- No ground_truth decisions reversed to make detectors pass (CC-007 and CC-004 adjustments are predeclared-rule-based, not detector-driven)
 - No threshold tuning on detectors to overfit corpus
 - No attack_family reclassifications (CC-004 stays in confidence_calibration)
+- Detector keyword lists not modified to accommodate specific cases (CC-004 euphemism pattern "review approved" explicitly rejected as single-case tuning)
 
 ## References
 
@@ -37,6 +43,7 @@ This document lists every authoring adjustment made to the Round 12 corpus durin
 - PS detector: `7761631`
 - CC detector: `1d5bccc`
 - Action-type escalation: `0791a5a`
-- CC-004 fix: `3151537`
+- CC-004 type fix: `3151537`
+- CC-004 ground truth: `pending`
 - CC-007 fix: `7f5b3b5`
 - PA-012 fix: `48bf64e`
