@@ -15004,14 +15004,27 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             _set_action(_nat_sev_map[_nat_cur], "detection_naturalness", "FABRICATED escalation")
 
     # Timestamp integrity override — post-reconciliation
+    # Corroboration gate: SUSPICIOUS alone → no escalation (fleet_age_collapse on
+    # multi-entry controls fires without semantic significance). Requires another
+    # detection layer to co-fire. MANIPULATED always escalates (no gate needed —
+    # content-age mismatch with forged timestamps is a strong standalone signal).
     _ts_integrity = response.get("timestamp_integrity", "VALID")
     if _ts_integrity == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_timestamp", "MANIPULATED flag")
     elif _ts_integrity == "SUSPICIOUS":
-        _ts_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
-        _ts_cur = response["recommended_action"]
-        if _ts_cur in _ts_sev_map:
-            _set_action(_ts_sev_map[_ts_cur], "detection_timestamp", "SUSPICIOUS escalation")
+        _ts_other_layers = (
+            response.get("identity_drift", "CLEAN") != "CLEAN" or
+            response.get("consensus_collapse", "CLEAN") != "CLEAN" or
+            response.get("provenance_chain_integrity", "CLEAN") not in ("CLEAN",) or
+            response.get("sync_bleed", "CLEAN") != "CLEAN" or
+            response.get("confidence_calibration_check", "CLEAN") != "CLEAN" or
+            response.get("naturalness_level", "ORGANIC") in ("SYNTHETIC", "FABRICATED")
+        )
+        if _ts_other_layers:
+            _ts_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
+            _ts_cur = response["recommended_action"]
+            if _ts_cur in _ts_sev_map:
+                _set_action(_ts_sev_map[_ts_cur], "detection_timestamp", "SUSPICIOUS escalation (corroborated)")
 
     # Identity drift override — post-reconciliation
     _id_drift = response.get("identity_drift", "CLEAN")

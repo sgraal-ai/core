@@ -173,16 +173,21 @@ class TestPreflightIntegration:
         assert resp["timestamp_integrity"] == "MANIPULATED"
         assert resp["recommended_action"] == "BLOCK"
 
-    def test_suspicious_escalates_decision(self):
-        """SUSPICIOUS escalates USE_MEMORY → WARN."""
+    def test_suspicious_alone_does_not_escalate(self):
+        """SUSPICIOUS alone does not escalate — requires corroboration from another layer.
+
+        Phase 7b corroboration gate: fleet_age_collapse SUSPICIOUS without
+        another detection layer co-firing is annotation only, not escalation.
+        Prevents false positives on multi-entry controls with similar ages.
+        """
         entry = _make_entry(
             content="Current policy for handling customer returns within 30 days.",
             age=0, trust=0.95, conflict=0.01, downstream=10,
         )
         resp = _preflight([entry], domain="general", action_type="informational")
         assert resp["timestamp_integrity"] == "SUSPICIOUS"
-        # Anchor inconsistency should escalate
-        assert resp["recommended_action"] in ("WARN", "ASK_USER", "BLOCK")
+        # Corroboration gate: no other layer fires → no escalation
+        assert resp["recommended_action"] == "USE_MEMORY"
 
     def test_timestamp_flags_in_response(self):
         """timestamp_flags populated in response."""
