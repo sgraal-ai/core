@@ -10903,6 +10903,7 @@ from api.detection import (
     _check_identity_drift,
     _check_consensus_collapse,
     _check_provenance_chain,
+    _check_sync_bleed,
     _check_naturalness,
     _extract_attack_signature,
     _compute_attack_surface_score,
@@ -12423,6 +12424,37 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         response["provenance_chain_integrity"] = "CLEAN"
         response["provenance_chain_flags"] = []
         response["chain_depth"] = 0
+
+    # Sync bleed check (Round 12 PS detector)
+    try:
+        _sb_check = _check_sync_bleed(req.memory_state, _preprocessed=_pp_entries)
+        response["sync_bleed"] = _sb_check["sync_bleed"]
+        response["sync_bleed_flags"] = _sb_check.get("sync_bleed_flags", [])
+        response["sync_signals"] = _sb_check.get("sync_signals", {})
+        # Corroboration gate: MANIPULATED requires another layer co-firing
+        if _sb_check["sync_bleed"] == "MANIPULATED":
+            _sb_other_layers = (
+                response.get("timestamp_integrity", "VALID") not in ("VALID", "CLEAN") or
+                response.get("identity_drift", "CLEAN") != "CLEAN" or
+                response.get("consensus_collapse", "CLEAN") != "CLEAN" or
+                response.get("provenance_chain_integrity", "CLEAN") not in ("CLEAN",) or
+                response.get("naturalness_level", "ORGANIC") in ("SYNTHETIC", "FABRICATED")
+            )
+            if not _sb_other_layers:
+                response["sync_bleed"] = "SUSPICIOUS"
+                _sb_check["sync_bleed"] = "SUSPICIOUS"
+                _sb_check["sync_bleed_flags"] = [f.replace("manipulated", "suspicious") for f in _sb_check.get("sync_bleed_flags", [])]
+        if _sb_check["sync_bleed"] in ("MANIPULATED", "SUSPICIOUS"):
+            repair_plan_out.append({
+                "action": "RESYNC_AGENTS", "entry_id": "*",
+                "reason": "Partial sync detected — stale agents may hold outdated data.",
+                "priority": "critical" if _sb_check["sync_bleed"] == "MANIPULATED" else "high",
+                "projected_improvement": 0,
+                "success_probability": 0.9,
+            })
+    except Exception as _e:
+        _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
+        response["sync_bleed"] = "CLEAN"
 
     # Compound attack surface score
     try:
@@ -14978,6 +15010,16 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _pc_cur = response["recommended_action"]
         if _pc_cur in _pc_sev_map:
             _set_action(_pc_sev_map[_pc_cur], "detection_provenance", "SUSPICIOUS escalation")
+
+    # Sync bleed override — post-reconciliation
+    _sb_level = response.get("sync_bleed", "CLEAN")
+    if _sb_level == "MANIPULATED":
+        _set_action(DecisionAction.BLOCK, "detection_sync_bleed", "MANIPULATED flag")
+    elif _sb_level == "SUSPICIOUS":
+        _sb_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
+        _sb_cur = response["recommended_action"]
+        if _sb_cur in _sb_sev_map:
+            _set_action(_sb_sev_map[_sb_cur], "detection_sync_bleed", "SUSPICIOUS escalation")
 
     # Boundary Explainer
     if 35 <= _omega_now <= 55:

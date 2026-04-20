@@ -36,6 +36,7 @@ __all__ = [
     "_compute_attack_surface_score",
     "_NATURALNESS_BASELINES",
     "_SECRET_PATTERNS",
+    "_check_sync_bleed",
 ]
 
 
@@ -654,6 +655,99 @@ def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rge
         "pa_primary_gate": _pa_primary_gate,
         "pa_supplementary_count": _pa_supplementary_count,
     }
+
+
+def _check_sync_bleed(memory_state: list, _preprocessed: list = None) -> dict:
+    """Detect partial-sync bleed attacks via sync_version/sync_state fields.
+
+    Requires MemCube v4 fields: sync_version, sync_state, sync_source_id.
+    Returns CLEAN immediately if no entries have sync fields (backward compatible).
+    """
+    _entries = _preprocessed if _preprocessed else _preprocess_entries(memory_state)
+    _flags = []
+
+    # Graceful degradation: if no entries have sync fields, return CLEAN
+    _has_sync = any(e.get("sync_version") or e.get("sync_state") for e in _entries)
+    if not _has_sync:
+        return {"sync_bleed": "CLEAN", "sync_bleed_flags": [],
+                "sync_signals": {"stale_fraction": 0, "pending_fraction": 0,
+                                 "version_count": 0, "cross_version_jaccard": 1.0,
+                                 "stale_outnumbers_fresh": False}}
+
+    n = len(_entries)
+
+    # Signal A: stale_fraction
+    _stale = sum(1 for e in _entries if e.get("sync_state") == "stale")
+    _pending = sum(1 for e in _entries if e.get("sync_state") == "pending")
+    _current = sum(1 for e in _entries if e.get("sync_state") in ("current", None))
+    _stale_fraction = round((_stale + _pending) / max(n, 1), 4)
+    _pending_fraction = round(_pending / max(n, 1), 4)
+
+    # Signal B: version_count
+    _versions = set(e.get("sync_version") for e in _entries if e.get("sync_version"))
+    _version_count = len(_versions)
+
+    # Signal C: stale_outnumbers_fresh
+    _stale_outnumbers = (_stale + _pending) > _current
+
+    # Signal D: cross_version_jaccard — content similarity between entries of different versions
+    _STOP = {"this", "that", "with", "have", "from", "they", "them", "then",
+             "than", "when", "what", "your", "been", "were", "will", "also",
+             "into", "more", "some", "such", "each", "both", "very", "just",
+             "the", "and", "for", "are", "but", "not", "you", "all", "can"}
+    _cross_jaccard = 1.0
+    if _version_count >= 2:
+        # Group entries by version
+        _by_version = {}
+        for e in _entries:
+            v = e.get("sync_version", "unknown")
+            if v not in _by_version:
+                _by_version[v] = []
+            _by_version[v].append(e)
+
+        # Compute Jaccard between each pair of version groups
+        _version_list = list(_by_version.keys())
+        _min_jaccard = 1.0
+        for i in range(len(_version_list)):
+            for j in range(i + 1, len(_version_list)):
+                # Pool content tokens from each version group
+                _tokens_i = set()
+                for e in _by_version[_version_list[i]]:
+                    _tokens_i.update(w.lower() for w in e.get("content", "").split() if len(w) >= 4 and w.lower() not in _STOP)
+                _tokens_j = set()
+                for e in _by_version[_version_list[j]]:
+                    _tokens_j.update(w.lower() for w in e.get("content", "").split() if len(w) >= 4 and w.lower() not in _STOP)
+                if _tokens_i and _tokens_j:
+                    _jac = len(_tokens_i & _tokens_j) / len(_tokens_i | _tokens_j)
+                    _min_jaccard = min(_min_jaccard, _jac)
+        _cross_jaccard = round(_min_jaccard, 4)
+
+    _signals = {
+        "stale_fraction": _stale_fraction,
+        "pending_fraction": _pending_fraction,
+        "version_count": _version_count,
+        "cross_version_jaccard": _cross_jaccard,
+        "stale_outnumbers_fresh": _stale_outnumbers,
+    }
+
+    # Classification — requires stale presence as hard gate to avoid FP on
+    # latency-only controls where content differs by topic, not by contradiction.
+    if _stale_outnumbers and _cross_jaccard < 0.15:
+        _flags.append("sync_bleed:manipulated")
+    elif _stale_outnumbers and _cross_jaccard < 0.25:
+        _flags.append("sync_bleed:suspicious")
+    elif _stale_fraction >= 0.4 and _cross_jaccard < 0.15:
+        # Near-equal stale split with strong content contradiction
+        _flags.append("sync_bleed:suspicious")
+
+    if any("manipulated" in f for f in _flags):
+        _level = "MANIPULATED"
+    elif _flags:
+        _level = "SUSPICIOUS"
+    else:
+        _level = "CLEAN"
+
+    return {"sync_bleed": _level, "sync_bleed_flags": _flags, "sync_signals": _signals}
 
 
 _NATURALNESS_BASELINES = {

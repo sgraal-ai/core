@@ -4291,7 +4291,10 @@
             "agent_compliance_root",
             "agent_planner"
           ],
-          "r_belief": 0.95
+          "r_belief": 0.95,
+          "sync_version": "v2.1",
+          "sync_state": "current",
+          "sync_source_id": "agent_planner"
         },
         {
           "id": "ps001_e2",
@@ -4304,7 +4307,10 @@
           "provenance_chain": [
             "agent_executor_1"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "sync_version": "v2.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_executor_1"
         },
         {
           "id": "ps001_e3",
@@ -4317,7 +4323,10 @@
           "provenance_chain": [
             "agent_executor_2"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "sync_version": "v2.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_executor_2"
         },
         {
           "id": "ps001_e4",
@@ -4330,7 +4339,10 @@
           "provenance_chain": [
             "agent_executor_3"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "sync_version": "v2.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_executor_3"
         },
         {
           "id": "ps001_e5",
@@ -4343,7 +4355,10 @@
           "provenance_chain": [
             "agent_planner"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "sync_version": "v2.1",
+          "sync_state": "current",
+          "sync_source_id": "agent_planner"
         }
       ],
       "sync_topology": {
@@ -4572,7 +4587,10 @@
             "agent_pharmacist",
             "agent_physician_super"
           ],
-          "r_belief": 0.94
+          "r_belief": 0.94,
+          "sync_version": "v3.1",
+          "sync_state": "current",
+          "sync_source_id": "agent_physician_super"
         },
         {
           "id": "ps002_e2",
@@ -4585,7 +4603,10 @@
           "provenance_chain": [
             "agent_nurse_station_1"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "sync_version": "v3.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_nurse_station_1"
         },
         {
           "id": "ps002_e3",
@@ -4598,7 +4619,10 @@
           "provenance_chain": [
             "agent_nurse_station_2"
           ],
-          "r_belief": 0.83
+          "r_belief": 0.83,
+          "sync_version": "v3.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_nurse_station_2"
         },
         {
           "id": "ps002_e4",
@@ -4611,7 +4635,10 @@
           "provenance_chain": [
             "agent_nurse_station_3"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "sync_version": "v3.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_nurse_station_3"
         },
         {
           "id": "ps002_e5",
@@ -4624,7 +4651,10 @@
           "provenance_chain": [
             "agent_nurse_station_1"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "sync_version": "v3.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_nurse_station_1"
         },
         {
           "id": "ps002_e6",
@@ -4637,7 +4667,10 @@
           "provenance_chain": [
             "agent_nurse_station_2"
           ],
-          "r_belief": 0.8
+          "r_belief": 0.8,
+          "sync_version": "v3.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_nurse_station_2"
         }
       ],
       "sync_topology": {
@@ -4858,7 +4891,10 @@
           "provenance_chain": [
             "agent_legal_review"
           ],
-          "r_belief": 0.93
+          "r_belief": 0.93,
+          "sync_version": "v4.2",
+          "sync_state": "current",
+          "sync_source_id": "agent_legal_review"
         },
         {
           "id": "ps003_e2",
@@ -4871,7 +4907,10 @@
           "provenance_chain": [
             "agent_contracts_1"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "sync_version": "v4.1-draft",
+          "sync_state": "stale",
+          "sync_source_id": "agent_contracts_1"
         },
         {
           "id": "ps003_e3",
@@ -4885,7 +4924,10 @@
             "agent_contracts_1",
             "agent_contracts_2"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "sync_version": "v4.1-draft",
+          "sync_state": "stale",
+          "sync_source_id": "agent_contracts_2"
         },
         {
           "id": "ps003_e4",
@@ -4899,7 +4941,10 @@
             "agent_contracts_2",
             "agent_procurement"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "sync_version": "v4.1-draft",
+          "sync_state": "stale",
+          "sync_source_id": "agent_procurement"
         },
         {
           "id": "ps003_e5",
@@ -4912,7 +4957,10 @@
           "provenance_chain": [
             "agent_procurement"
           ],
-          "r_belief": 0.83
+          "r_belief": 0.83,
+          "sync_version": "v4.1-draft",
+          "sync_state": "stale",
+          "sync_source_id": "agent_procurement"
         }
       ],
       "sync_topology": {
@@ -5125,7 +5173,10 @@
             "agent_devops_lead",
             "agent_deploy_planner"
           ],
-          "r_belief": 0.92
+          "r_belief": 0.92,
+          "sync_version": "deploy-v7",
+          "sync_state": "current",
+          "sync_source_id": "agent_deploy_planner"
         },
         {
           "id": "ps004_e2",
@@ -5138,7 +5189,10 @@
           "provenance_chain": [
             "agent_deploy_planner"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "sync_version": "deploy-v7",
+          "sync_state": "current",
+          "sync_source_id": "agent_deploy_planner"
         },
         {
           "id": "ps004_e3",
@@ -5151,7 +5205,10 @@
           "provenance_chain": [
             "agent_deploy_executor"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "sync_version": "deploy-v6",
+          "sync_state": "stale",
+          "sync_source_id": "agent_deploy_executor"
         },
         {
           "id": "ps004_e4",
@@ -5164,7 +5221,10 @@
           "provenance_chain": [
             "agent_monitoring"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "sync_version": "deploy-v6",
+          "sync_state": "stale",
+          "sync_source_id": "agent_monitoring"
         }
       ],
       "sync_topology": {
@@ -5363,7 +5423,10 @@
           "provenance_chain": [
             "agent_risk_assessor"
           ],
-          "r_belief": 0.94
+          "r_belief": 0.94,
+          "sync_version": "risk-v9.1",
+          "sync_state": "current",
+          "sync_source_id": "agent_risk_assessor"
         },
         {
           "id": "ps005_e2",
@@ -5376,7 +5439,10 @@
           "provenance_chain": [
             "agent_trader"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "sync_version": "risk-v9.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_trader"
         },
         {
           "id": "ps005_e3",
@@ -5389,7 +5455,10 @@
           "provenance_chain": [
             "agent_settlement"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "sync_version": "risk-v9.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_settlement"
         },
         {
           "id": "ps005_e4",
@@ -5403,7 +5472,10 @@
             "agent_trader",
             "agent_settlement"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "sync_version": "risk-v9.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_settlement"
         },
         {
           "id": "ps005_e5",
@@ -5416,7 +5488,10 @@
           "provenance_chain": [
             "agent_risk_assessor"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "sync_version": "risk-v9.1",
+          "sync_state": "current",
+          "sync_source_id": "agent_risk_assessor"
         }
       ],
       "sync_topology": {
@@ -5630,7 +5705,10 @@
             "agent_kyc_authority",
             "agent_branch_1"
           ],
-          "r_belief": 0.95
+          "r_belief": 0.95,
+          "sync_version": "kyc-v12",
+          "sync_state": "current",
+          "sync_source_id": "agent_branch_1"
         },
         {
           "id": "ps006_e2",
@@ -5643,7 +5721,10 @@
           "provenance_chain": [
             "agent_branch_1"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "sync_version": "kyc-v12",
+          "sync_state": "current",
+          "sync_source_id": "agent_branch_1"
         },
         {
           "id": "ps006_e3",
@@ -5656,7 +5737,10 @@
           "provenance_chain": [
             "agent_branch_2"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "sync_version": "kyc-v11",
+          "sync_state": "stale",
+          "sync_source_id": "agent_branch_2"
         },
         {
           "id": "ps006_e4",
@@ -5669,7 +5753,10 @@
           "provenance_chain": [
             "agent_branch_3"
           ],
-          "r_belief": 0.85
+          "r_belief": 0.85,
+          "sync_version": "kyc-v11",
+          "sync_state": "stale",
+          "sync_source_id": "agent_branch_3"
         },
         {
           "id": "ps006_e5",
@@ -5682,7 +5769,10 @@
           "provenance_chain": [
             "agent_wire_desk"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "sync_version": "kyc-v11",
+          "sync_state": "stale",
+          "sync_source_id": "agent_wire_desk"
         }
       ],
       "sync_topology": {
@@ -5896,7 +5986,10 @@
           "provenance_chain": [
             "agent_ehr_source"
           ],
-          "r_belief": 0.97
+          "r_belief": 0.97,
+          "sync_version": "ehr-v44",
+          "sync_state": "current",
+          "sync_source_id": "agent_ehr_source"
         },
         {
           "id": "ps007_e2",
@@ -5909,7 +6002,10 @@
           "provenance_chain": [
             "agent_prescriber"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "sync_version": "ehr-v43",
+          "sync_state": "stale",
+          "sync_source_id": "agent_prescriber"
         },
         {
           "id": "ps007_e3",
@@ -5922,7 +6018,10 @@
           "provenance_chain": [
             "agent_pharmacy"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "sync_version": "ehr-v43",
+          "sync_state": "stale",
+          "sync_source_id": "agent_pharmacy"
         },
         {
           "id": "ps007_e4",
@@ -5935,7 +6034,10 @@
           "provenance_chain": [
             "agent_nurse_admin"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "sync_version": "ehr-v43",
+          "sync_state": "stale",
+          "sync_source_id": "agent_nurse_admin"
         },
         {
           "id": "ps007_e5",
@@ -5948,7 +6050,10 @@
           "provenance_chain": [
             "agent_prescriber"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "sync_version": "ehr-v43",
+          "sync_state": "stale",
+          "sync_source_id": "agent_prescriber"
         }
       ],
       "sync_topology": {
@@ -6153,7 +6258,10 @@
             "agent_court_clerk",
             "agent_case_manager"
           ],
-          "r_belief": 0.96
+          "r_belief": 0.96,
+          "sync_version": "case-v3-amended",
+          "sync_state": "current",
+          "sync_source_id": "agent_case_manager"
         },
         {
           "id": "ps008_e2",
@@ -6166,7 +6274,10 @@
           "provenance_chain": [
             "agent_case_manager"
           ],
-          "r_belief": 0.91
+          "r_belief": 0.91,
+          "sync_version": "case-v3-amended",
+          "sync_state": "current",
+          "sync_source_id": "agent_case_manager"
         },
         {
           "id": "ps008_e3",
@@ -6179,7 +6290,10 @@
           "provenance_chain": [
             "agent_filing_executor"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "sync_version": "case-v3-original",
+          "sync_state": "stale",
+          "sync_source_id": "agent_filing_executor"
         },
         {
           "id": "ps008_e4",
@@ -6192,7 +6306,10 @@
           "provenance_chain": [
             "agent_filing_executor"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "sync_version": "case-v3-original",
+          "sync_state": "stale",
+          "sync_source_id": "agent_filing_executor"
         }
       ],
       "sync_topology": {
@@ -6376,7 +6493,10 @@
           "provenance_chain": [
             "agent_warehouse_central"
           ],
-          "r_belief": 0.92
+          "r_belief": 0.92,
+          "sync_version": "inv-v8.1",
+          "sync_state": "current",
+          "sync_source_id": "agent_warehouse_central"
         },
         {
           "id": "ps009_e2",
@@ -6389,7 +6509,10 @@
           "provenance_chain": [
             "agent_warehouse_east"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "sync_version": "inv-v8.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_warehouse_east"
         },
         {
           "id": "ps009_e3",
@@ -6402,7 +6525,10 @@
           "provenance_chain": [
             "agent_fulfillment"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "sync_version": "inv-v8.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_fulfillment"
         }
       ],
       "sync_topology": {
@@ -6573,7 +6699,10 @@
           "provenance_chain": [
             "agent_claims_authority"
           ],
-          "r_belief": 0.91
+          "r_belief": 0.91,
+          "sync_version": "claims-v5.1",
+          "sync_state": "current",
+          "sync_source_id": "agent_claims_authority"
         },
         {
           "id": "ps010_e2",
@@ -6586,7 +6715,10 @@
           "provenance_chain": [
             "agent_payout_processor"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "sync_version": "claims-v5.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_payout_processor"
         },
         {
           "id": "ps010_e3",
@@ -6599,7 +6731,10 @@
           "provenance_chain": [
             "agent_customer_service"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "sync_version": "claims-v5.0",
+          "sync_state": "stale",
+          "sync_source_id": "agent_customer_service"
         }
       ],
       "sync_topology": {
@@ -6777,7 +6912,10 @@
           "provenance_chain": [
             "agent_aml_compliance"
           ],
-          "r_belief": 0.95
+          "r_belief": 0.95,
+          "sync_version": "aml-v6",
+          "sync_state": "current",
+          "sync_source_id": "agent_aml_compliance"
         },
         {
           "id": "ps011_e2",
@@ -6790,7 +6928,10 @@
           "provenance_chain": [
             "agent_crypto_desk"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "sync_version": "aml-v6",
+          "sync_state": "current",
+          "sync_source_id": "agent_crypto_desk"
         },
         {
           "id": "ps011_e3",
@@ -6803,7 +6944,10 @@
           "provenance_chain": [
             "agent_reporting"
           ],
-          "r_belief": 0.86
+          "r_belief": 0.86,
+          "sync_version": "aml-v5",
+          "sync_state": "stale",
+          "sync_source_id": "agent_reporting"
         },
         {
           "id": "ps011_e4",
@@ -6816,7 +6960,10 @@
           "provenance_chain": [
             "agent_archival"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "sync_version": "aml-v5",
+          "sync_state": "stale",
+          "sync_source_id": "agent_archival"
         }
       ],
       "sync_topology": {
@@ -7007,7 +7154,10 @@
           "provenance_chain": [
             "agent_kb_authority"
           ],
-          "r_belief": 0.92
+          "r_belief": 0.92,
+          "sync_version": "kb-v22",
+          "sync_state": "current",
+          "sync_source_id": "agent_kb_authority"
         },
         {
           "id": "ps012_e2",
@@ -7020,7 +7170,10 @@
           "provenance_chain": [
             "agent_cs_tier1_a"
           ],
-          "r_belief": 0.84
+          "r_belief": 0.84,
+          "sync_version": "kb-v22",
+          "sync_state": "current",
+          "sync_source_id": "agent_cs_tier1_a"
         },
         {
           "id": "ps012_e3",
@@ -7033,7 +7186,10 @@
           "provenance_chain": [
             "agent_cs_tier1_b"
           ],
-          "r_belief": 0.83
+          "r_belief": 0.83,
+          "sync_version": "kb-v21",
+          "sync_state": "stale",
+          "sync_source_id": "agent_cs_tier1_b"
         },
         {
           "id": "ps012_e4",
@@ -7046,7 +7202,10 @@
           "provenance_chain": [
             "agent_cs_tier1_c"
           ],
-          "r_belief": 0.82
+          "r_belief": 0.82,
+          "sync_version": "kb-v21",
+          "sync_state": "stale",
+          "sync_source_id": "agent_cs_tier1_c"
         }
       ],
       "sync_topology": {
@@ -7222,7 +7381,10 @@
           "provenance_chain": [
             "agent_lint_authority"
           ],
-          "r_belief": 0.91
+          "r_belief": 0.91,
+          "sync_version": "lint-v14",
+          "sync_state": "current",
+          "sync_source_id": "agent_lint_authority"
         },
         {
           "id": "ps013_e2",
@@ -7235,7 +7397,10 @@
           "provenance_chain": [
             "agent_ci_runner"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "sync_version": "lint-v13",
+          "sync_state": "stale",
+          "sync_source_id": "agent_ci_runner"
         },
         {
           "id": "ps013_e3",
@@ -7248,7 +7413,10 @@
           "provenance_chain": [
             "agent_reviewer"
           ],
-          "r_belief": 0.87
+          "r_belief": 0.87,
+          "sync_version": "lint-v14",
+          "sync_state": "current",
+          "sync_source_id": "agent_reviewer"
         }
       ],
       "sync_topology": {
@@ -7424,7 +7592,10 @@
           "provenance_chain": [
             "agent_compliance_lead"
           ],
-          "r_belief": 0.94
+          "r_belief": 0.94,
+          "sync_version": "retention-v3",
+          "sync_state": "current",
+          "sync_source_id": "agent_compliance_lead"
         },
         {
           "id": "ps014_e2",
@@ -7437,7 +7608,10 @@
           "provenance_chain": [
             "agent_legal_ops"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "sync_version": "retention-v3",
+          "sync_state": "current",
+          "sync_source_id": "agent_legal_ops"
         },
         {
           "id": "ps014_e3",
@@ -7450,7 +7624,10 @@
           "provenance_chain": [
             "agent_marketing"
           ],
-          "r_belief": 0.79
+          "r_belief": 0.79,
+          "sync_version": "retention-v2",
+          "sync_state": "stale",
+          "sync_source_id": "agent_marketing"
         }
       ],
       "sync_topology": {
@@ -7619,7 +7796,10 @@
           "provenance_chain": [
             "agent_gateway_primary"
           ],
-          "r_belief": 0.93
+          "r_belief": 0.93,
+          "sync_version": "gw-v8",
+          "sync_state": "current",
+          "sync_source_id": "agent_gateway_primary"
         },
         {
           "id": "ps015_e2",
@@ -7632,7 +7812,10 @@
           "provenance_chain": [
             "agent_gateway_secondary"
           ],
-          "r_belief": 0.92
+          "r_belief": 0.92,
+          "sync_version": "gw-v8",
+          "sync_state": "current",
+          "sync_source_id": "agent_gateway_secondary"
         },
         {
           "id": "ps015_e3",
@@ -7645,7 +7828,10 @@
           "provenance_chain": [
             "agent_gateway_tertiary"
           ],
-          "r_belief": 0.91
+          "r_belief": 0.91,
+          "sync_version": "gw-v8-propagating",
+          "sync_state": "current",
+          "sync_source_id": "agent_gateway_tertiary"
         }
       ],
       "sync_topology": {
@@ -7821,7 +8007,10 @@
           "provenance_chain": [
             "agent_icu_monitor"
           ],
-          "r_belief": 0.95
+          "r_belief": 0.95,
+          "sync_version": "vitals-v1201",
+          "sync_state": "current",
+          "sync_source_id": "agent_icu_monitor"
         },
         {
           "id": "ps016_e2",
@@ -7834,7 +8023,10 @@
           "provenance_chain": [
             "agent_icu_nurse_station"
           ],
-          "r_belief": 0.92
+          "r_belief": 0.92,
+          "sync_version": "vitals-v1201",
+          "sync_state": "current",
+          "sync_source_id": "agent_icu_nurse_station"
         },
         {
           "id": "ps016_e3",
@@ -7847,7 +8039,10 @@
           "provenance_chain": [
             "agent_icu_physician"
           ],
-          "r_belief": 0.94
+          "r_belief": 0.94,
+          "sync_version": "vitals-v1201-propagating",
+          "sync_state": "current",
+          "sync_source_id": "agent_icu_physician"
         }
       ],
       "sync_topology": {
@@ -8025,7 +8220,10 @@
           "provenance_chain": [
             "agent_fw_primary"
           ],
-          "r_belief": 0.94
+          "r_belief": 0.94,
+          "sync_version": "fw-v44",
+          "sync_state": "current",
+          "sync_source_id": "agent_fw_primary"
         },
         {
           "id": "ps017_e2",
@@ -8038,7 +8236,10 @@
           "provenance_chain": [
             "agent_fw_secondary"
           ],
-          "r_belief": 0.93
+          "r_belief": 0.93,
+          "sync_version": "fw-v44",
+          "sync_state": "current",
+          "sync_source_id": "agent_fw_secondary"
         },
         {
           "id": "ps017_e3",
@@ -8051,7 +8252,10 @@
           "provenance_chain": [
             "agent_fw_edge_1"
           ],
-          "r_belief": 0.91
+          "r_belief": 0.91,
+          "sync_version": "fw-v44",
+          "sync_state": "current",
+          "sync_source_id": "agent_fw_edge_1"
         },
         {
           "id": "ps017_e4",
@@ -8064,7 +8268,10 @@
           "provenance_chain": [
             "agent_fw_edge_2"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "sync_version": "fw-v44-propagating",
+          "sync_state": "current",
+          "sync_source_id": "agent_fw_edge_2"
         }
       ],
       "sync_topology": {
@@ -8240,7 +8447,10 @@
           "provenance_chain": [
             "agent_shipping_us"
           ],
-          "r_belief": 0.9
+          "r_belief": 0.9,
+          "sync_version": "rates-v2026Q2",
+          "sync_state": "current",
+          "sync_source_id": "agent_shipping_us"
         },
         {
           "id": "ps018_e2",
@@ -8253,7 +8463,10 @@
           "provenance_chain": [
             "agent_shipping_eu"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "sync_version": "rates-v2026Q2",
+          "sync_state": "current",
+          "sync_source_id": "agent_shipping_eu"
         },
         {
           "id": "ps018_e3",
@@ -8266,7 +8479,10 @@
           "provenance_chain": [
             "agent_shipping_apac"
           ],
-          "r_belief": 0.88
+          "r_belief": 0.88,
+          "sync_version": "rates-v2026Q2-propagating",
+          "sync_state": "current",
+          "sync_source_id": "agent_shipping_apac"
         }
       ],
       "sync_topology": {
@@ -8436,7 +8652,10 @@
           "provenance_chain": [
             "agent_legal_research_1"
           ],
-          "r_belief": 0.92
+          "r_belief": 0.92,
+          "sync_version": "caselaw-v2026.04.17",
+          "sync_state": "current",
+          "sync_source_id": "agent_legal_research_1"
         },
         {
           "id": "ps019_e2",
@@ -8449,7 +8668,10 @@
           "provenance_chain": [
             "agent_legal_research_2"
           ],
-          "r_belief": 0.91
+          "r_belief": 0.91,
+          "sync_version": "caselaw-v2026.04.17",
+          "sync_state": "current",
+          "sync_source_id": "agent_legal_research_2"
         },
         {
           "id": "ps019_e3",
@@ -8462,7 +8684,10 @@
           "provenance_chain": [
             "agent_brief_writer"
           ],
-          "r_belief": 0.89
+          "r_belief": 0.89,
+          "sync_version": "caselaw-v2026.04.17-propagating",
+          "sync_state": "current",
+          "sync_source_id": "agent_brief_writer"
         }
       ],
       "sync_topology": {
@@ -8632,7 +8857,10 @@
           "provenance_chain": [
             "agent_lab_analyzer"
           ],
-          "r_belief": 0.96
+          "r_belief": 0.96,
+          "sync_version": "lab-v2026Q1",
+          "sync_state": "current",
+          "sync_source_id": "agent_lab_analyzer"
         },
         {
           "id": "ps020_e2",
@@ -8645,7 +8873,10 @@
           "provenance_chain": [
             "agent_lab_reporting"
           ],
-          "r_belief": 0.93
+          "r_belief": 0.93,
+          "sync_version": "lab-v2026Q1",
+          "sync_state": "current",
+          "sync_source_id": "agent_lab_reporting"
         },
         {
           "id": "ps020_e3",
@@ -8658,7 +8889,10 @@
           "provenance_chain": [
             "agent_lab_physician"
           ],
-          "r_belief": 0.95
+          "r_belief": 0.95,
+          "sync_version": "lab-v2026Q1-propagating",
+          "sync_state": "current",
+          "sync_source_id": "agent_lab_physician"
         }
       ],
       "sync_topology": {
