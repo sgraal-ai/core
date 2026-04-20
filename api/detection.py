@@ -243,12 +243,37 @@ def _check_identity_drift(memory_state: list, _preprocessed: list = None) -> dic
     # PATTERN 2 — Permission lattice violation
     _perm_levels = {"read_only": 0, "read-only": 0, "annotate": 1, "recommend": 2,
                     "modify": 3, "approve": 4, "execute": 5, "admin": 6}
+    _negation_markers = {"no", "not", "never", "denied", "denial", "excluded", "excluding",
+                         "blocked", "restricted", "cannot", "without", "revoked", "prohibited"}
+    def _keyword_in_non_negated_context(text, keyword):
+        """Check if keyword appears in text without a negation marker nearby in the same sentence.
+
+        Checks both preceding (5 tokens before) and following (5 tokens after) the keyword,
+        and also checks for negation markers with punctuation attached (e.g., 'denied:').
+        """
+        for sentence in re.split(r'[.!?\n]', text):
+            if keyword not in sentence:
+                continue
+            tokens = sentence.split()
+            for i, tok in enumerate(tokens):
+                if keyword in tok:
+                    # Check preceding 5 tokens
+                    preceding = {re.sub(r'[^a-z]', '', t) for t in tokens[max(0, i - 5):i]}
+                    # Check following 5 tokens
+                    following = {re.sub(r'[^a-z]', '', t) for t in tokens[i + 1:i + 6]}
+                    nearby = preceding | following
+                    if not nearby & _negation_markers:
+                        return True
+        return False
+
+    _high_severity_pats = [re.compile(r'\b' + kw + r'\b') for kw in ("execute", "approve", "delete", "transfer", "admin")]
     for entry in _entries:
         content = entry.get("content", "").lower()
         for perm, level in _perm_levels.items():
             if perm in content and level <= 1:  # Claims low permission
-                # Check if any entry has high-severity action signals
-                if any(kw in content for kw in ("execute", "approve", "delete", "transfer", "admin")):
+                # Check if any high-severity keyword appears as whole word in non-negated context
+                if any(_keyword_in_non_negated_context(content, m.group())
+                       for pat in _high_severity_pats for m in pat.finditer(content)):
                     _flags.append("permission_lattice_violation:suspicious")
                     _risk = max(_risk, 0.6)
                     break
