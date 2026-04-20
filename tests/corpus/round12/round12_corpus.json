@@ -12332,7 +12332,7 @@
         }
       ],
       "query": {
-        "action_type": "informational",
+        "action_type": "irreversible",
         "domain": "customer_support",
         "intent": "Verify E-2847 access status for compliance audit report",
         "stakes": "Data breach risk \u2014 terminated employee with root database access to 2M PII records"
