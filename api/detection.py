@@ -73,7 +73,13 @@ def _preprocess_entries(memory_state: list) -> list:
                  "provenance_chain": getattr(e, "provenance_chain", None) or [],
                  "prompt_embedding": getattr(e, "prompt_embedding", None),
                  "source": getattr(e, "source", None),
-                 "path": getattr(e, "path", None)}
+                 "path": getattr(e, "path", None),
+                 "sync_version": getattr(e, "sync_version", None),
+                 "sync_state": getattr(e, "sync_state", None),
+                 "sync_source_id": getattr(e, "sync_source_id", None),
+                 "source_declared_origin": getattr(e, "source_declared_origin", None),
+                 "source_actual_origin": getattr(e, "source_actual_origin", None),
+                 "model_confidence": getattr(e, "model_confidence", None)}
         content = d.get("content", "")
         content_lower = content.lower()
         tokens = set(w for w in content_lower.split() if len(w) >= 4 and w not in _STOPWORDS)
@@ -88,6 +94,12 @@ def _preprocess_entries(memory_state: list) -> list:
             "prompt_embedding": d.get("prompt_embedding"),
             "source": d.get("source"),
             "path": d.get("path"),
+            "sync_version": d.get("sync_version"),
+            "sync_state": d.get("sync_state"),
+            "sync_source_id": d.get("sync_source_id"),
+            "source_declared_origin": d.get("source_declared_origin"),
+            "source_actual_origin": d.get("source_actual_origin"),
+            "model_confidence": d.get("model_confidence"),
         })
     return result
 
@@ -564,13 +576,20 @@ def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rge
         _pa_primary_gate = True
 
     # PA SIGNAL 2: origin_mismatch_ratio — declared_origin vs actual_origin
+    # Checks both corpus format (source.declared_origin) and API format (source_declared_origin)
     _origin_total = 0
     _origin_mismatches = 0
     for e in _entries:
-        src = e.get("source")
-        if isinstance(src, dict) and "declared_origin" in src and "actual_origin" in src:
+        _decl = e.get("source_declared_origin")
+        _actual = e.get("source_actual_origin")
+        if not _decl or not _actual:
+            src = e.get("source")
+            if isinstance(src, dict):
+                _decl = _decl or src.get("declared_origin")
+                _actual = _actual or src.get("actual_origin")
+        if _decl and _actual:
             _origin_total += 1
-            if src["declared_origin"] != src["actual_origin"]:
+            if _decl != _actual:
                 _origin_mismatches += 1
     _origin_ratio = round(_origin_mismatches / max(_origin_total, 1), 4)
     _pa_signals["origin_mismatch_ratio"] = _origin_ratio
@@ -579,15 +598,20 @@ def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rge
         _flags.append("provenance_origin_mismatch:suspicious")
 
     # PA SIGNAL 3: echo_ratio — unique actual_origins / unique declared_origins
+    # Checks both corpus format (source.declared_origin) and API format (source_declared_origin)
     _declared_origins = set()
     _actual_origins = set()
     for e in _entries:
+        _decl = e.get("source_declared_origin")
+        _actual = e.get("source_actual_origin")
         src = e.get("source")
         if isinstance(src, dict):
-            if src.get("declared_origin"):
-                _declared_origins.add(src["declared_origin"])
-            if src.get("actual_origin"):
-                _actual_origins.add(src["actual_origin"])
+            _decl = _decl or src.get("declared_origin")
+            _actual = _actual or src.get("actual_origin")
+        if _decl:
+            _declared_origins.add(_decl)
+        if _actual:
+            _actual_origins.add(_actual)
     _echo_ratio = round(len(_actual_origins) / max(len(_declared_origins), 1), 4) if _declared_origins else 1.0
     _pa_signals["echo_ratio"] = _echo_ratio
     if _echo_ratio < 1.0:

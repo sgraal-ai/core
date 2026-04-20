@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends, Response, Cookie, Query, Re
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import RedirectResponse, PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Any, Literal, Optional
 from scoring_engine.constants import (  # #4: canonical decision enum
     DecisionAction,
@@ -851,6 +851,27 @@ class MemoryEntryRequest(BaseModel):
     # MemCube v3 optional fields
     provenance_chain: Optional[list[str]] = None  # ordered list of agent_ids that touched this entry
     memory_location: Optional[str] = None  # e.g. "redis://agent-001/session-42", "vector_db://collection-fintech"
+    # MemCube v4 optional fields — Round 12 detector support
+    sync_version: Optional[str] = None           # agent's memory view version (PS detector)
+    sync_state: Optional[str] = None             # "current" | "stale" | "pending" (PS detector)
+    sync_source_id: Optional[str] = None         # agent ID that produced this entry (PS detector)
+    source_declared_origin: Optional[str] = None  # declared provenance origin (PA detector)
+    source_actual_origin: Optional[str] = None    # actual provenance origin (PA detector)
+    model_confidence: Optional[float] = None      # 0.0-1.0 self-reported confidence (CC detector)
+
+    @field_validator("sync_state")
+    @classmethod
+    def validate_sync_state(cls, v):
+        if v is not None and v not in ("current", "stale", "pending"):
+            raise ValueError(f"sync_state must be one of: current, stale, pending (got '{v}')")
+        return v
+
+    @field_validator("model_confidence")
+    @classmethod
+    def validate_model_confidence(cls, v):
+        if v is not None and (v < 0.0 or v > 1.0):
+            raise ValueError(f"model_confidence must be between 0.0 and 1.0 (got {v})")
+        return v
 
 class StepRequest(BaseModel):
     step_id: str
@@ -893,6 +914,10 @@ class PreflightRequest(BaseModel):
     per_type_thresholds: Optional[bool] = None  # A2: enable type-specific BLOCK thresholds (uses research defaults or custom dict)
     per_type_threshold_values: Optional[dict[str, float]] = None  # A2: custom per-type thresholds, falls back to research defaults
     parallel_scoring: Optional[bool] = None  # A1: opt-in parallel module execution via ThreadPoolExecutor (2-3x realistic speedup)
+    # Round 12 detector support — top-level request metadata
+    sync_topology: Optional[dict] = None   # sync graph for PS detector
+    event_timeline: Optional[list] = None  # chronological events for PS/CC detectors
+    agents: Optional[list] = None          # agent definitions with sync_state, trust_level
 
 class HealRequest(BaseModel):
     entry_id: str
