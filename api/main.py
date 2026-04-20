@@ -15063,6 +15063,22 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         if _cc_cur in _cc_sev_map:
             _set_action(_cc_sev_map[_cc_cur], "detection_confidence_calibration", "SUSPICIOUS escalation")
 
+    # Phase 5a: action-type escalation — SUSPICIOUS + destructive/irreversible → BLOCK
+    # Applied uniformly after all detection overrides. If any detection layer
+    # fired at SUSPICIOUS or above AND the action is high-stakes, escalate to BLOCK.
+    if req.action_type in ("destructive", "irreversible"):
+        _any_suspicious = (
+            response.get("provenance_chain_integrity", "CLEAN") not in ("CLEAN",) or
+            response.get("sync_bleed", "CLEAN") != "CLEAN" or
+            response.get("confidence_calibration_check", "CLEAN") != "CLEAN" or
+            response.get("timestamp_integrity", "VALID") in ("SUSPICIOUS", "MANIPULATED") or
+            response.get("identity_drift", "CLEAN") in ("SUSPICIOUS", "MANIPULATED") or
+            response.get("consensus_collapse", "CLEAN") in ("SUSPICIOUS", "MANIPULATED")
+        )
+        if _any_suspicious and response.get("recommended_action") != "BLOCK":
+            _set_action(DecisionAction.BLOCK, "action_type_escalation",
+                        f"SUSPICIOUS detection on {req.action_type} action — escalated to BLOCK")
+
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
         response["boundary_decision"] = True
@@ -16062,6 +16078,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _adj_warn = 20
         _adj_block = 65
     # Recompute decision with adjusted thresholds (both tiers)
+    # GUARD: never downgrade a BLOCK set by a detection layer override.
+    # Detection layers have stronger signal than omega-based cost adjustment.
+    _SEVERITY_CD = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
     if _cost_adjusted:
         _orig_action = response["recommended_action"]
         if omega_out >= _adj_block:
@@ -16072,7 +16091,11 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             _new_action = "WARN"
         else:
             _new_action = "USE_MEMORY"
-        _set_action(_new_action, "compound_detection", "cost-adjusted threshold override")
+        # Only apply cost adjustment if it escalates or maintains (never downgrades)
+        if _SEVERITY_CD.get(_new_action, 0) >= _SEVERITY_CD.get(_orig_action, 0):
+            _set_action(_new_action, "compound_detection", "cost-adjusted threshold override")
+        else:
+            _new_action = _orig_action  # keep the detection-layer decision
     response["decision_cost_asymmetry"] = {
         "cost_adjusted_decision": _cost_adjusted,
         "cost_adjustment_reason": _cost_reason,
