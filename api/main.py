@@ -15057,14 +15057,28 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             _set_action(_pc_sev_map[_pc_cur], "detection_provenance", "SUSPICIOUS escalation")
 
     # Sync bleed override — post-reconciliation
+    # Corroboration gate: sync_bleed alone (stale majority + low Jaccard without
+    # cross-layer support) does not escalate. Topic diversity creates low Jaccard
+    # on bleed-contained controls without semantic contradiction. Requires another
+    # detection layer to co-fire for escalation.
     _sb_level = response.get("sync_bleed", "CLEAN")
-    if _sb_level == "MANIPULATED":
-        _set_action(DecisionAction.BLOCK, "detection_sync_bleed", "MANIPULATED flag")
-    elif _sb_level == "SUSPICIOUS":
-        _sb_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
-        _sb_cur = response["recommended_action"]
-        if _sb_cur in _sb_sev_map:
-            _set_action(_sb_sev_map[_sb_cur], "detection_sync_bleed", "SUSPICIOUS escalation")
+    if _sb_level in ("MANIPULATED", "SUSPICIOUS"):
+        _sb_other_layers = (
+            response.get("timestamp_integrity", "VALID") not in ("VALID", "CLEAN") or
+            response.get("identity_drift", "CLEAN") != "CLEAN" or
+            response.get("consensus_collapse", "CLEAN") != "CLEAN" or
+            response.get("provenance_chain_integrity", "CLEAN") not in ("CLEAN",) or
+            response.get("confidence_calibration_check", "CLEAN") != "CLEAN" or
+            response.get("naturalness_level", "ORGANIC") in ("SYNTHETIC", "FABRICATED")
+        )
+        if _sb_other_layers:
+            if _sb_level == "MANIPULATED":
+                _set_action(DecisionAction.BLOCK, "detection_sync_bleed", "MANIPULATED flag (corroborated)")
+            else:
+                _sb_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
+                _sb_cur = response["recommended_action"]
+                if _sb_cur in _sb_sev_map:
+                    _set_action(_sb_sev_map[_sb_cur], "detection_sync_bleed", "SUSPICIOUS escalation (corroborated)")
 
     # Confidence calibration override — post-reconciliation
     _cc_level = response.get("confidence_calibration_check", "CLEAN")
