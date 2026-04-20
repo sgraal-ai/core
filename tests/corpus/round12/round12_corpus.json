@@ -761,7 +761,7 @@
         {
           "id": "cc004_e3",
           "content": "PR #4821 deployment readiness: Senior review completed and findings addressed in review cycle. Auth, payment, and admin modules reviewed. Ready for deployment planning.",
-          "type": "tool_state",
+          "type": "semantic",
           "timestamp_age_days": 1,
           "source_trust": 0.86,
           "source_conflict": 0.04,
