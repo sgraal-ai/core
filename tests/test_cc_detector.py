@@ -91,10 +91,15 @@ class TestGracefulDegradation:
 
 class TestCCAttackDetection:
     def test_cc_overconfident_attacks_detected(self):
-        """At least 4/7 CC overconfident attacks should produce SUSPICIOUS or MANIPULATED."""
+        """At least 3/5 CC overconfident attacks (authored BLOCK) should produce SUSPICIOUS or MANIPULATED.
+
+        Originally 7 BLOCK attacks. CC-004 adjusted to ASK_USER (semantic content
+        interpretation rule #4) and CC-007 adjusted to WARN (factual accuracy rule #1)
+        during Phase 6 corpus recalibration. See CORPUS_RECALIBRATION.md.
+        """
         cc_cases = _load_cc_cases()
         attacks = [c for c in cc_cases if not c["control"] and c["ground_truth"]["correct_decision"] == "BLOCK"]
-        assert len(attacks) == 7
+        assert len(attacks) == 5, f"Expected 5 CC BLOCK attacks after Phase 6 recalibration, got {len(attacks)}"
 
         detected = 0
         for c in attacks:
@@ -102,7 +107,7 @@ class TestCCAttackDetection:
             if result["confidence_calibration"] != "CLEAN":
                 detected += 1
 
-        assert detected >= 4, f"Only {detected}/7 CC attacks detected (expected >=4)"
+        assert detected >= 3, f"Only {detected}/5 CC BLOCK attacks detected (expected >=3)"
 
 
 class TestCCControlCases:
