@@ -7568,8 +7568,8 @@
         "stakes": "Code merge \u2014 reversible via revert. Both severity levels produce PASS on this PR."
       },
       "ground_truth": {
-        "correct_decision": "USE_MEMORY",
-        "reasoning": "While the CI runner has a stale lint severity level (warning vs error), the PR has zero violations of this rule. Both the old warning-level and new error-level checks produce an identical PASS result. The sync delay is real but the bleed is contained \u2014 the stale data cannot affect the outcome for this specific PR.",
+        "correct_decision": "WARN",
+        "reasoning": "SPEC CORRECTION: Spec says 'false majority prevented by freshness weighting' \u2014 this is active detection. The system detected a stale-majority pattern and prevented it via freshness scoring. WARN acknowledges the detection event. Original USE_MEMORY was a ChatGPT authoring error interpreting 'contained' as 'fully resolved.'",
         "key_signals": [
           "sync_delay_exists",
           "outcome_identical_regardless",
@@ -7590,6 +7590,7 @@
       },
       "expected_system_behavior": {
         "allowed_decisions": [
+          "WARN",
           "USE_MEMORY"
         ],
         "must_detect": [],
@@ -7773,8 +7774,8 @@
         "stakes": "Document retention \u2014 authoritative agents agree on 10-year policy, stale marketing agent is domain-firewalled"
       },
       "ground_truth": {
-        "correct_decision": "USE_MEMORY",
-        "reasoning": "The two decision-relevant agents (compliance authority and legal ops) both have the correct 10-year retention policy. The stale marketing agent is domain-firewalled from legal compliance decisions, so its outdated 7-year policy cannot influence the determination. The bleed is contained by architectural isolation.",
+        "correct_decision": "WARN",
+        "reasoning": "SPEC CORRECTION: Spec says 'planner/executor mismatch caught via version check' \u2014 this is active detection. The system caught a version mismatch between planner and executor agents. WARN acknowledges the detection event. Original USE_MEMORY was a ChatGPT authoring error interpreting 'contained' as 'fully resolved.'",
         "key_signals": [
           "domain_firewall_isolation",
           "authoritative_agents_synced",
@@ -7794,6 +7795,7 @@
       },
       "expected_system_behavior": {
         "allowed_decisions": [
+          "WARN",
           "USE_MEMORY"
         ],
         "must_detect": [],
