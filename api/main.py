@@ -15012,14 +15012,17 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     if _ts_integrity == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_timestamp", "MANIPULATED flag")
     elif _ts_integrity == "SUSPICIOUS":
+        # Corroboration: check all layers EXCEPT timestamp itself to prevent circular validation
         _ts_other_layers = (
             response.get("identity_drift", "CLEAN") != "CLEAN" or
             response.get("consensus_collapse", "CLEAN") != "CLEAN" or
             response.get("provenance_chain_integrity", "CLEAN") not in ("CLEAN",) or
-            response.get("sync_bleed", "CLEAN") != "CLEAN" or
             response.get("confidence_calibration_check", "CLEAN") != "CLEAN" or
             response.get("naturalness_level", "ORGANIC") in ("SYNTHETIC", "FABRICATED")
         )
+        # NOTE: sync_bleed deliberately excluded — sync_bleed's gate checks timestamp,
+        # so including it here would create mutual corroboration (two weak signals
+        # validating each other without independent confirmation).
         if _ts_other_layers:
             _ts_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
             _ts_cur = response["recommended_action"]
@@ -15063,14 +15066,16 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # detection layer to co-fire for escalation.
     _sb_level = response.get("sync_bleed", "CLEAN")
     if _sb_level in ("MANIPULATED", "SUSPICIOUS"):
+        # Corroboration: check all layers EXCEPT sync_bleed itself to prevent circular validation
         _sb_other_layers = (
-            response.get("timestamp_integrity", "VALID") not in ("VALID", "CLEAN") or
             response.get("identity_drift", "CLEAN") != "CLEAN" or
             response.get("consensus_collapse", "CLEAN") != "CLEAN" or
             response.get("provenance_chain_integrity", "CLEAN") not in ("CLEAN",) or
             response.get("confidence_calibration_check", "CLEAN") != "CLEAN" or
             response.get("naturalness_level", "ORGANIC") in ("SYNTHETIC", "FABRICATED")
         )
+        # NOTE: timestamp_integrity deliberately excluded — timestamp's gate checks sync_bleed,
+        # so including it here would create mutual corroboration.
         if _sb_other_layers:
             if _sb_level == "MANIPULATED":
                 _set_action(DecisionAction.BLOCK, "detection_sync_bleed", "MANIPULATED flag (corroborated)")
