@@ -4241,17 +4241,18 @@ def store_memory(req: StoreMemoryRequest, key_record: dict = Depends(verify_api_
     except Exception:
         pass
 
-    # #23 Memory-DNS: auto-assign URI
+    # #23 Memory-DNS: auto-assign URI (tenant-scoped)
     _org_id = (kh or "default")[:8]
     _category = req.memory_type or "semantic"
     _uri = f"mem://{_org_id}/{req.agent_id or 'anonymous'}/{_category}/{mem_id}"
-    # Collision check (org_id + entry_id must be unique)
-    _collision_key = f"{_org_id}:{mem_id}"
+    # Collision check (org_id + entry_id must be unique, scoped by tenant)
+    _collision_key = f"{kh}:{mem_id}"
     if _collision_key in _memory_uris:
         raise HTTPException(status_code=409, detail=_json.dumps({
             "error": "uri_collision", "existing_uri": _memory_uris[_collision_key].get("uri", "")}))
+    _evict_if_full(_memory_uris)
     _memory_uris[_uri] = {"id": mem_id, "uri": _uri, "content": req.content, "type": _category,
-                           "agent_id": req.agent_id or "anonymous", "omega": omega}
+                           "agent_id": req.agent_id or "anonymous", "omega": omega, "key_hash": kh}
     _memory_uris[_collision_key] = {"uri": _uri}
 
     return {"id": mem_id, "content": req.content, "metadata": req.metadata or {}, "score": omega, "blocked": blocked,
