@@ -9384,14 +9384,18 @@ def auto_heal(req: AutoHealRequest, key_record: dict = Depends(verify_api_key)):
     initial = _ah_compute(entries).omega_mem_final
     current = initial
     audit = []
+    import copy
     for iteration in range(req.max_iterations):
         if current < req.target_omega:
             break
+        # Deep copy before mutation to avoid cross-iteration side effects
+        _iter_entries = copy.deepcopy(entries)
         # Simulate healing: reduce age, increase trust
-        for me in entries:
+        for me in _iter_entries:
             me.timestamp_age_days = max(0, me.timestamp_age_days - 10)
             me.source_trust = min(1.0, me.source_trust + 0.1)
-        r = _ah_compute(entries)
+        r = _ah_compute(_iter_entries)
+        entries = _iter_entries
         current = r.omega_mem_final
         audit.append({"iteration": iteration + 1, "omega": current, "action": "heal_all"})
     return {"iterations": len(audit), "initial_omega": initial, "final_omega": current,
