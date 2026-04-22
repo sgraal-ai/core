@@ -209,7 +209,8 @@ def compute(
                 drift_penalties.append(penalty)
         if drift_penalties:
             s_relevance = min(100, sum(drift_penalties) / len(drift_penalties))
-    elif len(entries) >= 2:
+        # If no entries had embeddings, fall through to Tier 2 TF-IDF
+    if s_relevance == 0.0 and len(entries) >= 2:
         # Tier 2: TF-IDF token similarity fallback — detects topical outliers
         # Build token sets per entry (stopwords filtered, min length 4)
         _stop = {"this", "that", "with", "have", "from", "they", "them", "then",
