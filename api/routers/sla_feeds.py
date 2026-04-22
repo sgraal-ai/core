@@ -122,6 +122,10 @@ def list_sla_rules(key_record: dict = Depends(verify_api_key)):
 @router.delete("/v1/sla-rules/{rule_id}")
 def delete_sla_rule(rule_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    kh = _safe_key_hash(key_record)
+    existing = _sla_rules.get(rule_id)
+    if existing and existing.get("key_hash") != kh:
+        raise HTTPException(status_code=403, detail="Cannot delete another tenant's SLA rule")
     _sla_rules.pop(rule_id, None)
     return {"deleted": rule_id}
 
