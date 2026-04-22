@@ -8248,14 +8248,14 @@ def refine_memory(req: RefineRequest, key_record: dict = Depends(verify_api_key)
     }
 
 
-class CompressRequest(BaseModel):
+class AdvancedCompressRequest(BaseModel):
     memory_state: list[dict]
     agent_id: str = ""
     domain: str = "general"
     max_distortion: float = 0.1
 
 @app.post("/v1/compress")
-def compress_memory(req: CompressRequest, key_record: dict = Depends(verify_api_key)):
+def advanced_compress_memory(req: AdvancedCompressRequest, key_record: dict = Depends(verify_api_key)):
     """Three-stage memory compression with stability guarantees."""
     _check_rate_limit(key_record)
     if not req.memory_state:
