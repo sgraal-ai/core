@@ -13026,7 +13026,8 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             # Wire into s_provenance: use fused projected_prob instead of raw trust
             if sl.fused_opinion and "component_breakdown" in response:
                 fused_risk = (1.0 - sl.fused_opinion.projected_prob) * 100
-                response["component_breakdown"]["s_provenance"] = round(min(100, fused_risk), 2)
+                _existing_prov_sl = response["component_breakdown"].get("s_provenance", 0)
+                response["component_breakdown"]["s_provenance"] = round(min(100, _existing_prov_sl + (fused_risk - _existing_prov_sl) * 0.8), 2)
     except Exception as _e:
         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
@@ -13599,7 +13600,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         if owa:
             response["owa_provenance"] = {"owa_score": owa.owa_score, "weights_used": owa.weights_used, "orness": owa.orness}
             if "component_breakdown" in response:
-                response["component_breakdown"]["s_provenance"] = round(min(100, (1.0 - owa.owa_score) * 100), 2)
+                _owa_risk = (1.0 - owa.owa_score) * 100
+                _owa_risk = (1.0 - owa.owa_score) * 100
+                _existing_prov_owa = response["component_breakdown"].get("s_provenance", 0)
+                response["component_breakdown"]["s_provenance"] = round(min(100, _existing_prov_owa + (_owa_risk - _existing_prov_owa) * 0.8), 2)
     except Exception as _e:
         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
