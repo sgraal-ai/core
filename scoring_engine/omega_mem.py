@@ -185,7 +185,7 @@ def compute(
     s_freshness   = sum(_weibull_decay(e.timestamp_age_days, e.type) for e in entries) / len(entries)
     s_provenance  = min(100, sum((1 - e.source_trust) * 100 for e in entries) / len(entries))
     s_interference= min(100, sum(e.source_conflict * 100 for e in entries) / len(entries))
-    s_propagation = min(100, sum(e.downstream_count * 8 for e in entries) / len(entries))
+    s_propagation = max(0, min(100, sum(e.downstream_count * 8 for e in entries) / len(entries)))
     r_recall      = min(100, s_freshness * 0.6 + s_provenance * 0.4)
     r_encode      = min(100, s_provenance * 0.5)
     s_drift       = min(100, s_freshness * 0.4 + s_interference * 0.6)
