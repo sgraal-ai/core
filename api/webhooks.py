@@ -17,11 +17,15 @@ import hmac as _hmac
 import json as _json
 import logging
 import threading
+import time as _time
+import urllib.parse
 from datetime import datetime, timezone
 
 import requests as http_requests
 
-logger = logging.getLogger(__name__)
+from api.helpers import _dns_cache, _DNS_CACHE_TTL
+
+logger = logging.getLogger("sgraal.webhooks")
 
 __all__ = [
     "_dispatch_webhooks",
@@ -30,6 +34,23 @@ __all__ = [
     "_format_slack",
     "_format_pagerduty",
 ]
+
+
+def _resolve_url_from_cache(url: str) -> str:
+    """If the hostname has a cached DNS entry, substitute it to prevent DNS rebinding."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        if hostname and hostname in _dns_cache:
+            cached_ip, cached_ts = _dns_cache[hostname]
+            if _time.time() - cached_ts < _DNS_CACHE_TTL:
+                # Replace hostname with cached IP, set Host header via the URL
+                port = parsed.port
+                port_str = f":{port}" if port else ""
+                return url.replace(f"://{hostname}{port_str}", f"://{cached_ip}{port_str}"), hostname
+        return url, None
+    except Exception:
+        return url, None
 
 
 def _sign_payload(payload: str, secret: str) -> str:
@@ -103,17 +124,21 @@ def _dispatch_webhooks(decision: str, request_id: str, omega: float, entry_ids: 
 
         def _send(url=hook["url"], data=payload_str, sig=signature):
             try:
+                resolved_url, original_host = _resolve_url_from_cache(url)
+                headers = {
+                    "Content-Type": "application/json",
+                    "X-Sgraal-Signature": sig,
+                }
+                if original_host:
+                    headers["Host"] = original_host
                 http_requests.post(
-                    url,
+                    resolved_url,
                     data=data,
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-Sgraal-Signature": sig,
-                    },
+                    headers=headers,
                     timeout=5,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Webhook dispatch failed for %s: %s", url, exc)
 
         threading.Thread(target=_send, daemon=True).start()
 
@@ -139,9 +164,13 @@ def _dispatch_security_event(event_type: str, details: dict, key_hash: str,
             sig = _sign_payload(_json.dumps(payload, sort_keys=True), wh.get("secret", ""))
             def _send_sec(url=wh["url"], data=_json.dumps(payload, sort_keys=True), s=sig):
                 try:
-                    http_requests.post(url, data=data, headers={"Content-Type": "application/json", "X-Sgraal-Signature": s}, timeout=5)
-                except Exception:
-                    pass
+                    resolved_url, original_host = _resolve_url_from_cache(url)
+                    headers = {"Content-Type": "application/json", "X-Sgraal-Signature": s}
+                    if original_host:
+                        headers["Host"] = original_host
+                    http_requests.post(resolved_url, data=data, headers=headers, timeout=5)
+                except Exception as exc:
+                    logger.warning("Security event dispatch failed for %s: %s", url, exc)
             threading.Thread(target=_send_sec, daemon=True).start()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Security event dispatch setup failed for %s: %s", event_type, exc)
