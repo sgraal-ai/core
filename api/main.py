@@ -2839,20 +2839,30 @@ def get_replay_history(key_record: dict = Depends(verify_api_key)):
 def decision_heatmap(days: int = Query(7), domain: Optional[str] = None,
                      key_record: dict = Depends(verify_api_key)):
     """Decision heatmap by hour and day of week."""
+    _kh = _safe_key_hash(key_record)
     _days_of_week = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     heatmap = []
     _peak_blocks = 0
     _peak_hour = 0
     _peak_day = "Mon"
-    for d in _days_of_week:
+    # Pre-bucket tenant-filtered outcomes by (day_index, hour)
+    _buckets: dict = {}
+    for _od in list(_outcomes.values())[-2000:]:
+        if _od.get("key_hash") != _kh:
+            continue
+        _ts = _od.get("created_at", "")
+        _dec = _od.get("recommended_action", "USE_MEMORY")
+        if _ts and _dec in ("USE_MEMORY", "WARN", "ASK_USER", "BLOCK"):
+            try:
+                _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
+                _bk = (_dt.weekday(), _dt.hour)
+                _buckets.setdefault(_bk, {"USE_MEMORY": 0, "WARN": 0, "ASK_USER": 0, "BLOCK": 0})
+                _buckets[_bk][_dec] += 1
+            except (ValueError, AttributeError):
+                pass
+    for di, d in enumerate(_days_of_week):
         for h in range(24):
-            _counts = {"USE_MEMORY": 0, "WARN": 0, "ASK_USER": 0, "BLOCK": 0}
-            # Scan recent outcomes
-            for _od in list(_outcomes.values())[-500:]:
-                _created = _od.get("created_at", "")
-                _dec = _od.get("recommended_action", "USE_MEMORY")
-                if _dec in _counts:
-                    _counts[_dec] += 0  # placeholder — real data from audit_log
+            _counts = _buckets.get((di, h), {"USE_MEMORY": 0, "WARN": 0, "ASK_USER": 0, "BLOCK": 0})
             _total = sum(_counts.values())
             _br = _counts["BLOCK"] / max(_total, 1)
             heatmap.append({"hour": h, "day": d, "decision_counts": _counts, "total": _total, "block_rate": round(_br, 4)})
@@ -2885,11 +2895,24 @@ def omega_distribution(days: int = Query(7), key_record: dict = Depends(verify_a
 @app.get("/v1/analytics/attack-surface-trend")
 def attack_surface_trend(days: int = Query(30), key_record: dict = Depends(verify_api_key)):
     """Attack surface level trend over time."""
-    # Placeholder — would aggregate from audit_log by date
+    _kh = _safe_key_hash(key_record)
+    _attack_counts: dict = {}
+    _trend_data: list = []
+    for _od in list(_outcomes.values())[-2000:]:
+        if _od.get("key_hash") != _kh:
+            continue
+        _asl = _od.get("attack_surface_level", "NONE")
+        if _asl != "NONE":
+            _attack_counts[_asl] = _attack_counts.get(_asl, 0) + 1
+        _ts = _od.get("created_at", "")
+        if _ts:
+            _trend_data.append({"date": _ts[:10], "level": _asl})
+    _most_common = max(_attack_counts, key=_attack_counts.get) if _attack_counts else "none"
+    _trending = len(_trend_data) >= 2 and _trend_data[-1].get("level", "NONE") != "NONE"
     return {
-        "trend": [],
-        "trending_up": False,
-        "most_common_attack": "consensus_collapse",
+        "trend": _trend_data[-30:],
+        "trending_up": _trending,
+        "most_common_attack": _most_common,
     }
 
 
@@ -2958,31 +2981,18 @@ def get_insights(agent_id: str = Query(""), domain: str = Query("general"), key_
     if not _mem_state:
         return {"agent_id": agent_id, "available": False, "reason": "no_recent_data"}
 
-    # 2. Run preflight to get all synthesis fields
-    from fastapi.testclient import TestClient as _InternalClient
-    _ic = _InternalClient(app)
-    _api_key = None
-    # Extract the bearer token from the current request's key_record
-    _kh = key_record.get("key_hash")
-    # Find api_key from in-memory store or use test key
-    for _ak, _cid in API_KEYS.items():
-        if _cid == key_record.get("customer_id"):
-            _api_key = _ak
-            break
-    if not _api_key:
-        _api_key = "sg_test_key_001"
-
+    # 2. Run preflight to get all synthesis fields — direct call, no TestClient
     try:
-        _pf_resp = _ic.post("/v1/preflight", headers={"Authorization": f"Bearer {_api_key}"}, json={
-            "memory_state": _mem_state[:20],
-            "action_type": "reversible",
-            "domain": _recent_domain,
-            "agent_id": agent_id,
-            "dry_run": True,
-        })
-        if _pf_resp.status_code != 200:
-            return {"agent_id": agent_id, "available": False, "reason": f"preflight_error_{_pf_resp.status_code}"}
-        _pf = _pf_resp.json()
+        _pf_req = PreflightRequest(
+            memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in _mem_state[:20]],
+            action_type="reversible",
+            domain=_recent_domain,
+            agent_id=agent_id,
+            dry_run=True,
+        )
+        _pf = _preflight_internal(_pf_req, key_record)
+        if not isinstance(_pf, dict):
+            return {"agent_id": agent_id, "available": False, "reason": "preflight_error"}
     except Exception as e:
         return {"agent_id": agent_id, "available": False, "reason": f"preflight_exception: {str(e)[:80]}"}
 
@@ -3642,6 +3652,8 @@ def serve_embed_js():
 @app.get("/v1/playground/share")
 def playground_share(result: str = Query(...)):
     """Decode and return a shared playground result."""
+    if len(result) > 65536:
+        raise HTTPException(status_code=413, detail="Shared result too large (max 64KB)")
     import base64
     try:
         decoded = base64.b64decode(result).decode("utf-8")
