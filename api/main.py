@@ -15229,7 +15229,8 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                          "omega_detection_adjusted", "omega_adjustment_reason", "detection_omega_contribution",
                          "provenance_signature", "provenance_signed", "replay_available",
                          "content_independence_score", "content_too_similar",
-                         "domain_naturalness_baseline"}
+                         "domain_naturalness_baseline",
+                         "block_explanation", "per_type_threshold_applied", "days_until_block"}
         # Truncate repair_plan to top 3 in compact mode
         if "repair_plan" in response and isinstance(response["repair_plan"], list):
             response["repair_plan"] = response["repair_plan"][:3]
