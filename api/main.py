@@ -3987,7 +3987,21 @@ def list_members(team_id: str, key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/teams/members/{email}")
 def remove_member(email: str, team_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    # Tenant ownership check: verify the caller's customer_id owns this team
+    caller_id = key_record.get("customer_id", "")
+    key_hash = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            ownership_resp = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/teams?id=eq.{team_id}&owner_id=eq.{caller_id}&select=id",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=5)
+            if not ownership_resp.ok or not ownership_resp.json():
+                raise HTTPException(status_code=403, detail="You do not own this team")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=403, detail="Unable to verify team ownership")
         try:
             http_requests.delete(f"{SUPABASE_URL}/rest/v1/team_members?team_id=eq.{team_id}&user_email=eq.{email}",
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
