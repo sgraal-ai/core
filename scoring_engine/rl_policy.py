@@ -135,10 +135,10 @@ class QTable:
         if not self._redis_set:
             return
         try:
-            self._redis_set(f"sgraal:rl_qtable:{domain}", self._tables.get(domain, {}), ttl=0)
-            self._redis_set(f"sgraal:rl_episodes:{domain}", self._episodes.get(domain, 0), ttl=0)
+            self._redis_set(f"sgraal:rl_qtable:{domain}", self._tables.get(domain, {}), ttl=7776000)
+            self._redis_set(f"sgraal:rl_episodes:{domain}", self._episodes.get(domain, 0), ttl=7776000)
             ts = datetime.now(timezone.utc).isoformat()
-            self._redis_set(f"sgraal:rl_last_update:{domain}", ts, ttl=0)
+            self._redis_set(f"sgraal:rl_last_update:{domain}", ts, ttl=7776000)
             self._last_update[domain] = ts
         except Exception as e:
             logger.debug("RL Redis persist failed for domain=%s: %s", domain, e)
