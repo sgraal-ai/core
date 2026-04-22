@@ -10908,7 +10908,6 @@ from api.detection import (
     _check_naturalness,
     _extract_attack_signature,
     _compute_attack_surface_score,
-    _NATURALNESS_BASELINES,
     _SECRET_PATTERNS,
 )
 

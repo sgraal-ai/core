@@ -25,6 +25,12 @@ import time as _time
 import uuid
 from datetime import datetime
 
+# Shared stopword set — unified across all detection functions
+_STOPWORDS = {"this", "that", "with", "have", "from", "they", "them", "then",
+              "than", "when", "what", "your", "been", "were", "will", "also",
+              "into", "more", "some", "such", "each", "both", "very", "just",
+              "the", "and", "for", "are", "but", "not", "you", "all", "can"}
+
 __all__ = [
     "_preprocess_entries",
     "_check_timestamp_integrity",
@@ -34,7 +40,6 @@ __all__ = [
     "_check_naturalness",
     "_extract_attack_signature",
     "_compute_attack_surface_score",
-    "_NATURALNESS_BASELINES",
     "_SECRET_PATTERNS",
     "_check_sync_bleed",
     "_check_confidence_calibration",
@@ -59,9 +64,6 @@ _SECRET_PATTERNS = [
 
 def _preprocess_entries(memory_state: list) -> list:
     """Shared preprocessing for detection layers — avoids redundant conversion/tokenization."""
-    _STOPWORDS = {"this", "that", "with", "have", "from", "they", "them", "then",
-                   "than", "when", "what", "your", "been", "were", "will", "also",
-                   "into", "more", "some", "such", "each", "both", "very", "just"}
     result = []
     for e in memory_state:
         if isinstance(e, dict):
@@ -576,7 +578,9 @@ def _check_provenance_chain(memory_state: list, redis_enabled: bool = False, rge
         _flags.append("identical_chains:suspicious")
 
     # ---- Round 12 PA detector: provenance asymmetry signals ----
-    # Requires entries with provenance_chain length >= 2 (multi-hop)
+    # Filter to entries with provenance_chain length >= 1. Single-hop entries are
+    # included because the trust delta from length=1 to length=2 is itself a real
+    # provenance hop that can indicate manipulation.
 
     _pa_primary_gate = False
     _pa_supplementary_count = 0
@@ -717,10 +721,6 @@ def _check_sync_bleed(memory_state: list, _preprocessed: list = None) -> dict:
     _stale_outnumbers = (_stale + _pending) > _current
 
     # Signal D: cross_version_jaccard — content similarity between entries of different versions
-    _STOP = {"this", "that", "with", "have", "from", "they", "them", "then",
-             "than", "when", "what", "your", "been", "were", "will", "also",
-             "into", "more", "some", "such", "each", "both", "very", "just",
-             "the", "and", "for", "are", "but", "not", "you", "all", "can"}
     _cross_jaccard = 1.0
     if _version_count >= 2:
         # Group entries by version
@@ -739,10 +739,10 @@ def _check_sync_bleed(memory_state: list, _preprocessed: list = None) -> dict:
                 # Pool content tokens from each version group
                 _tokens_i = set()
                 for e in _by_version[_version_list[i]]:
-                    _tokens_i.update(w.lower() for w in e.get("content", "").split() if len(w) >= 4 and w.lower() not in _STOP)
+                    _tokens_i.update(w.lower() for w in e.get("content", "").split() if len(w) >= 4 and w.lower() not in _STOPWORDS)
                 _tokens_j = set()
                 for e in _by_version[_version_list[j]]:
-                    _tokens_j.update(w.lower() for w in e.get("content", "").split() if len(w) >= 4 and w.lower() not in _STOP)
+                    _tokens_j.update(w.lower() for w in e.get("content", "").split() if len(w) >= 4 and w.lower() not in _STOPWORDS)
                 if _tokens_i and _tokens_j:
                     _jac = len(_tokens_i & _tokens_j) / len(_tokens_i | _tokens_j)
                     _min_jaccard = min(_min_jaccard, _jac)
@@ -787,7 +787,10 @@ def _check_confidence_calibration(memory_state: list, _preprocessed: list = None
     _flags = []
     n = len(_entries)
     if n < 2:
-        return {"confidence_calibration": "CLEAN", "cc_flags": [], "cc_signals": {}}
+        return {"confidence_calibration": "CLEAN", "cc_flags": [], "cc_signals": {
+            "correlated_consensus": False, "stale_but_confident_count": 0,
+            "age_cluster_detected": False, "model_confidence_divergence": False,
+            "age_mean": 0.0, "age_std": 0.0, "trust_std": 0.0}}
 
     # Weibull half-lives per memory type
     _HALFLIFE = {"tool_state": 5, "shared_workflow": 9, "episodic": 14,
@@ -861,12 +864,6 @@ def _check_confidence_calibration(memory_state: list, _preprocessed: list = None
         _level = "CLEAN"
 
     return {"confidence_calibration": _level, "cc_flags": _flags, "cc_signals": _signals}
-
-
-_NATURALNESS_BASELINES = {
-    "fintech": 0.005, "medical": 0.008, "legal": 0.007,
-    "coding": 0.010, "customer_support": 0.020, "general": 0.015,
-}
 
 
 def _check_naturalness(memory_state: list, action_type: str = "reversible", _preprocessed: list = None, domain: str = "general") -> dict:
