@@ -14565,11 +14565,16 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         if _suppress_auto_inference:
             response["auto_inference_suppressed"] = True
         elif _prev_omega is not None and isinstance(_prev_omega, (int, float)):
-            delta = omega_out - _prev_omega
-            if delta < -10:
-                auto_inferred = "success"
-            elif delta > 15:
-                auto_inferred = "partial_failure"
+            # Only infer outcome if previous action was a healing/blocking action
+            _prev_summary_key = f"last_preflight_summary:{key_record.get('key_hash', 'default')}:{_agent_id}"
+            _prev_sum = _rget(_prev_summary_key)
+            _prev_action = _prev_sum.get("action", "USE_MEMORY") if isinstance(_prev_sum, dict) else "USE_MEMORY"
+            if _prev_action in ("BLOCK", "ASK_USER", "WARN"):
+                delta = omega_out - _prev_omega
+                if delta < -10:
+                    auto_inferred = "success"
+                elif delta > 15:
+                    auto_inferred = "partial_failure"
         if auto_inferred:
             response["auto_outcome_inferred"] = True
             response["inferred_outcome"] = auto_inferred
