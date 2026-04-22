@@ -11310,6 +11310,7 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
                 if comp in _cal_weights:
                     old_w = _cal_weights[comp]
                     new_w = round(old_w + _cal_lr, 6)
+                    new_w = min(new_w, 0.5)
                     _cal_weights[comp] = new_w
                     _updates[comp] = (old_w, new_w)
         elif req.status == "success" and _cb:
