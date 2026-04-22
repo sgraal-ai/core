@@ -3104,7 +3104,7 @@ def verify_provenance(req: ProvenanceVerifyRequest, request: Request):
     if not ATTESTATION_SECRET:
         raise HTTPException(status_code=503, detail="Provenance verification not configured")
     import hmac as _hm
-    _msg = ":".join(sorted(req.provenance_chain)) + ":" + req.input_hash
+    _msg = ":".join(req.provenance_chain) + ":" + req.input_hash
     _expected = _hm.new(ATTESTATION_SECRET.encode(), _msg.encode(), hashlib.sha256).hexdigest()
     _valid = _hm.compare_digest(_expected, req.provenance_signature)
     return {"valid": _valid, "message": "Provenance chain verified" if _valid else "Invalid provenance signature"}
