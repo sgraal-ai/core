@@ -11600,11 +11600,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 f"{UPSTASH_REDIS_URL}/INCR/{_quota_key}",
                 headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
             _new_count = int(_incr_r.json().get("result", 0)) if _incr_r.ok else 0
-            if _new_count == 1:
-                # First call this month — set TTL of 35 days
-                http_requests.post(
-                    f"{UPSTASH_REDIS_URL}/EXPIRE/{_quota_key}/3024000",
-                    headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
+            # Always set TTL to prevent orphaned keys if a prior EXPIRE failed
+            http_requests.post(
+                f"{UPSTASH_REDIS_URL}/EXPIRE/{_quota_key}/3024000",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
             if _new_count > limit:
                 # Over limit — decrement back and reject
                 http_requests.post(
