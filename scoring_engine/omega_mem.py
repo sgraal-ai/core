@@ -189,7 +189,11 @@ def compute(
     r_recall      = min(100, s_freshness * 0.6 + s_provenance * 0.4)
     r_encode      = min(100, s_provenance * 0.5)
     s_drift       = min(100, s_freshness * 0.4 + s_interference * 0.6)
-    s_recovery    = max(0, 100 - s_freshness * 0.5)
+    _has_backup = any(getattr(e, 'has_backup_source', False) for e in entries)
+    _heal_sum = sum(getattr(e, 'healing_counter', 0) for e in entries)
+    _backup_factor = 1.0 if _has_backup else 0.7
+    _heal_factor = min(1.0, _heal_sum / max(len(entries) * 3, 1))
+    s_recovery    = max(0, (100 - s_freshness * 0.5) * _backup_factor * (0.8 + _heal_factor * 0.2))
 
     # R_belief: inverse of model belief — low belief = high risk
     # r_belief 0.0–1.0 maps to risk 100–0 (inverted)

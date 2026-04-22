@@ -690,8 +690,8 @@ class TestDeterminism:
             assert result.omega_mem_final == baseline.omega_mem_final
             assert result.healing_counter == baseline.healing_counter
 
-    def test_different_healing_counter_same_omega(self):
-        """healing_counter tracks heals but does not affect the score itself."""
+    def test_different_healing_counter_affects_recovery(self):
+        """healing_counter influences s_recovery — more heals = higher recovery capability."""
         base = dict(
             id="det_hc", content="Test", type="semantic",
             timestamp_age_days=10, source_trust=0.8,
@@ -701,7 +701,9 @@ class TestDeterminism:
         r0 = compute([MemoryEntry(**base, healing_counter=0)])
         r5 = compute([MemoryEntry(**base, healing_counter=5)])
 
-        assert r0.omega_mem_final == r5.omega_mem_final
+        # Higher healing_counter → higher s_recovery → lower omega (less risk)
+        assert r5.component_breakdown["s_recovery"] > r0.component_breakdown["s_recovery"]
+        assert r5.omega_mem_final < r0.omega_mem_final
         assert r0.healing_counter == 0
         assert r5.healing_counter == 5
 
