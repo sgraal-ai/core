@@ -828,7 +828,7 @@ def _check_confidence_calibration(memory_state: list, _preprocessed: list = None
         mc_max = max(_mc_values)
         avg_hl = sum(_HALFLIFE.get(e.get("type", "semantic"), 69) for e in _entries) / n
         age_ratio = age_mean / max(avg_hl, 1)
-        _mc_divergence = mc_max > 0.8 and age_ratio > 0.3
+        _mc_divergence = mc_max > 0.8 and age_ratio > 0.5
 
     _signals = {
         "correlated_consensus": _correlated,
