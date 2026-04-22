@@ -988,12 +988,11 @@ def auth_github(response: Response):
 @app.get("/auth/github/callback")
 def auth_github_callback(code: str = Query(...), state: str = Query(...), sgraal_oauth_state: Optional[str] = Cookie(None)):
     """Exchange GitHub code for API key."""
-    # Validate CSRF state
-    if not sgraal_oauth_state or sgraal_oauth_state != state or state not in _oauth_states:
-        raise HTTPException(status_code=400, detail="Invalid OAuth state")
-    # Clean up state (one-time use) — save timestamp BEFORE pop
+    # Validate CSRF state — atomic pop-then-check to prevent race conditions
     stored_ts = _oauth_states.pop(state, None)
-    if stored_ts is None or _time.time() - stored_ts > 600:
+    if not sgraal_oauth_state or sgraal_oauth_state != state or stored_ts is None:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    if _time.time() - stored_ts > 600:
         raise HTTPException(status_code=400, detail="OAuth state expired")
 
     if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
