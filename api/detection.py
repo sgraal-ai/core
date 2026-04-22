@@ -710,7 +710,7 @@ def _check_sync_bleed(memory_state: list, _preprocessed: list = None) -> dict:
     # Signal A: stale_fraction
     _stale = sum(1 for e in _entries if e.get("sync_state") == "stale")
     _pending = sum(1 for e in _entries if e.get("sync_state") == "pending")
-    _current = sum(1 for e in _entries if e.get("sync_state") in ("current", None))
+    _current = sum(1 for e in _entries if e.get("sync_state") == "current")
     _stale_fraction = round((_stale + _pending) / max(n, 1), 4)
     _pending_fraction = round(_pending / max(n, 1), 4)
 
