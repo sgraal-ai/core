@@ -12740,11 +12740,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     elif req.policy_id:
         response["policy_applied"] = {"policy_id": req.policy_id, "rule_triggered": None, "override": None}
 
-    # #136 Push event to WS/SSE buffer
+    # #136 Push event to WS/SSE buffer (deferred to after detection overrides via response dict)
+    # NOTE: this fires before detection overrides; the event is re-pushed with
+    # the final decision after _finalize_decision() later in the pipeline.
     _ev_kh = _safe_key_hash(key_record)
-    _ev_type = "block" if result.recommended_action == "BLOCK" else "preflight"
-    _push_event(_ev_kh, {"type": _ev_type, "omega": omega_out, "decision": result.recommended_action,
-                         "request_id": request_id})
 
     # Drift details — ensemble of KL, Wasserstein, JSD
     component_scores = list(result.component_breakdown.values())
@@ -16804,6 +16803,11 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             _persist_store_bg("fleet_health_vectors", _fh_existing, ttl=604800)
         except Exception:
             pass
+
+    # #136 Push event with the FINAL decision (not the pre-override engine result)
+    _ev_type_final = "block" if _blessed_action == "BLOCK" else "preflight"
+    _push_event(_ev_kh, {"type": _ev_type_final, "omega": response.get("omega_mem_final", omega_out),
+                         "decision": _blessed_action, "request_id": request_id})
 
     # #19 fix: webhook dispatch uses the FINAL decision (after all overrides).
     if not _is_dry_run:
