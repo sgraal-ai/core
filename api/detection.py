@@ -961,15 +961,20 @@ def _extract_attack_signature(memory_state: list, detection_results: dict, domai
     }
 
 
-def _compute_attack_surface_score(ts_result: dict, id_result: dict, cc_result: dict, pc_result: dict = None) -> dict:
+def _compute_attack_surface_score(ts_result: dict, id_result: dict, cc_result: dict, pc_result: dict = None,
+                                   sb_result: dict = None, cc_calibration_result: dict = None) -> dict:
     """Compute compound attack surface score from detection layers."""
     _RISK = {"CLEAN": 0.0, "VALID": 0.0, "SUSPICIOUS": 0.5, "MANIPULATED": 1.0}
     _pc_risk = _RISK.get((pc_result or {}).get("provenance_chain_integrity", "CLEAN"), 0.0)
+    _sb_risk = _RISK.get((sb_result or {}).get("sync_bleed", "CLEAN"), 0.0)
+    _cc_cal_risk = _RISK.get((cc_calibration_result or {}).get("confidence_calibration", "CLEAN"), 0.0)
     risks = sorted([
         _RISK.get(ts_result.get("timestamp_integrity", "VALID"), 0.0),
         _RISK.get(id_result.get("identity_drift", "CLEAN"), 0.0),
         _RISK.get(cc_result.get("consensus_collapse", "CLEAN"), 0.0),
         _pc_risk,
+        _sb_risk,
+        _cc_cal_risk,
     ], reverse=True)
 
     score = round(risks[0] + 0.3 * risks[1] + 0.1 * risks[2] + 0.05 * risks[3], 2)
@@ -994,5 +999,9 @@ def _compute_attack_surface_score(ts_result: dict, id_result: dict, cc_result: d
         active.append("consensus_collapse")
     if _pc_risk > 0:
         active.append("provenance_chain")
+    if _sb_risk > 0:
+        active.append("sync_bleed")
+    if _cc_cal_risk > 0:
+        active.append("confidence_calibration")
 
     return {"attack_surface_score": score, "attack_surface_level": level, "active_detection_layers": active}
