@@ -2551,10 +2551,11 @@ def get_governance_score(key_record: dict = Depends(verify_api_key)):
     _hist = redis_get(f"te_history:{_kh}:general", [])
     if not isinstance(_hist, list):
         _hist = []
-    # Also check in-memory outcomes for this key
+    # Also check in-memory outcomes for this key (tenant-filtered)
     _decisions = []
     for _oid, _od in list(_outcomes.items())[-1000:]:
-        _decisions.append(_od.get("recommended_action", "USE_MEMORY"))
+        if _od.get("key_hash") == _kh:
+            _decisions.append(_od.get("recommended_action", "USE_MEMORY"))
     total = len(_decisions)
     if total < 10:
         return {"governance_score": None, "total_governed_actions": total,
