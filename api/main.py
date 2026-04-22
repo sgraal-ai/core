@@ -4292,9 +4292,10 @@ def get_memory(memory_id: str, key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/store/memories/{memory_id}")
 def delete_stored_memory(memory_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
-            http_requests.delete(f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{memory_id}",
+            http_requests.delete(f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{memory_id}&api_key_hash=eq.{kh}",
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
         except Exception:
             pass
@@ -4316,9 +4317,10 @@ def update_stored_memory(memory_id: str, req: StoreMemoryRequest, key_record: di
     except Exception:
         pass
 
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
-            http_requests.patch(f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{memory_id}",
+            http_requests.patch(f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{memory_id}&api_key_hash=eq.{kh}",
                 json={"content": req.content, "omega_score": omega, "blocked": blocked},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
