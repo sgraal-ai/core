@@ -845,12 +845,16 @@ def _check_confidence_calibration(memory_state: list, _preprocessed: list = None
         _flags.append("confidence_calibration:manipulated")
     elif _mc_divergence and _sbc_count >= 2:
         _flags.append("confidence_calibration:manipulated")
-    elif _mc_divergence and _sbc_count == 1:
-        # Single stale-but-confident entry + mc divergence → suspicious (not manipulated)
+    elif _mc_divergence and _sbc_count >= 1:
+        # Model confidence divergence + at least 1 stale entry → suspicious
         _flags.append("confidence_calibration:suspicious")
-    elif _mc_divergence:
+    elif _mc_divergence and _age_cluster:
+        # Model confidence divergence + age clustering → suspicious
         _flags.append("confidence_calibration:suspicious")
-    elif _correlated and _sbc_count >= 1:
+    elif _correlated and _sbc_count >= 2:
+        # Require 2+ stale entries even with correlated consensus. Correlated
+        # ages + trust is normal for batch-refreshed caches; a single entry
+        # past half-life in a correlated set is not evidence of manipulation.
         _flags.append("confidence_calibration:suspicious")
     elif _age_cluster:
         _flags.append("confidence_calibration:suspicious")
