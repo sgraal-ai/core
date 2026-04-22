@@ -854,7 +854,10 @@ def _check_confidence_calibration(memory_state: list, _preprocessed: list = None
         _flags.append("confidence_calibration:suspicious")
     elif _age_cluster:
         _flags.append("confidence_calibration:suspicious")
-    elif _sbc_count >= 1:
+    elif _sbc_count >= 2:
+        # Require 2+ stale-but-confident entries to fire standalone (without
+        # correlated_consensus, age_cluster, or mc_divergence). A single entry
+        # past half-life with high trust is normal in long-running agents.
         _flags.append("confidence_calibration:suspicious")
 
     if any("manipulated" in f for f in _flags):
