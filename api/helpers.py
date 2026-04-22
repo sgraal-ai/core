@@ -201,10 +201,21 @@ def _is_whitelisted_ip(ip: str) -> bool:
 
 
 def _extract_client_ip(request: Request) -> str:
-    """Extract client IP from request, respecting X-Forwarded-For."""
+    """Extract client IP from request, respecting X-Forwarded-For.
+
+    Uses the RIGHTMOST non-private IP from X-Forwarded-For to prevent
+    client-controlled spoofing (the leftmost entry is attacker-controlled,
+    while the rightmost non-private entry is set by the last trusted proxy).
+    """
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
-        return xff.split(",")[0].strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        # Walk from right to left; return the first non-private IP
+        for ip in reversed(parts):
+            if not _is_whitelisted_ip(ip):
+                return ip
+        # All IPs are private/internal — return the rightmost one
+        return parts[-1] if parts else "unknown"
     xri = request.headers.get("x-real-ip", "")
     if xri:
         return xri
