@@ -4278,9 +4278,10 @@ def search_memories(query: str = "", agent_id: Optional[str] = None, key_record:
 
 @app.get("/v1/store/memories/{memory_id}")
 def get_memory(memory_id: str, key_record: dict = Depends(verify_api_key)):
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
-            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{memory_id}&select=*",
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/memory_store?id=eq.{memory_id}&api_key_hash=eq.{kh}&select=*",
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
             if r.ok and r.json():
                 return r.json()[0]
