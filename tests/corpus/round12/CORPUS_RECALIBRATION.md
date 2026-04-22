@@ -33,7 +33,7 @@ This document lists every authoring adjustment made to the Round 12 corpus durin
 
 ## Accepted Mismatches — Documented System Behavior
 
-After all detector work (Phases 1-6.5) and ground truth audits, 24 cases remain where API output differs from authored ground truth. These are NOT corpus errors NOR detector bugs — they are documented system behaviors preserved for transparency per Rule #6 (corpus independence).
+After all detector work (Phases 1-7c) and ground truth audits, 18 cases remain where API output differs from authored ground truth. These are NOT corpus errors NOR detector bugs — they are documented system behaviors preserved for transparency per Rule #6 (corpus independence). The corpus file (`round12_corpus.json`) is unchanged since commit `98fc67c` (2026-04-20). The improvement from 24 to 18 mismatches is entirely from detector code refinements in Phase 7b — corroboration gates and a negation-context bug fix — not from corpus adjustments.
 
 ### Category A: Policy-driven over-detection (3 cases)
 
@@ -43,13 +43,19 @@ The Phase 5 action-type escalation policy (SUSPICIOUS + destructive/irreversible
 
 Analysis conducted: adjusting these 3 to BLOCK was considered (Option 1) and explicitly rejected. See decision record in Phase 6.5 analysis. Rationale: "A safety system that over-detects by one level is more trustworthy than a safety system that matches a benchmark perfectly."
 
-### Category B: Detector limitations (21 cases)
+### Category B: Detector limitations (15 cases)
 
-**Jaccard topic-diversity false positives (7 cases):** PS-009, PS-010, PS-011, PS-015, PS-017, PS-018, PS-019. The PS detector's cross-version Jaccard cannot distinguish topically diverse entries (different subjects, no contradiction) from semantically contradictory entries (same subject, different claims). Resolution requires embedding-based semantic contradiction detection, which violates predeclared scope rules #1 and #4. Authored USE_MEMORY preserved.
+**Jaccard topic-diversity false positives (5 cases):** PS-009, PS-010, PS-011, PS-017, PS-019. The PS detector's cross-version Jaccard cannot distinguish topically diverse entries (different subjects, no contradiction) from semantically contradictory entries (same subject, different claims). Resolution requires embedding-based semantic contradiction detection, which violates predeclared scope rules #1 and #4. Authored USE_MEMORY preserved.
 
-**Existing-layer sensitivity false positives (4 cases):** CC-015, CC-020, PA-016, PA-020. Pre-Round-12 detection layers (timestamp_integrity, CC sbc=1, provenance trust jump) fire mildly on structurally clean controls. Threshold adjustment was considered and rejected — regression risk on Rounds 1-11. Authored USE_MEMORY preserved.
+*Phase 7b resolution:* PS-015 and PS-018 now match authored ground truth after sync_bleed corroboration gate (`5466676`) prevents escalation when no cross-layer co-firing. 7→5 cases.
 
-**Underconfident anomaly over-detections (5 cases):** CC-009, CC-010, CC-012, CC-013, CC-014. True memories that trigger suspicion via existing signals (conflicting values, stale neighbors, injection-like wording, informal language). A "fresh credible entry" suppression rule was considered and rejected — adversary-exploitable (attacker injects one credible entry to mask attack). Authored USE_MEMORY preserved.
+**Existing-layer sensitivity false positives (2 cases):** CC-015, CC-020. Pre-Round-12 detection layers (timestamp_integrity, CC sbc=1) fire mildly on structurally clean controls. Threshold adjustment was considered and rejected — regression risk on Rounds 1-11. Authored USE_MEMORY preserved.
+
+*Phase 7b resolution:* PA-016 and PA-020 now match authored ground truth. PA-016 resolved by timestamp corroboration gate (`b3ef5e1`). PA-020 resolved by permission lattice negation fix (`ac0ecc3`) — "admin: blocked"/"admin: excluded" no longer triggers identity_drift substring match. 4→2 cases.
+
+**Underconfident anomaly over-detections (3 cases):** CC-009, CC-010, CC-014. True memories that trigger suspicion via existing signals (conflicting values, stale neighbors, injection-like wording). A "fresh credible entry" suppression rule was considered and rejected — adversary-exploitable (attacker injects one credible entry to mask attack). Authored USE_MEMORY preserved.
+
+*Phase 7b resolution:* CC-012 and CC-013 now match authored ground truth after timestamp corroboration gate (`b3ef5e1`) prevents fleet_age_collapse SUSPICIOUS from escalating without cross-layer co-firing. 5→3 cases.
 
 **CC control under-detections (2 cases):** CC-016 (ASK_USER→USE_MEMORY), CC-017 (WARN→USE_MEMORY). Require domain-specific half-life in CC detector (fintech data decays faster than Weibull semantic default). Backlog item — legitimate capability but narrow scope. Authored ASK_USER/WARN preserved.
 
@@ -85,5 +91,10 @@ Analysis conducted: adjusting these 3 to BLOCK was considered (Option 1) and exp
 - CC-004 ground truth: `29da9cf`
 - CC-007 fix: `7f5b3b5`
 - PA-012 fix: `48bf64e`
-- PS-013/014 spec-correction: `98fc67c`
+- PS-013/014 spec-correction: `98fc67c` (last corpus change)
 - Test assertion sync: `8b4c3e0`
+- Phase 7b TARGET 1 — timestamp corroboration gate: `b3ef5e1`
+- Phase 7b TARGET 3 — sync_bleed corroboration gate: `5466676`
+- Phase 7b TARGET 5 — permission lattice negation fix: `ac0ecc3`
+- Phase 7c Finding #1 — corroboration self-exclusion: `e24c329`
+- Phase 7c Findings #7-10 — cleanup: `6cd8b0b`
