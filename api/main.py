@@ -80,6 +80,8 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 ATTESTATION_SECRET = os.getenv("ATTESTATION_SECRET", "")
+if not ATTESTATION_SECRET and (os.getenv("SGRAAL_TEST_MODE") or os.getenv("ENV", "").lower() != "production"):
+    ATTESTATION_SECRET = "dev_attestation_not_for_production"
 
 # #39: Signal vector logging to Redis — disabled by default (storage cost with no reader).
 _SIGNAL_LOGGING_ENABLED = os.getenv("SGRAAL_SIGNAL_LOGGING", "false").lower() in ("1", "true", "yes")
@@ -306,23 +308,18 @@ async def _scheduler_scoring_drift():
                 sample = cases[:50]
                 omega_sum = 0.0
                 counted = 0
+                _drift_key_record = {"customer_id": "_internal_drift_check", "tier": "internal"}
                 for case in sample:
                     try:
-                        from fastapi.testclient import TestClient as _DriftClient
-                        _dc = _DriftClient(app)
-                        _dr = _dc.post(
-                            "/v1/preflight",
-                            headers={"Authorization": "Bearer sg_test_key_001"},
-                            json={
-                                "memory_state": case.get("memory_state", [])[:20],
-                                "action_type": case.get("action_type", "reversible"),
-                                "domain": case.get("domain", "general"),
-                                "dry_run": True,
-                            },
-                            timeout=10.0,
+                        _drift_req = PreflightRequest(
+                            memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in case.get("memory_state", [])[:20]],
+                            action_type=case.get("action_type", "reversible"),
+                            domain=case.get("domain", "general"),
+                            dry_run=True,
                         )
-                        if _dr.status_code == 200:
-                            omega_sum += float(_dr.json().get("omega_mem_final", 0) or 0)
+                        _dr = _preflight_internal(_drift_req, _drift_key_record)
+                        if isinstance(_dr, dict):
+                            omega_sum += float(_dr.get("omega_mem_final", 0) or 0)
                             counted += 1
                     except Exception:
                         continue
@@ -1547,10 +1544,9 @@ def _cert_proof_value(credential_subject: dict, api_key_hash: str) -> str:
     import hmac as _hmac_mod
     import hashlib as _hashlib_mod
     import json as _json_mod
-    # FIX 9: warn on every call if using dev fallback (not just at startup)
     if not ATTESTATION_SECRET:
-        logger.debug("CERT_PROOF using dev_cert_secret fallback — not production-safe")
-    _secret_key = (ATTESTATION_SECRET or "dev_cert_secret").encode()
+        raise HTTPException(status_code=503, detail="Certification not configured (ATTESTATION_SECRET missing)")
+    _secret_key = ATTESTATION_SECRET.encode()
     # Deterministic canonical form: sorted keys JSON + tenant salt
     _canon = _json_mod.dumps(credential_subject, sort_keys=True, separators=(",", ":"))
     _msg = f"{_canon}|{api_key_hash}".encode()
@@ -1568,31 +1564,22 @@ def certify_memory(req: CertifyRequest, key_record: dict = Depends(verify_api_ke
     import json as _json_mod
     _check_rate_limit(key_record)
 
-    # Run preflight internally
-    _ck = None
-    for _ak, _cust in API_KEYS.items():
-        if _cust == key_record.get("customer_id"):
-            _ck = _ak
-            break
-    if not _ck:
-        _ck = "sg_test_key_001"
-
-    from fastapi.testclient import TestClient as _CClient
-    _cc = _CClient(app)
-    _pf = _cc.post(
-        "/v1/preflight",
-        headers={"Authorization": f"Bearer {_ck}"},
-        json={
-            "memory_state": req.memory_state[:20],
-            "action_type": req.action_type or "reversible",
-            "domain": req.domain or "general",
-            "agent_id": req.agent_id,
-            "dry_run": True,
-        },
-    )
-    if _pf.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"Preflight failed: {_pf.status_code}")
-    _r = _pf.json()
+    # Run preflight internally — direct call, no TestClient or test key
+    try:
+        _pf_req = PreflightRequest(
+            memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in req.memory_state[:20]],
+            action_type=req.action_type or "reversible",
+            domain=req.domain or "general",
+            agent_id=req.agent_id,
+            dry_run=True,
+        )
+        _r = _preflight_internal(_pf_req, key_record)
+        if not isinstance(_r, dict):
+            raise HTTPException(status_code=500, detail="Preflight returned non-dict")
+    except HTTPException:
+        raise
+    except Exception as _e:
+        raise HTTPException(status_code=500, detail=f"Preflight failed: {str(_e)[:200]}")
     _decision = _r.get("recommended_action", "USE_MEMORY")
     _omega = float(_r.get("omega_mem_final", 0) or 0)
 
@@ -2600,6 +2587,8 @@ class VerifyAttestationRequest(BaseModel):
 def verify_attestation(req: VerifyAttestationRequest, request: Request):
     """Verify a portable safety attestation. No auth required. Rate limited: 60/min per IP."""
     _check_public_rate_limit(request, "verify_attestation")
+    if not ATTESTATION_SECRET:
+        raise HTTPException(status_code=503, detail="Attestation verification not configured")
     import hmac as _hmac_mod
     _msg = f"{req.input_hash}:{req.omega}:{req.decision}:{req.request_id}"
     _expected = _hmac_mod.new(ATTESTATION_SECRET.encode(), _msg.encode(), hashlib.sha256).hexdigest()
@@ -3113,6 +3102,8 @@ class ProvenanceVerifyRequest(BaseModel):
 def verify_provenance(req: ProvenanceVerifyRequest, request: Request):
     """Verify a signed provenance chain. No auth required. Rate limited: 60/min per IP."""
     _check_public_rate_limit(request, "provenance_verify")
+    if not ATTESTATION_SECRET:
+        raise HTTPException(status_code=503, detail="Provenance verification not configured")
     import hmac as _hm
     _msg = ":".join(sorted(req.provenance_chain)) + ":" + req.input_hash
     _expected = _hm.new(ATTESTATION_SECRET.encode(), _msg.encode(), hashlib.sha256).hexdigest()
@@ -6486,6 +6477,8 @@ def export_passport(req: PassportExportRequest, key_record: dict = Depends(verif
     # Signature with key versioning
     _key_version = "v1"
     _signing_key = os.getenv("PASSPORT_SIGNING_KEY_V1", "")
+    if not _signing_key and (os.getenv("SGRAAL_TEST_MODE") or os.getenv("ENV", "").lower() != "production"):
+        _signing_key = "dev_passport_key_not_for_production"
     _sig_data = f"{pid}:{kh}:{req.agent_id}:{valid_until}:{omega_avg}"
     _signature = hashlib.sha256((_sig_data + _signing_key).encode()).hexdigest()
     passport = {
@@ -6515,12 +6508,20 @@ def import_passport(req: PassportImportRequest, key_record: dict = Depends(verif
     passport = _passports.get(req.passport_id) or redis_get(f"memory_passport:{req.passport_id}")
     if not passport:
         raise HTTPException(status_code=404, detail="Passport not found or expired")
-    # Validate signature with version-matched key
+    # Validate signature with version-matched key — recompute HMAC, don't trust caller value
     _kv = req.signature_key_version
     _sk = os.getenv(f"PASSPORT_SIGNING_KEY_{_kv.upper()}", "")
-    _sig_data = f"{passport['passport_id']}:{key_record.get('key_hash','default')}:{passport['agent_id']}:{passport['valid_until']}:{passport['omega_avg']}"
-    # Passport signature was created with source key_hash, so verify with stored signature
-    if passport.get("signature") != req.signature:
+    if not _sk:
+        if os.getenv("SGRAAL_TEST_MODE") or os.getenv("ENV", "").lower() != "production":
+            _sk = "dev_passport_key_not_for_production"
+        else:
+            raise HTTPException(status_code=503, detail=f"Passport signing key {_kv} not configured")
+    # Reconstruct signature data using the STORED passport fields (not caller-supplied)
+    _source_kh = passport.get("source_key_hash", _safe_key_hash(key_record))
+    _sig_data = f"{passport['passport_id']}:{_source_kh}:{passport['agent_id']}:{passport['valid_until']}:{passport['omega_avg']}"
+    import hmac as _passport_hmac
+    _expected_sig = hashlib.sha256((_sig_data + _sk).encode()).hexdigest()
+    if not _passport_hmac.compare_digest(_expected_sig, req.signature):
         raise HTTPException(status_code=403, detail="Invalid passport signature")
     # Check expiry
     try:
@@ -10511,6 +10512,8 @@ _UNSUB_SECRET = os.getenv("UNSUB_HMAC_SECRET", "")
 
 
 def _generate_unsubscribe_token(email: str) -> str:
+    if not _UNSUB_SECRET:
+        logger.warning("UNSUB_HMAC_SECRET not set — unsubscribe tokens will use empty key")
     return _hmac.new(_UNSUB_SECRET.encode(), email.lower().encode(), hashlib.sha256).hexdigest()
 
 

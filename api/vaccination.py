@@ -54,19 +54,13 @@ def encrypt_vaccine(data: dict, attestation_secret: str = "") -> str:
             ct_tag = AESGCM(aes_key).encrypt(nonce, plaintext, None)
             return _b64.b64encode(b"AES1" + nonce + ct_tag).decode("ascii")
         except ImportError:
-            pass  # cryptography not installed — fall through to XOR
-        # XOR fallback
-        nonce = secrets.token_bytes(16)
-        dk = hashlib.sha256(key.encode() + nonce).digest()
-        keystream = b""
-        block = dk
-        while len(keystream) < len(plaintext):
-            keystream += block
-            block = hashlib.sha256(block).digest()
-        ct = bytes(p ^ k for p, k in zip(plaintext, keystream[:len(plaintext)]))
-        import hmac as _hmac_enc
-        tag = _hmac_enc.new(key.encode(), nonce + ct, hashlib.sha256).digest()
-        return _b64.b64encode(nonce + ct + tag).decode("ascii")
+            import logging as _log_vax
+            _log_vax.getLogger("sgraal.vaccination").critical(
+                "cryptography package not installed — vaccine encryption unavailable. "
+                "Install with: pip install cryptography"
+            )
+            # Fall through to raw JSON (no encryption) rather than weak XOR
+            return _json.dumps(data)
     except Exception:
         return _json.dumps(data)
 
