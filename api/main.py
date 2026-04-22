@@ -14394,12 +14394,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     except Exception as _e:
         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
-    # FIX 9: dry_run skips audit log and webhooks.
-    # Issue R/S fix: audit_log is now deferred to the VERY END of preflight
-    # (right before `return response`), so it captures the FINAL
-    # recommended_action after all overrides (per-type thresholds, plugin
-    # hooks, detection-layer overrides, Issue I reconciliation). See below.
-    _is_dry_run = req.dry_run or key_record.get("demo", False)
+    # dry_run / demo flag already set earlier (see _is_dry_run above).
+    # Audit log and webhooks are deferred to the VERY END of preflight
+    # so they capture the FINAL recommended_action after all overrides.
 
     # Webhook dispatch — deferred to end of preflight (after _finalize_decision)
     # alongside audit_log, so it uses the FINAL decision. See below.
