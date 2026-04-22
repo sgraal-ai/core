@@ -14646,8 +14646,21 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         if response.get("component_breakdown") != response.get("component_breakdown_engine"):
             response["enrichment_applied"] = True
         # FIX 3: Use omega_adjusted for decisions when delta is significant
-        # Guard: reversible/informational with omega < 20 = clean memory, skip adjusted escalation
-        _skip_adjusted = omega_out < 20 and req.action_type in ("reversible", "informational")
+        # Guard 1: reversible/informational with omega < 20 = clean memory
+        # Guard 2: omega_raw well below WARN and no detection layers fired = clean memory,
+        #          enrichment should not escalate regardless of action_type
+        _any_detection = (
+            response.get("timestamp_integrity", "VALID") not in ("VALID", "CLEAN") or
+            response.get("identity_drift", "CLEAN") != "CLEAN" or
+            response.get("consensus_collapse", "CLEAN") != "CLEAN" or
+            response.get("provenance_chain_integrity", "CLEAN") != "CLEAN" or
+            response.get("sync_bleed", "CLEAN") != "CLEAN" or
+            response.get("confidence_calibration_check", "CLEAN") != "CLEAN"
+        )
+        _skip_adjusted = (
+            (omega_out < 20 and req.action_type in ("reversible", "informational")) or
+            (omega_out < 15 and not _any_detection)
+        )
         if abs(_omega_delta) > 5.0 and not _skip_adjusted:
             response["decision_based_on"] = "omega_adjusted"
             _t_warn = req.thresholds.get("warn", DEFAULT_WARN_THRESHOLD) if req.thresholds else DEFAULT_WARN_THRESHOLD
