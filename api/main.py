@@ -12655,6 +12655,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                     _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key}/{_urlp.quote(_sig['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                     _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                     _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)  # Match vaccine TTL: 7 days
+                    response["_vaccination_stored"] = True
         except Exception as _e:
             _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
@@ -15114,6 +15115,35 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         if _any_suspicious and response.get("recommended_action") != "BLOCK":
             _set_action(DecisionAction.BLOCK, "action_type_escalation",
                         f"SUSPICIOUS detection on {req.action_type} action — escalated to BLOCK")
+
+    # Deferred vaccination — detection-layer BLOCKs that fired after the
+    # original vaccination check at line 12634 need to store signatures too.
+    if _redis_enabled and response.get("recommended_action") == "BLOCK" and not response.get("vaccination_match"):
+        try:
+            _manip_layers_deferred = sum(1 for v in [
+                response.get("timestamp_integrity") == "MANIPULATED",
+                response.get("identity_drift") == "MANIPULATED",
+                response.get("consensus_collapse") == "MANIPULATED",
+                response.get("provenance_chain_integrity") == "MANIPULATED",
+                response.get("sync_bleed") == "MANIPULATED",
+                response.get("confidence_calibration_check") == "MANIPULATED",
+            ] if v)
+            if _manip_layers_deferred >= 1 and not response.get("_vaccination_stored"):
+                _det_results_d = {
+                    "timestamp_integrity": response.get("timestamp_integrity", "VALID"),
+                    "identity_drift": response.get("identity_drift", "CLEAN"),
+                    "consensus_collapse": response.get("consensus_collapse", "CLEAN"),
+                }
+                _sig_d = _extract_attack_signature(req.memory_state, _det_results_d, req.domain, content_hash=_input_hash_full[:16])
+                redis_set(f"vaccine:{_sig_d['signature_id']}", _encrypt_vaccine(_sig_d), ttl=604800)
+                _vax_idx_key_d = f"vaccine_index:{req.domain}"
+                import urllib.parse as _urlp_d
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key_d}/{_urlp_d.quote(_sig_d['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key_d}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key_d}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                response["_vaccination_stored"] = True
+        except Exception:
+            pass
 
     # Boundary Explainer
     if 35 <= _omega_now <= 55:
