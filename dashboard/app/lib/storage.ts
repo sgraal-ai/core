@@ -1,18 +1,22 @@
 const isBrowser = typeof window !== "undefined";
 
+// Use sessionStorage instead of localStorage for API keys.
+// sessionStorage is cleared when the tab closes and is not accessible
+// to other tabs, reducing the XSS attack window for key exfiltration.
+
 export function getApiKey(): string {
   if (!isBrowser) return "";
-  return localStorage.getItem("sgraal_api_key") ?? "";
+  return sessionStorage.getItem("sgraal_api_key") ?? "";
 }
 
 export function setApiKey(key: string): void {
   if (!isBrowser) return;
-  localStorage.setItem("sgraal_api_key", key);
+  sessionStorage.setItem("sgraal_api_key", key);
 }
 
 export function removeApiKey(): void {
   if (!isBrowser) return;
-  localStorage.removeItem("sgraal_api_key");
+  sessionStorage.removeItem("sgraal_api_key");
 }
 
 export function getApiUrl(): string {
