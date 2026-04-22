@@ -24,9 +24,15 @@ def list_vaccines(domain: str = Query("general"), key_record: dict = Depends(ver
 
 
 @router.delete("/v1/vaccines/{signature_id}")
-def delete_vaccine(signature_id: str, key_record: dict = Depends(verify_api_key)):
+def delete_vaccine(signature_id: str, domain: str = Query("general"), key_record: dict = Depends(verify_api_key)):
     """Remove a vaccine signature."""
     redis_delete(f"vaccine:{signature_id}")
+    # Also remove from vaccine index so list_vaccines stays consistent
+    _vax_idx_key = f"vaccine_index:{domain}"
+    _vax_ids = redis_get(_vax_idx_key, [])
+    if isinstance(_vax_ids, list) and signature_id in _vax_ids:
+        _vax_ids.remove(signature_id)
+        redis_set(_vax_idx_key, _vax_ids, ttl=604800)
     return {"deleted": signature_id}
 
 
