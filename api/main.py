@@ -16786,6 +16786,13 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # trail to the response and captures the final action for audit.
     _blessed_action = _finalize_decision()
 
+    # Recompute attestation signature against the FINAL decision and omega,
+    # not the pre-override snapshot computed earlier in the pipeline.
+    import hmac as _hmac_final
+    _final_omega_attest = response.get("omega_mem_final", omega_out)
+    _attest_msg_final = f"{_input_hash_full}:{_final_omega_attest}:{_blessed_action}:{request_id}"
+    response["proof_signature"] = _hmac_final.new(ATTESTATION_SECRET.encode(), _attest_msg_final.encode(), hashlib.sha256).hexdigest()
+
     # FIX 4: store fleet health vector ONLY when the FINAL decision is USE_MEMORY
     if not _is_dry_run and _redis_enabled and _blessed_action == "USE_MEMORY":
         try:
