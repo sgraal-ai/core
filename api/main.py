@@ -12425,12 +12425,12 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
 
     # Confidence calibration check (Round 12 CC detector)
     try:
-        _cc_check = _check_confidence_calibration(req.memory_state, _preprocessed=_pp_entries)
-        response["confidence_calibration_check"] = _cc_check["confidence_calibration"]
-        response["cc_flags"] = _cc_check.get("cc_flags", [])
-        response["cc_signals"] = _cc_check.get("cc_signals", {})
+        _cal_check = _check_confidence_calibration(req.memory_state, _preprocessed=_pp_entries)
+        response["confidence_calibration_check"] = _cal_check["confidence_calibration"]
+        response["cc_flags"] = _cal_check.get("cc_flags", [])
+        response["cc_signals"] = _cal_check.get("cc_signals", {})
         # Corroboration gate
-        if _cc_check["confidence_calibration"] == "MANIPULATED":
+        if _cal_check["confidence_calibration"] == "MANIPULATED":
             _cc_other_layers = (
                 response.get("timestamp_integrity", "VALID") not in ("VALID", "CLEAN") or
                 response.get("identity_drift", "CLEAN") != "CLEAN" or
@@ -12441,12 +12441,12 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             )
             if not _cc_other_layers:
                 response["confidence_calibration_check"] = "SUSPICIOUS"
-                _cc_check["confidence_calibration"] = "SUSPICIOUS"
-        if _cc_check["confidence_calibration"] in ("MANIPULATED", "SUSPICIOUS"):
+                _cal_check["confidence_calibration"] = "SUSPICIOUS"
+        if _cal_check["confidence_calibration"] in ("MANIPULATED", "SUSPICIOUS"):
             repair_plan_out.append({
                 "action": "VERIFY_CONFIDENCE", "entry_id": "*",
                 "reason": "Confidence calibration anomaly — model confidence may exceed actual reliability.",
-                "priority": "critical" if _cc_check["confidence_calibration"] == "MANIPULATED" else "high",
+                "priority": "critical" if _cal_check["confidence_calibration"] == "MANIPULATED" else "high",
                 "projected_improvement": 0,
                 "success_probability": 0.8,
             })
