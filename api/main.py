@@ -16713,7 +16713,19 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 tenant=_pf_tenant,
             )
             if isinstance(_final, dict):
+                # Security monotonicity: plugin cannot downgrade the decision
+                _pre_plugin_action = response.get("recommended_action", "USE_MEMORY")
+                _pre_plugin_sev = _SEVERITY.get(_pre_plugin_action, 0)
                 response = _final
+                _post_plugin_action = response.get("recommended_action", "USE_MEMORY")
+                _post_plugin_sev = _SEVERITY.get(_post_plugin_action, 0)
+                if _post_plugin_sev < _pre_plugin_sev:
+                    response["recommended_action"] = _pre_plugin_action
+                    response["plugin_downgrade_blocked_complete"] = True
+                    logger.warning(
+                        "on_preflight_complete plugin tried to downgrade %s → %s — restored",
+                        _pre_plugin_action, _post_plugin_action,
+                    )
     except Exception as _pe:
         logger.debug("Plugin hooks failed: %s", _pe)
 
