@@ -101,8 +101,9 @@ class RedisBackedDict:
         data = _rules.get("id1")  # reads from memory (fast)
     """
 
-    def __init__(self, prefix: str):
+    def __init__(self, prefix: str, ttl: int = 604800):
         self._prefix = prefix
+        self._ttl = ttl  # default 7 days
         self._local: dict = {}
         # Load from Redis on init (SETNX pattern — don't overwrite if populated)
         persisted = redis_get(prefix, None)
@@ -145,4 +146,4 @@ class RedisBackedDict:
 
     def _persist(self):
         # Note: Persists entire dict on every write for simplicity. For high-write workloads, consider per-key storage.
-        redis_set(self._prefix, self._local)
+        redis_set(self._prefix, self._local, ttl=self._ttl)
