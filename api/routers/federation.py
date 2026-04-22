@@ -23,7 +23,7 @@ class FederationCheckRequest(BaseModel):
 @router.post("/v1/federation/contribute")
 def federation_contribute(req: FederationContributeRequest, key_record: dict = Depends(verify_api_key)):
     """Contribute anonymized vaccine to shared federation."""
-    _sig = req.vaccine_signature[:16]
+    _sig = hashlib.sha256(req.vaccine_signature.encode()).hexdigest()[:16]
     entry = {"signature": _sig, "attack_type": req.attack_type,
              "domain": req.domain, "contributed_by": "anonymous", "contributed_at": _time.time()}
     _evict_if_full(_federation_registry, "_federation_registry")
