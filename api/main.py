@@ -15087,6 +15087,33 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             _set_action(DecisionAction.BLOCK, "action_type_escalation",
                         f"SUSPICIOUS detection on {req.action_type} action — escalated to BLOCK")
 
+    # Append detection-layer entries to override chain based on what actually fired
+    _det_check_layers = [
+        ("timestamp_integrity", "VALID", "detection_timestamp"),
+        ("identity_drift", "CLEAN", "detection_identity"),
+        ("consensus_collapse", "CLEAN", "detection_consensus"),
+        ("provenance_chain_integrity", "CLEAN", "detection_provenance"),
+        ("sync_bleed", "CLEAN", "detection_sync_bleed"),
+        ("confidence_calibration_check", "CLEAN", "detection_confidence_calibration"),
+        ("naturalness_level", "ORGANIC", "detection_naturalness"),
+    ]
+    for _det_key, _det_clean, _det_source in _det_check_layers:
+        _det_val = response.get(_det_key, _det_clean)
+        if _det_val != _det_clean:
+            _override_chain.append({"source": _det_source, "action": response.get("recommended_action", "USE_MEMORY"),
+                                    "applied": True, "detection_level": _det_val})
+    if req.action_type in ("destructive", "irreversible") and response.get("recommended_action") == "BLOCK":
+        _any_det_fired = any(response.get(k, c) != c for k, c, _ in _det_check_layers)
+        if _any_det_fired:
+            _override_chain.append({"source": "action_type_escalation", "action": "BLOCK", "applied": True})
+    # Re-mark final winner after detection entries
+    if len(_override_chain) > 1:
+        _winner = _override_chain[-1]
+        for _oc in _override_chain:
+            _oc["applied"] = (_oc is _winner)
+        _override_chain[0]["applied"] = False
+    response["action_override_chain"] = _override_chain
+
     # Deferred vaccination — detection-layer BLOCKs that fired after the
     # original vaccination check at line 12634 need to store signatures too.
     if _redis_enabled and response.get("recommended_action") == "BLOCK" and not response.get("vaccination_match"):
