@@ -160,7 +160,7 @@ def _check_timestamp_integrity(memory_state: list, _preprocessed: list = None) -
             _flags.append("fleet_age_collapse:suspicious")
             _risk = max(_risk, 0.4)
 
-    # PATTERN 4 — Anchor inconsistency
+    # PATTERN 3 — Anchor inconsistency
     for entry in _entries:
         ds = entry.get("downstream_count", 0)
         age = entry.get("timestamp_age_days", 0) or 0
