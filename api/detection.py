@@ -58,7 +58,7 @@ _SECRET_PATTERNS = [
     (re.compile(r'ghp_[a-zA-Z0-9]{36,}'), "GitHub personal access token"),
     (re.compile(r'AKIA[A-Z0-9]{16}'), "AWS access key"),
     (re.compile(r'xox[bpras]-[a-zA-Z0-9\-]{20,}'), "Slack token"),
-    (re.compile(r'[a-zA-Z0-9_\-]{40,64}', re.ASCII), "likely secret or API key"),
+    (re.compile(r'\b[a-zA-Z0-9_\-]{48,64}\b', re.ASCII), "likely secret or API key"),
 ]
 
 
