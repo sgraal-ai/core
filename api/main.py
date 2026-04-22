@@ -3638,60 +3638,6 @@ def serve_embed_js():
     return Response(content=_EMBED_JS, media_type="application/javascript")
 
 
-# ---- GitHub OAuth ----
-
-GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
-GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
-
-
-@app.get("/v1/auth/github")
-def github_oauth_start():
-    """Redirect to GitHub OAuth authorization."""
-    if not GITHUB_CLIENT_ID:
-        return {"error": "GitHub OAuth not configured", "detail": "Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET env vars"}
-    return RedirectResponse(
-        url=f"https://github.com/login/oauth/authorize?client_id={GITHUB_CLIENT_ID}&scope=user:email",
-        status_code=302)
-
-
-@app.get("/v1/auth/github/callback")
-def github_oauth_callback(code: str = Query(...)):
-    """Exchange GitHub OAuth code for API key."""
-    if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
-        raise HTTPException(status_code=503, detail="GitHub OAuth not configured")
-    try:
-        # Exchange code for token
-        token_resp = http_requests.post("https://github.com/login/oauth/access_token",
-            json={"client_id": GITHUB_CLIENT_ID, "client_secret": GITHUB_CLIENT_SECRET, "code": code},
-            headers={"Accept": "application/json"}, timeout=10)
-        access_token = token_resp.json().get("access_token")
-        if not access_token:
-            raise HTTPException(status_code=400, detail="GitHub OAuth failed")
-        # Get user info
-        user_resp = http_requests.get("https://api.github.com/user",
-            headers={"Authorization": f"token {access_token}"}, timeout=10)
-        user = user_resp.json()
-        email = user.get("email") or f"{user.get('login')}@github.com"
-        username = user.get("login", "unknown")
-        # Create or retrieve API key
-        api_key = _generate_api_key()
-        key_hash = _hash_key(api_key)
-        if supabase_service_client:
-            try:
-                supabase_service_client.table("api_keys").insert({
-                    "key_hash": key_hash, "customer_id": f"github_{username}",
-                    "email": email, "tier": "free", "calls_this_month": 0,
-                }).execute()
-                redis_set(f"api_key_valid:{key_hash[:16]}", {"valid": True, "user_id": f"github_{username}", "plan": "free"}, ttl=300)
-            except Exception:
-                pass
-        return {"api_key": api_key, "email": email, "github_username": username}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"GitHub OAuth error: {str(e)}")
-
-
 # ---- Playground Share ----
 
 @app.get("/v1/playground/share")
