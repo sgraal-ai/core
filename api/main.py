@@ -15010,7 +15010,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     if _id_drift == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_identity", "MANIPULATED flag")
     elif _id_drift == "SUSPICIOUS":
-        _id_sev_map = {"USE_MEMORY": "WARN", "WARN": "BLOCK", "ASK_USER": "BLOCK"}
+        _id_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER", "ASK_USER": "BLOCK"}
         _id_cur = response["recommended_action"]
         if _id_cur in _id_sev_map:
             _set_action(_id_sev_map[_id_cur], "detection_identity", "SUSPICIOUS escalation")
