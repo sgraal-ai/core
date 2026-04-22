@@ -47,7 +47,8 @@ def redis_get(key: str, default=None):
         return default
     try:
         s = _get_session()
-        r = s.get(f"{UPSTASH_REDIS_URL}/GET/{key}", timeout=2)
+        _enc_key = urllib.parse.quote(key, safe='')
+        r = s.get(f"{UPSTASH_REDIS_URL}/GET/{_enc_key}", timeout=2)
         if r.ok and r.json().get("result"):
             return json.loads(r.json()["result"])
     except Exception as e:
@@ -61,7 +62,8 @@ def redis_set(key: str, value, ttl: int = 0):
     try:
         s = _get_session()
         data = json.dumps(value)
-        url = f"{UPSTASH_REDIS_URL}/SET/{key}/{urllib.parse.quote(data, safe='')}"
+        _enc_key = urllib.parse.quote(key, safe='')
+        url = f"{UPSTASH_REDIS_URL}/SET/{_enc_key}/{urllib.parse.quote(data, safe='')}"
         if ttl > 0:
             url += f"/EX/{ttl}"
         s.post(url, timeout=2)
@@ -74,7 +76,8 @@ def redis_delete(key: str):
         return
     try:
         s = _get_session()
-        s.post(f"{UPSTASH_REDIS_URL}/DEL/{key}", timeout=2)
+        _enc_key = urllib.parse.quote(key, safe='')
+        s.post(f"{UPSTASH_REDIS_URL}/DEL/{_enc_key}", timeout=2)
     except Exception as e:
         logger.debug("redis_delete %s failed: %s", key, e)
 
@@ -85,9 +88,10 @@ def redis_setnx(key: str, value, ttl: int = 0):
     try:
         s = _get_session()
         data = json.dumps(value)
-        r = s.post(f"{UPSTASH_REDIS_URL}/SETNX/{key}/{urllib.parse.quote(data, safe='')}", timeout=2)
+        _enc_key = urllib.parse.quote(key, safe='')
+        r = s.post(f"{UPSTASH_REDIS_URL}/SETNX/{_enc_key}/{urllib.parse.quote(data, safe='')}", timeout=2)
         if r.ok and r.json().get("result", 0) == 1 and ttl > 0:
-            s.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{key}/{ttl}", timeout=2)
+            s.post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_enc_key}/{ttl}", timeout=2)
     except Exception as e:
         logger.debug("redis_setnx %s failed: %s", key, e)
 
