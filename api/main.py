@@ -80,7 +80,7 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 ATTESTATION_SECRET = os.getenv("ATTESTATION_SECRET", "")
-if not ATTESTATION_SECRET and os.getenv("SGRAAL_TEST_MODE"):
+if not ATTESTATION_SECRET and os.getenv("SGRAAL_TEST_MODE", "").lower() in ("1", "true", "yes"):
     ATTESTATION_SECRET = "dev_attestation_not_for_production"
 
 # #39: Signal vector logging to Redis — disabled by default (storage cost with no reader).
@@ -1076,7 +1076,7 @@ def exchange_oauth_token(token: str, request: Request):
         raise HTTPException(status_code=404, detail="Token not found or expired")
 
     # Delete token immediately (one-time use)
-    redis_set(f"oauth_token:{token}", None, ttl=1)
+    redis_delete(f"oauth_token:{token}")
     _exchange_attempts.pop(ip, None)
     return {"api_key": data["api_key"], "email": data.get("email", "")}
 

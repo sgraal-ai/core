@@ -5,7 +5,7 @@ import time as _time
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api.main import verify_api_key, _federation_registry, _evict_if_full
+from api.main import verify_api_key, _federation_registry, _evict_if_full, _safe_key_hash
 
 router = APIRouter(tags=["federation"])
 
@@ -24,7 +24,7 @@ class FederationCheckRequest(BaseModel):
 def federation_contribute(req: FederationContributeRequest, key_record: dict = Depends(verify_api_key)):
     """Contribute anonymized vaccine to shared federation."""
     _sig = hashlib.sha256(req.vaccine_signature.encode()).hexdigest()[:32]
-    _key_hash = key_record.get("key_hash", "anonymous")
+    _key_hash = _safe_key_hash(key_record)
     entry = {"signature": _sig, "attack_type": req.attack_type,
              "domain": req.domain, "contributed_by": _key_hash, "contributed_at": _time.time()}
     _evict_if_full(_federation_registry, "_federation_registry")
