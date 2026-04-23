@@ -2503,6 +2503,8 @@ def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify
     _kh = _safe_key_hash(key_record)
     try:
         _proof_val = _cert_proof_value(cert.get("credentialSubject", {}), _kh)
+    except HTTPException:
+        raise
     except Exception:
         _proof_val = ""
     cert["proof"] = {
@@ -2616,9 +2618,12 @@ def export_lineage(format: str = Query("graphml"), agent_id: Optional[str] = Non
                    limit: int = Query(50, le=200), key_record: dict = Depends(verify_api_key)):
     """Export memory lineage graph in GraphML, JSON, or DOT format."""
     # Build nodes/edges from recent outcomes
+    _kh = _safe_key_hash(key_record)
     nodes = []
     edges = []
     for _oid, _od in list(_outcomes.items())[-limit:]:
+        if _od.get("key_hash") != _kh:
+            continue
         if agent_id and _od.get("agent_id") != agent_id:
             continue
         _ms = _od.get("memory_state", [])
@@ -2930,6 +2935,7 @@ def attack_surface_trend(days: int = Query(30), tenant: TenantContext = Depends(
 @app.get("/v1/analytics/sankey")
 def analytics_sankey(key_record: dict = Depends(verify_api_key)):
     """Sankey diagram data: domain → attack_surface → decision."""
+    _kh = _safe_key_hash(key_record)
     _domains = ["general", "fintech", "medical", "legal", "coding", "customer_support"]
     _levels = ["NONE", "LOW", "MODERATE", "HIGH", "CRITICAL"]
     _decisions = ["USE_MEMORY", "WARN", "ASK_USER", "BLOCK"]
@@ -2937,6 +2943,8 @@ def analytics_sankey(key_record: dict = Depends(verify_api_key)):
     links = []
     # Build from recent outcomes
     for _od in list(_outcomes.values())[-500:]:
+        if _od.get("key_hash") != _kh:
+            continue
         _dom = _od.get("domain", "general")
         _asl = _od.get("attack_surface_level", "NONE")
         _dec = _od.get("recommended_action", "USE_MEMORY")
