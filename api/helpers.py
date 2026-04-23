@@ -337,12 +337,13 @@ def _check_public_rate_limit(request: Request, endpoint_name: str,
         if not incr_r.ok:
             return {"count": 0, "remaining": _PUBLIC_RL_LIMIT}
         count = int(incr_r.json().get("result", 0))
-        # Always renew TTL to prevent orphaned keys without expiry
-        http_requests.post(
-            f"{upstash_url}/EXPIRE/{rl_key}/{_PUBLIC_RL_WINDOW}",
-            headers={"Authorization": f"Bearer {upstash_token}"},
-            timeout=1,
-        )
+        # Set TTL only on first request in window to prevent sliding window bypass
+        if count == 1:
+            http_requests.post(
+                f"{upstash_url}/EXPIRE/{rl_key}/{_PUBLIC_RL_WINDOW}",
+                headers={"Authorization": f"Bearer {upstash_token}"},
+                timeout=1,
+            )
         remaining = max(0, _PUBLIC_RL_LIMIT - count)
         if count > _PUBLIC_RL_LIMIT:
             reset_ts = int(_time.time()) + _PUBLIC_RL_WINDOW
