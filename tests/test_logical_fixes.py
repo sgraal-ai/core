@@ -72,13 +72,16 @@ class TestIdentityDriftCrossEntry:
 
 class TestHedgeMarkerOrder:
     def test_hedge_marker_reversed_downstream(self):
-        """Fix 14: Reversed downstream order → still sorts internally."""
+        """Fix 14: Reversed downstream order → still sorts internally.
+        Requires at least 4 entries (2+ on each side of the midpoint)."""
         entries = [
             _e(id="m1", content="Settlement confirmed. Execute immediately.",
                downstream=20, trust=0.90, conflict=0.02),
-            _e(id="m2", content="Settlement likely approved per review.",
+            _e(id="m2", content="Settlement finalized and processed.",
+               downstream=15, trust=0.90, conflict=0.02),
+            _e(id="m3", content="Settlement likely approved per review.",
                downstream=3, trust=0.88, conflict=0.03),
-            _e(id="m3", content="Settlement possibly approved.",
+            _e(id="m4", content="Settlement possibly approved.",
                downstream=1, trust=0.87, conflict=0.04),
         ]
         from api.main import _check_consensus_collapse

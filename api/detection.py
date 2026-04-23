@@ -116,10 +116,10 @@ def _check_timestamp_integrity(memory_state: list, _preprocessed: list = None) -
     _entries = _preprocessed if _preprocessed else _preprocess_entries(memory_state)
 
     # PATTERN 1 — Content-age mismatch
-    _past_year_pat = re.compile(r'\b(20[0-2][0-9])\b')
+    _past_year_pat = re.compile(r'\b(20[0-9][0-9])\b')
     _temporal_markers = [
         r'\b(last year|previous year|earlier this year)\b',
-        r'\bQ[1-4]\s*20[0-2][0-9]\b',
+        r'\bQ[1-4]\s*20[0-9][0-9]\b',
         r'\b(deprecated|legacy|obsolete|end-of-life|sunset)\b',
         r'\b(v[0-9]+\.[0-9]+|version\s+[0-9]+)\b',
         r'\b(was|were|had been|used to)\b.{0,30}\b(required|mandatory|recommended)\b',
@@ -362,7 +362,7 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
                 _similar_groups.add(i)
                 _similar_groups.add(j)
 
-    n_similar = max(len(_similar_groups), 1)
+    n_similar = len(_similar_groups)
 
     # Count independent roots via content clusters
     _content_clusters = []
@@ -378,7 +378,7 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
             _content_clusters.append([i])
     independent_roots = max(len(_content_clusters), 1)
 
-    collapse_ratio = round(n_similar / independent_roots, 2) if independent_roots > 0 else 0.0
+    collapse_ratio = round(n_similar / independent_roots, 2) if independent_roots > 0 and n_similar > 0 else 0.0
 
     if collapse_ratio >= 5.0:
         _flags.append("collapse_ratio:manipulated")
@@ -397,8 +397,9 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
         words = set(e.get("content", "").lower().split())
         hedge_present.append(bool(words & _hedge_words))
 
-    if n >= 3 and any(hedge_present[:n//2 + 1]) and not any(hedge_present[n//2 + 1:]):
-        # Early entries have hedges, later entries don't
+    _mid = n // 2
+    if n >= 4 and _mid >= 2 and (n - _mid) >= 2 and any(hedge_present[:_mid]) and not any(hedge_present[_mid:]):
+        # Early entries have hedges, later entries don't — require at least 2 entries on each side
         _flags.append("uncertainty_hardening:suspicious")
         _risk = max(_risk, 0.5)
 

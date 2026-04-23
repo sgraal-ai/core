@@ -31,13 +31,15 @@ def _preflight(entries, domain="general", action_type="informational"):
 
 class TestCollapseRatio:
     def test_redundant_summarization_detected(self):
-        """3 similar entries, same trust+downstream → high collapse ratio."""
+        """4 similar entries sharing most tokens, same trust+downstream → high collapse ratio."""
         entries = [
-            _e(id="m1", content="Settlement netting likely approved for this transaction.",
+            _e(id="m1", content="Settlement netting approved transaction processing confirmed",
                trust=0.90, conflict=0.02, downstream=3),
-            _e(id="m2", content="Settlement netting appears approved per prior review.",
+            _e(id="m2", content="Settlement netting approved transaction review confirmed",
                trust=0.90, conflict=0.02, downstream=3),
-            _e(id="m3", content="Settlement netting confirmed and approved. No further review.",
+            _e(id="m3", content="Settlement netting approved transaction completed confirmed",
+               trust=0.90, conflict=0.02, downstream=3),
+            _e(id="m4", content="Settlement netting approved transaction executed confirmed",
                trust=0.90, conflict=0.02, downstream=3),
         ]
         result = _call_check(entries)
@@ -70,13 +72,16 @@ class TestCollapseRatio:
 
 class TestUncertaintyHardening:
     def test_modal_collapse_detected(self):
-        """Hedge markers in early entries, stripped in later → SUSPICIOUS."""
+        """Hedge markers in early entries, stripped in later → SUSPICIOUS.
+        Requires at least 4 entries (2+ on each side of the midpoint)."""
         entries = [
             _e(id="m1", content="Counterparty has likely approved the settlement terms.",
-               downstream=3, trust=0.88, conflict=0.03),
+               downstream=2, trust=0.88, conflict=0.03),
             _e(id="m2", content="Settlement terms possibly approved per initial review.",
-               downstream=5, trust=0.88, conflict=0.03),
+               downstream=3, trust=0.88, conflict=0.03),
             _e(id="m3", content="Settlement terms approved. Execute immediately.",
+               downstream=10, trust=0.88, conflict=0.03),
+            _e(id="m4", content="Settlement confirmed and fully executed.",
                downstream=18, trust=0.88, conflict=0.03),
         ]
         result = _call_check(entries)
