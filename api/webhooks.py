@@ -44,10 +44,11 @@ def _resolve_url_from_cache(url: str) -> str:
         if hostname and hostname in _dns_cache:
             cached_ip, cached_ts = _dns_cache[hostname]
             if _time.time() - cached_ts < _DNS_CACHE_TTL:
-                # Replace hostname with cached IP, set Host header via the URL
+                # Replace only the netloc to avoid corrupting hostnames that appear in the path
                 port = parsed.port
-                port_str = f":{port}" if port else ""
-                return url.replace(f"://{hostname}{port_str}", f"://{cached_ip}{port_str}"), hostname
+                new_netloc = f"{cached_ip}:{port}" if port else cached_ip
+                resolved = parsed._replace(netloc=new_netloc)
+                return urllib.parse.urlunparse(resolved), hostname
         return url, None
     except Exception:
         return url, None
