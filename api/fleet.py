@@ -103,6 +103,7 @@ OPSGENIE_API_KEY = os.getenv("OPSGENIE_API_KEY")
 def _track_block_rate(is_block: bool, agent_id: str = "", omega: float = 0):
     global _last_incident_time
     now = _time.time()
+    incident_data = None
     with _block_rate_lock:
         _block_rate_window.append((now, is_block, agent_id, omega))
         # Prune older than 5 minutes
@@ -116,7 +117,7 @@ def _track_block_rate(is_block: bool, agent_id: str = "", omega: float = 0):
 
         if rate > 0.5 and now - _last_incident_time > _INCIDENT_DEDUP_SECONDS:
             _last_incident_time = now
-            # Top 3 affected agents
+            # Top 3 affected agents — capture data inside lock
             agent_scores = {}
             for _, is_b, aid, om in _block_rate_window:
                 if is_b and aid:
@@ -124,23 +125,30 @@ def _track_block_rate(is_block: bool, agent_id: str = "", omega: float = 0):
             top3 = sorted(agent_scores.items(), key=lambda x: x[1], reverse=True)[:3]
             title = f"Sgraal BLOCK rate spike: {rate*100:.0f}% in last 5 minutes ({len(agent_scores)} agents affected)"
             body = "Top affected agents:\n" + "\n".join(f"  {a}: omega={o:.1f}" for a, o in top3)
+            incident_data = {"title": title, "body": body, "rate": rate, "top3": top3}
 
-            if PAGERDUTY_ROUTING_KEY:
-                try:
-                    http_requests.post("https://events.pagerduty.com/v2/enqueue", json={
-                        "routing_key": PAGERDUTY_ROUTING_KEY,
-                        "event_action": "trigger",
-                        "payload": {"summary": title, "source": "sgraal-api", "severity": "critical",
-                                    "custom_details": {"block_rate": rate, "agents": dict(top3)}},
-                    }, timeout=5)
-                except Exception as e:
-                    logger.error("PagerDuty incident creation failed: %s", e)
-            elif OPSGENIE_API_KEY:
-                try:
-                    http_requests.post("https://api.opsgenie.com/v2/alerts", json={
-                        "message": title, "description": body, "priority": "P1",
-                    }, headers={"Authorization": f"GenieKey {OPSGENIE_API_KEY}"}, timeout=5)
-                except Exception as e:
-                    logger.error("OpsGenie alert creation failed: %s", e)
-            else:
-                logger.warning("BLOCK RATE SPIKE: %s — no PagerDuty/OpsGenie configured", title)
+    # HTTP calls outside the lock to avoid blocking concurrent callers
+    if incident_data is not None:
+        title = incident_data["title"]
+        body = incident_data["body"]
+        rate = incident_data["rate"]
+        top3 = incident_data["top3"]
+        if PAGERDUTY_ROUTING_KEY:
+            try:
+                http_requests.post("https://events.pagerduty.com/v2/enqueue", json={
+                    "routing_key": PAGERDUTY_ROUTING_KEY,
+                    "event_action": "trigger",
+                    "payload": {"summary": title, "source": "sgraal-api", "severity": "critical",
+                                "custom_details": {"block_rate": rate, "agents": dict(top3)}},
+                }, timeout=5)
+            except Exception as e:
+                logger.error("PagerDuty incident creation failed: %s", e)
+        elif OPSGENIE_API_KEY:
+            try:
+                http_requests.post("https://api.opsgenie.com/v2/alerts", json={
+                    "message": title, "description": body, "priority": "P1",
+                }, headers={"Authorization": f"GenieKey {OPSGENIE_API_KEY}"}, timeout=5)
+            except Exception as e:
+                logger.error("OpsGenie alert creation failed: %s", e)
+        else:
+            logger.warning("BLOCK RATE SPIKE: %s — no PagerDuty/OpsGenie configured", title)
