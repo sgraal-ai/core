@@ -76,6 +76,10 @@ class TestOwns:
     def test_custom_key_field(self):
         assert _ctx().owns({"tenant_id": "abc123"}, key_field="tenant_id") is True
 
+    def test_empty_key_hash_returns_false(self):
+        ctx = TenantContext(key_hash="", customer_id="c", is_demo=False)
+        assert ctx.owns({"key_hash": ""}) is False
+
 
 class TestAssertOwns:
     def test_passes_for_owner(self):
@@ -102,12 +106,18 @@ class TestTag:
         item = {"id": "1"}
         result = _ctx().tag(item)
         assert result["key_hash"] == "abc123"
-        assert result is item  # Same dict, mutated in place
+        assert result is not item  # Returns new dict, does not mutate original
+
+    def test_does_not_mutate_original(self):
+        item = {"id": "1"}
+        _ctx().tag(item)
+        assert "key_hash" not in item  # Original unchanged
 
     def test_overwrites_existing(self):
         item = {"key_hash": "old"}
-        _ctx().tag(item)
-        assert item["key_hash"] == "abc123"
+        result = _ctx().tag(item)
+        assert result["key_hash"] == "abc123"
+        assert item["key_hash"] == "old"  # Original unchanged
 
 
 class TestSupabaseFilter:

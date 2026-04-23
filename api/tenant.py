@@ -42,6 +42,8 @@ class TenantContext:
         """Check if a dict item belongs to this tenant. Returns False for None or missing key."""
         if not isinstance(item, dict):
             return False
+        if not self.key_hash:
+            return False  # Cannot verify ownership with empty key_hash
         stored = item.get(key_field)
         if not stored:
             return False
@@ -56,9 +58,8 @@ class TenantContext:
             raise HTTPException(status_code=403, detail=detail)
 
     def tag(self, item: dict) -> dict:
-        """Add key_hash to an item before storage. Returns the same dict (mutated)."""
-        item["key_hash"] = self.key_hash
-        return item
+        """Add key_hash to an item before storage. Returns a new dict (immutable)."""
+        return {**item, "key_hash": self.key_hash}
 
     def supabase_filter(self, url: str) -> str:
         """Append api_key_hash=eq.{key_hash} filter to a Supabase REST URL."""
@@ -76,8 +77,11 @@ def create_tenant_context(key_record: dict, safe_key_hash_fn) -> TenantContext:
     in api/main.py:
         tenant: TenantContext = Depends(get_tenant_context)
     """
+    key_hash = safe_key_hash_fn(key_record)
+    if not key_hash:
+        raise ValueError("safe_key_hash_fn returned empty hash — cannot create TenantContext")
     return TenantContext(
-        key_hash=safe_key_hash_fn(key_record),
+        key_hash=key_hash,
         customer_id=key_record.get("customer_id", ""),
         is_demo=key_record.get("demo", False),
     )

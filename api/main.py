@@ -4452,7 +4452,7 @@ def submit_async_batch(req: AsyncBatchRequest, key_record: dict = Depends(verify
     est = max(1, len(req.entries) // 100)
     _async_jobs[job_id] = {"status": "queued", "progress": 0, "result": None,
                             "entries": len(req.entries), "expires_at": _time.time() + 3600}
-    tenant.tag(_async_jobs[job_id])
+    _async_jobs[job_id] = tenant.tag(_async_jobs[job_id])
 
     # Process synchronously for now (BackgroundTasks would need async context)
     try:
@@ -4461,7 +4461,7 @@ def submit_async_batch(req: AsyncBatchRequest, key_record: dict = Depends(verify
             results.append({"id": entry_data.get("id", f"e{i}"), "omega_mem_final": 0, "recommended_action": "USE_MEMORY"})
         _async_jobs[job_id] = {"status": "complete", "progress": 100, "result": {"results": results, "total": len(req.entries)},
                                 "expires_at": _time.time() + 3600}
-        tenant.tag(_async_jobs[job_id])
+        _async_jobs[job_id] = tenant.tag(_async_jobs[job_id])
     except Exception:
         _async_jobs[job_id]["status"] = "failed"
 
@@ -6319,7 +6319,7 @@ def simulate_twin(req: TwinRequest, key_record: dict = Depends(verify_api_key),
         _twin_jobs[job_id] = {"status": "complete", "result": cf_result, "created_at": _time.time()}
     except Exception as _te:
         _twin_jobs[job_id] = {"status": "failed", "error": str(_te)[:200], "created_at": _time.time()}
-    tenant.tag(_twin_jobs[job_id])
+    _twin_jobs[job_id] = tenant.tag(_twin_jobs[job_id])
     redis_set(f"twin_job:{job_id}", _twin_jobs[job_id], ttl=300)
     return {"job_id": job_id, "status": "processing"}
 
@@ -6845,7 +6845,7 @@ def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api
                "z3_proof": _z3_proof, "explanation": f"Winner has omega={scored[0]['omega']:.1f}, most reliable by {len(scored)} entry analysis",
                "overridable": False, "authority": "formal_verification",
                "created_at": datetime.now(timezone.utc).isoformat()}
-    tenant.tag(verdict)
+    verdict = tenant.tag(verdict)
     _evict_if_full(_court_verdicts, "_court_verdicts")
     _court_verdicts[vid] = verdict
     _persist_store(f"court_verdict:{vid}", verdict, ttl=90*86400)
@@ -7349,7 +7349,7 @@ def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_a
         result = {"forensics_id": fid, "timeline": [], "root_cause": "insufficient_data",
                   "recommendation": "Enable audit logging and retry after sufficient activity is recorded.",
                   "root_cause_entry_id": None, "affected_decisions": 0, "contamination_chain": []}
-        tenant.tag(result)
+        result = tenant.tag(result)
         _forensics[fid] = result
         _persist_store(f"forensics_report:{fid}", result, ttl=90*86400)
         return result
@@ -7360,7 +7360,7 @@ def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_a
               "root_cause_entry_id": root_cause_entry, "affected_decisions": len(timeline),
               "contamination_chain": chain, "recommendation": f"Quarantine {root_cause_entry} and re-verify downstream",
               "forensics_report_url": f"/v1/forensics/{fid}/report"}
-    tenant.tag(result)
+    result = tenant.tag(result)
     _forensics[fid] = result
     _persist_store(f"forensics_report:{fid}", result, ttl=90*86400)
     return result
@@ -7443,7 +7443,7 @@ def create_lifecycle_policy(req: LifecyclePolicyRequest, key_record: dict = Depe
     _check_rate_limit(key_record)
     _policy_key = tenant.scoped_key(req.agent_id)
     _policy_data = {**req.model_dump()}
-    tenant.tag(_policy_data)
+    _policy_data = tenant.tag(_policy_data)
     _lifecycle_policies[_policy_key] = _policy_data
     _persist_store(f"lifecycle_policy:{_policy_key}", _policy_data)
     return {"created": True, "agent_id": req.agent_id, "policy": req.model_dump()}
@@ -11076,7 +11076,7 @@ def register_webhook(req: WebhookRegisterRequest, key_record: dict = Depends(ver
         "target": req.target,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    tenant.tag(webhook)
+    webhook = tenant.tag(webhook)
     _webhooks.append(webhook)
     return {
         "webhook_id": webhook["id"],
