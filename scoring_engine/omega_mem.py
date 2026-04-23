@@ -326,13 +326,15 @@ def compute(
         note += " Weak model belief — verify with user before relying on this memory."
 
     # Tier 1 self-healing: generate repair plan
+    # Use _applied_weights (which incorporates custom_weights) for improvement estimates
+    _used_weights = _applied_weights
     repair_plan: list[HealingAction] = []
     for e in entries:
         entry_freshness = _weibull_decay(e.timestamp_age_days, e.type)
         entry_interference = e.source_conflict * 100
 
         if entry_freshness > 60:
-            improvement = round(entry_freshness * WEIGHTS["s_freshness"] * c / len(entries), 1)
+            improvement = round(entry_freshness * _used_weights.get("s_freshness", 0) * c / len(entries), 1)
             repair_plan.append(HealingAction(
                 action="REFETCH",
                 entry_id=e.id,
@@ -342,7 +344,7 @@ def compute(
             ))
 
         if entry_interference > 50:
-            improvement = round(entry_interference * WEIGHTS["s_interference"] * c / len(entries), 1)
+            improvement = round(entry_interference * _used_weights.get("s_interference", 0) * c / len(entries), 1)
             repair_plan.append(HealingAction(
                 action="VERIFY_WITH_SOURCE",
                 entry_id=e.id,
@@ -353,7 +355,7 @@ def compute(
 
         if e.r_belief < 0.3:
             belief_risk = (1 - e.r_belief) * 100
-            improvement = round(belief_risk * WEIGHTS["r_belief"] * c / len(entries), 1)
+            improvement = round(belief_risk * _used_weights.get("r_belief", 0) * c / len(entries), 1)
             repair_plan.append(HealingAction(
                 action="REBUILD_WORKING_SET",
                 entry_id=e.id,
