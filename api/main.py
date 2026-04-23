@@ -11062,7 +11062,8 @@ def heal(req: HealRequest, key_record: dict = Depends(verify_api_key)):
 
 
 @app.post("/v1/webhooks")
-def register_webhook(req: WebhookRegisterRequest, key_record: dict = Depends(verify_api_key)):
+def register_webhook(req: WebhookRegisterRequest, key_record: dict = Depends(verify_api_key),
+                     tenant: TenantContext = Depends(get_tenant_context)):
     _check_rate_limit(key_record)
     _validate_webhook_url(req.url)
     webhook = {
@@ -11073,6 +11074,7 @@ def register_webhook(req: WebhookRegisterRequest, key_record: dict = Depends(ver
         "target": req.target,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    tenant.tag(webhook)
     _webhooks.append(webhook)
     return {
         "webhook_id": webhook["id"],
@@ -11083,22 +11085,24 @@ def register_webhook(req: WebhookRegisterRequest, key_record: dict = Depends(ver
     }
 
 @app.get("/v1/webhooks")
-def list_webhooks(key_record: dict = Depends(verify_api_key)):
+def list_webhooks(tenant: TenantContext = Depends(get_tenant_context)):
+    owned = tenant.filter_list(_webhooks)
     return {
         "webhooks": [
             {"id": w["id"], "url": w["url"], "events": w["events"], "target": w["target"]}
-            for w in _webhooks
+            for w in owned
         ],
-        "total": len(_webhooks),
+        "total": len(owned),
     }
 
 @app.delete("/v1/webhooks/{webhook_id}")
-def delete_webhook(webhook_id: str, key_record: dict = Depends(verify_api_key)):
+def delete_webhook(webhook_id: str, tenant: TenantContext = Depends(get_tenant_context)):
     global _webhooks
-    before = len(_webhooks)
-    _webhooks = [w for w in _webhooks if w["id"] != webhook_id]
-    if len(_webhooks) == before:
+    target = next((w for w in _webhooks if w["id"] == webhook_id), None)
+    if not target:
         raise HTTPException(status_code=404, detail=f"Webhook {webhook_id} not found")
+    tenant.assert_owns(target)
+    _webhooks = [w for w in _webhooks if w["id"] != webhook_id]
     return {"deleted": True, "webhook_id": webhook_id}
 
 
