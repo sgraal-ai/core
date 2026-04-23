@@ -12,12 +12,12 @@ Sgraal is a memory governance protocol for AI agents. It provides a preflight sc
 
 ```
 api/
-├── main.py              16,824 lines  — preflight orchestration, endpoint handlers, Pydantic models
-├── detection.py            676 lines  — 4 detection layers, naturalness, secret patterns, attack surface
+├── main.py             ~17,200 lines  — preflight orchestration, endpoint handlers, Pydantic models
+├── detection.py           ~870 lines  — 6 detection layers, naturalness, secret patterns, attack surface
 ├── helpers.py              354 lines  — dict management, SSRF validation, anomaly detection, rate limiting
-├── webhooks.py             147 lines  — webhook dispatch, Slack/PagerDuty formatters, HMAC signing
-├── vaccination.py          143 lines  — AES-256-GCM + XOR vaccine encryption/decryption
-├── fleet.py                139 lines  — Redis circuit breaker, PagerDuty/OpsGenie incident alerting
+├── webhooks.py             ~170 lines — webhook dispatch, DNS-pinned dispatch, Slack/PagerDuty formatters
+├── vaccination.py          143 lines  — AES-256-GCM vaccine encryption/decryption (XOR fallback removed)
+├── fleet.py                ~160 lines — Redis circuit breaker (thread-safe), PagerDuty/OpsGenie alerting
 ├── redis_state.py                    — Redis REST client (Upstash)
 └── routers/
     ├── guard.py                      — /v1/guard/* function-calling endpoints
@@ -54,20 +54,22 @@ A2 axiom: identical memory state + identical healing_counter = identical Ω_MEM 
 
 ### Detection layers (api/detection.py)
 
-4 post-reconciliation layers that cannot be overridden:
+6 post-reconciliation layers that cannot be overridden:
 1. `_check_timestamp_integrity` (Round 6) — content-age mismatch, fleet age collapse
 2. `_check_identity_drift` (Round 7) — authority expansion, subject rebinding
 3. `_check_consensus_collapse` (Round 8) — collapse ratio, federation asymmetry
-4. `_check_provenance_chain` (Round 9+) — circular refs, compromised agents
+4. `_check_provenance_chain` (Round 9+) — circular refs, compromised agents, PA signals
+5. `_check_sync_bleed` (Round 12) — stale/fresh version mixing, cross-version Jaccard
+6. `_check_confidence_calibration` (Round 12) — correlated consensus, stale-but-confident, model confidence divergence
 
-All MANIPULATED → BLOCK. `_compute_attack_surface_score` composites all 4 layers.
+All MANIPULATED → BLOCK. Corroboration gates prevent single-signal escalation. `_compute_attack_surface_score` composites all 6 layers. Plugin `on_preflight_complete` hook enforces security monotonicity (cannot downgrade decisions).
 
 ### Other key subsystems
 
 - **Plugin system** — registry-only, per-tenant isolation, no remote code upload
 - **Edge mode** — `sgraal.edge` zero-dependency SDK for offline/embedded scoring
 - **W3C VCs** — `POST /v1/certify` issues SgraalProof2026 credentials
-- **Memory Vaccination** — attack signatures encrypted at rest (AES-256-GCM), fleet-wide immunity
+- **Memory Vaccination** — attack signatures encrypted at rest (AES-256-GCM), fleet-wide immunity, deferred vaccination after detection overrides
 - **RL Q-learning** — per-domain Q-tables, updated via `/v1/outcome`
 - **Bridge SDKs** (27 integrations) — cloudflare-sgraal, mem0-sgraal, sgraal-llamaindex, etc.
 - **MCP server** — `@sgraal/mcp` npm package for Claude Desktop
@@ -106,8 +108,10 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,545+ passing
+- pytest: 2,579 passing (as of 2026-04-23)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
+- Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate
+- R2 F1: 1.0000 (must not regress)
 
 ### Scoring weight note:
 - `s_recovery` has **negative weight** (-0.10) — intentional
