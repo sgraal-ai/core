@@ -12,13 +12,14 @@ Sgraal is a memory governance protocol for AI agents. It provides a preflight sc
 
 ```
 api/
-├── main.py             ~17,200 lines  — preflight orchestration, endpoint handlers, Pydantic models
+├── main.py             ~17,300 lines  — preflight orchestration, endpoint handlers, Pydantic models
+├── tenant.py                80 lines  — TenantContext for structural tenant isolation
 ├── detection.py           ~870 lines  — 6 detection layers, naturalness, secret patterns, attack surface
 ├── helpers.py              354 lines  — dict management, SSRF validation, anomaly detection, rate limiting
 ├── webhooks.py             ~170 lines — webhook dispatch, DNS-pinned dispatch, Slack/PagerDuty formatters
 ├── vaccination.py          143 lines  — AES-256-GCM vaccine encryption/decryption (XOR fallback removed)
 ├── fleet.py                ~160 lines — Redis circuit breaker (thread-safe), PagerDuty/OpsGenie alerting
-├── redis_state.py                    — Redis REST client (Upstash)
+├── redis_state.py                    — Redis REST client (Upstash), thread-safe session, large payload POST
 └── routers/
     ├── guard.py                      — /v1/guard/* function-calling endpoints
     ├── vaccines.py          62 lines — /v1/vaccines/*, /v1/compromised-agents/*
@@ -108,10 +109,15 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,579 passing (as of 2026-04-23)
+- pytest: 2,604 passing (as of 2026-04-23)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
 - Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate
 - R2 F1: 1.0000 (must not regress)
+
+### Session audit summary (2026-04-22/23):
+- **3 audits**: 111+, 46, and 56 findings (213 total)
+- **70 commits**: 46 (audit #1) + 46 (audit #2) + 15 (audit #3) + 4 (R12 thresholds) + 1 (docs) + 7 (TenantContext) + 1 (CI check)
+- **0 regressions**: all baselines preserved throughout
 
 ### Scoring weight note:
 - `s_recovery` has **negative weight** (-0.10) — intentional
@@ -128,9 +134,11 @@ cd web-static && vercel --prod
 python3 -c "import ast; ast.parse(open('api/main.py').read())"
 ```
 
-### Test files (33+ files):
+### Test files (35+ files):
 - `test_scoring.py` — Core scoring engine (1840+ tests)
 - `test_security_audit.py` — Cross-tenant isolation, SSRF, secrets (27 tests)
+- `test_tenant_context.py` — TenantContext unit tests (25 tests)
+- `test_tenant_isolation.py` — Cross-tenant integration tests
 - `test_timestamp_integrity.py` — Round 6 detection (17 tests)
 - `test_identity_drift.py` — Round 7 detection (19 tests)
 - `test_consensus_collapse.py` — Round 8 detection (17 tests)
@@ -170,6 +178,15 @@ web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
 
 ### Tenant isolation
 All per-tenant data keyed by `_safe_key_hash(key_record)` — never returns "default" or empty string. Test keys get deterministic SHA-256 from the API key.
+
+**TenantContext pattern** (`api/tenant.py`) — structural enforcement of per-tenant data access. Every endpoint that touches tenant-scoped data should declare:
+```python
+from api.tenant import TenantContext
+tenant: TenantContext = Depends(get_tenant_context)
+```
+TenantContext provides: `.key_hash`, `.filter_list(items)`, `.owns(item)`, `.assert_owns(item)`, `.tag(item)`, `.scoped_key(*parts)`, `.redis_key(prefix, *parts)`, `.supabase_filter(url)`.
+
+**CI enforcement**: `scripts/check_tenant_isolation.py` — AST-based check that fails the build if any endpoint accesses a tenant-scoped collection without TenantContext or `_safe_key_hash`. Run: `python3 scripts/check_tenant_isolation.py --strict`.
 
 ### Rate limiting
 Quota: atomic Redis INCR on `quota:{key_hash}:{year_month}` (35-day TTL). Tiers: free (10K), starter (100K), growth (1M).
