@@ -4532,6 +4532,9 @@ def list_alert_rules(key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/alert-rules/{rule_id}")
 def delete_alert_rule(rule_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    rule = _alert_rules.get(rule_id)
+    if rule and rule.get("key_hash") != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this alert rule")
     _alert_rules.pop(rule_id, None)
     return {"deleted": rule_id}
 
@@ -5074,6 +5077,9 @@ def list_retention(key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/retention-policies/{policy_id}")
 def delete_retention(policy_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    policy = _retention_policies.get(policy_id)
+    if policy and policy.get("key_hash") != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this retention policy")
     _retention_policies.pop(policy_id, None)
     return {"deleted": policy_id}
 
@@ -5081,6 +5087,8 @@ def delete_retention(policy_id: str, key_record: dict = Depends(verify_api_key))
 def run_retention(policy_id: str, key_record: dict = Depends(verify_api_key)):
     policy = _retention_policies.get(policy_id)
     if not policy: raise HTTPException(status_code=404, detail="Policy not found")
+    if policy.get("key_hash") != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Not authorized to run this retention policy")
     return {"policy_id": policy_id, "action": policy.get("action"), "affected": 0}
 
 # ---- #46 Custom Webhook Payloads ----
@@ -5136,6 +5144,9 @@ def list_hooks(key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/hooks/{hook_id}")
 def delete_hook(hook_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    hook = _hooks.get(hook_id)
+    if hook and hook.get("key_hash") != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this hook")
     _hooks.pop(hook_id, None)
     return {"deleted": hook_id}
 
