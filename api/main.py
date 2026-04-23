@@ -12631,7 +12631,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     if _redis_enabled and len(entries) > 0:
         try:
             _vax_hash = _input_hash_full[:16]  # Fix 2: reuse canonical hash
-            _vax_idx_key = f"vaccine_index:{req.domain}"
+            _vax_idx_key = f"vaccine_index:{_pf_tenant}:{req.domain}"
             _vax_ids = _rget(_vax_idx_key, [])
             if isinstance(_vax_ids, list):
                 for _vid in _vax_ids[:20]:
@@ -12665,7 +12665,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 _sig = _extract_attack_signature(req.memory_state, _det_results, req.domain, content_hash=_input_hash_full[:16])
                 redis_set(f"vaccine:{_sig['signature_id']}", _encrypt_vaccine(_sig), ttl=604800)  # 7 days, encrypted at rest
                 # Update index
-                _vax_idx_key = f"vaccine_index:{req.domain}"
+                _vax_idx_key = f"vaccine_index:{_pf_tenant}:{req.domain}"
                 if _redis_enabled:
                     import urllib.parse as _urlp
                     _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key}/{_urlp.quote(_sig['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -15197,7 +15197,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 }
                 _sig_d = _extract_attack_signature(req.memory_state, _det_results_d, req.domain, content_hash=_input_hash_full[:16])
                 redis_set(f"vaccine:{_sig_d['signature_id']}", _encrypt_vaccine(_sig_d), ttl=604800)
-                _vax_idx_key_d = f"vaccine_index:{req.domain}"
+                _vax_idx_key_d = f"vaccine_index:{_pf_tenant}:{req.domain}"
                 import urllib.parse as _urlp_d
                 _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key_d}/{_urlp_d.quote(_sig_d['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key_d}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
@@ -16998,12 +16998,13 @@ def check_memories(req: CheckRequest, key_record: dict = Depends(verify_api_key)
     except HTTPException:
         raise
     except Exception as e:
+        # Security gate must fail CLOSED — never return safe=True on internal error
         return {
-            "safe": True,
-            "reason": "Sgraal preflight unavailable — memories allowed by default.",
-            "action": "No action needed. Retry later for full validation.",
-            "omega": 0.0,
-            "decision": "USE_MEMORY",
+            "safe": False,
+            "reason": "Sgraal preflight unavailable — memories blocked by default until scoring recovers.",
+            "action": "Do not proceed. Retry later for full validation.",
+            "omega": 100.0,
+            "decision": "ASK_USER",
             "request_id": request_id,
             "error": str(e)[:200],
         }

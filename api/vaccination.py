@@ -58,6 +58,8 @@ def encrypt_vaccine(data: dict, attestation_secret: str = "") -> str:
                 "cryptography package not installed — vaccine encryption unavailable. "
                 "Install with: pip install cryptography"
             )
+    except RuntimeError:
+        raise  # Do not swallow — missing cryptography must propagate
     except Exception:
         return _json.dumps(data)
 

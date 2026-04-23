@@ -9,8 +9,9 @@ router = APIRouter(tags=["vaccines"])
 
 @router.get("/v1/vaccines")
 def list_vaccines(domain: str = Query("general"), key_record: dict = Depends(verify_api_key)):
-    """List stored vaccine signatures for a domain."""
-    _vax_idx_key = f"vaccine_index:{domain}"
+    """List stored vaccine signatures for a domain (tenant-scoped)."""
+    _kh = _safe_key_hash(key_record)
+    _vax_idx_key = f"vaccine_index:{_kh}:{domain}"
     _vax_ids = redis_get(_vax_idx_key, [])
     vaccines = []
     if isinstance(_vax_ids, list):
@@ -35,7 +36,8 @@ def delete_vaccine(signature_id: str, domain: str = Query("general"), key_record
             raise HTTPException(status_code=403, detail="Cannot delete another tenant's vaccine")
     redis_delete(f"vaccine:{signature_id}")
     # Also remove from vaccine index so list_vaccines stays consistent
-    _vax_idx_key = f"vaccine_index:{domain}"
+    _kh = _safe_key_hash(key_record)
+    _vax_idx_key = f"vaccine_index:{_kh}:{domain}"
     _vax_ids = redis_get(_vax_idx_key, [])
     if isinstance(_vax_ids, list) and signature_id in _vax_ids:
         _vax_ids.remove(signature_id)
