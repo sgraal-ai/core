@@ -7398,14 +7398,15 @@ def _create_blackbox_capsule(agent_id: str, decision_input: dict, why: str, comp
     return cid
 
 @app.get("/v1/blackbox/list")
-def list_blackbox(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+def list_blackbox(agent_id: str = "", tenant: TenantContext = Depends(get_tenant_context)):
     caps = [c for c in _blackbox.values() if not agent_id or c.get("agent_id") == agent_id]
-    return {"capsules": caps[-100:]}
+    return {"capsules": tenant.filter_list(caps[-100:])}
 
 @app.get("/v1/blackbox/{capsule_id}")
-def get_blackbox(capsule_id: str, key_record: dict = Depends(verify_api_key)):
+def get_blackbox(capsule_id: str, tenant: TenantContext = Depends(get_tenant_context)):
     c = _blackbox.get(capsule_id) or _load_store(f"blackbox_capsule:{capsule_id}")
     if not c: raise HTTPException(status_code=404, detail="Capsule not found")
+    tenant.assert_owns(c)
     return c
 
 @app.get("/v1/blackbox/{capsule_id}/verify")
@@ -7430,28 +7431,28 @@ class LifecyclePolicyRequest(BaseModel):
     compliance_profile: str = "GENERAL"
 
 @app.post("/v1/lifecycle/policy")
-def create_lifecycle_policy(req: LifecyclePolicyRequest, key_record: dict = Depends(verify_api_key)):
+def create_lifecycle_policy(req: LifecyclePolicyRequest, key_record: dict = Depends(verify_api_key),
+                            tenant: TenantContext = Depends(get_tenant_context)):
     _check_rate_limit(key_record)
-    _kh = _safe_key_hash(key_record)
-    _policy_key = f"{_kh}:{req.agent_id}"
-    _policy_data = {**req.model_dump(), "key_hash": _kh}
+    _policy_key = tenant.scoped_key(req.agent_id)
+    _policy_data = {**req.model_dump()}
+    tenant.tag(_policy_data)
     _lifecycle_policies[_policy_key] = _policy_data
     _persist_store(f"lifecycle_policy:{_policy_key}", _policy_data)
     return {"created": True, "agent_id": req.agent_id, "policy": req.model_dump()}
 
 @app.get("/v1/lifecycle/policy")
-def get_lifecycle_policy(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
-    _kh = _safe_key_hash(key_record)
+def get_lifecycle_policy(agent_id: str = "", tenant: TenantContext = Depends(get_tenant_context)):
     if agent_id:
-        p = _lifecycle_policies.get(f"{_kh}:{agent_id}")
+        p = _lifecycle_policies.get(tenant.scoped_key(agent_id))
         return {"policy": p} if p else {"policy": None}
-    return {"policies": [v for v in _lifecycle_policies.values() if v.get("key_hash") == _kh]}
+    return {"policies": tenant.filter_list(list(_lifecycle_policies.values()))}
 
 @app.post("/v1/lifecycle/execute")
-def execute_lifecycle(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+def execute_lifecycle(agent_id: str = "", key_record: dict = Depends(verify_api_key),
+                      tenant: TenantContext = Depends(get_tenant_context)):
     _check_rate_limit(key_record)
-    _kh = _safe_key_hash(key_record)
-    policy = _lifecycle_policies.get(f"{_kh}:{agent_id}", {})
+    policy = _lifecycle_policies.get(tenant.scoped_key(agent_id), {})
     deleted, archived, transferred, held = 0, 0, 0, 0
     pii_stripped = 0
     _PII_FIELDS = {"content", "metadata.email", "metadata.name", "metadata.phone", "metadata.ssn", "metadata.address"}
@@ -7470,8 +7471,9 @@ def execute_lifecycle(agent_id: str = "", key_record: dict = Depends(verify_api_
             "pii_fields_stripped": pii_stripped, "report": f"Lifecycle executed for {agent_id}"}
 
 @app.get("/v1/lifecycle/schedule")
-def lifecycle_schedule(key_record: dict = Depends(verify_api_key)):
-    return {"schedules": [{"agent_id": k, "next_run": "daily"} for k in _lifecycle_policies.keys()]}
+def lifecycle_schedule(tenant: TenantContext = Depends(get_tenant_context)):
+    return {"schedules": [{"agent_id": k, "next_run": "daily"} for k in _lifecycle_policies.keys()
+                          if k.startswith(tenant.key_hash + ":")]}
 
 
 # ---- #39 Memory-Driven Regulatory Compliance API ----
