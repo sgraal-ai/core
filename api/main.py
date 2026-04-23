@@ -4434,7 +4434,8 @@ class AsyncBatchRequest(BaseModel):
     action_type: str = "reversible"
 
 @app.post("/v1/batch/async")
-def submit_async_batch(req: AsyncBatchRequest, key_record: dict = Depends(verify_api_key)):
+def submit_async_batch(req: AsyncBatchRequest, key_record: dict = Depends(verify_api_key),
+                       tenant: TenantContext = Depends(get_tenant_context)):
     _check_rate_limit(key_record)
     if len(req.entries) > 10000:
         raise HTTPException(status_code=400, detail="Maximum 10000 entries for async batch")
@@ -4450,6 +4451,7 @@ def submit_async_batch(req: AsyncBatchRequest, key_record: dict = Depends(verify
     est = max(1, len(req.entries) // 100)
     _async_jobs[job_id] = {"status": "queued", "progress": 0, "result": None,
                             "entries": len(req.entries), "expires_at": _time.time() + 3600}
+    tenant.tag(_async_jobs[job_id])
 
     # Process synchronously for now (BackgroundTasks would need async context)
     try:
@@ -4458,16 +4460,18 @@ def submit_async_batch(req: AsyncBatchRequest, key_record: dict = Depends(verify
             results.append({"id": entry_data.get("id", f"e{i}"), "omega_mem_final": 0, "recommended_action": "USE_MEMORY"})
         _async_jobs[job_id] = {"status": "complete", "progress": 100, "result": {"results": results, "total": len(req.entries)},
                                 "expires_at": _time.time() + 3600}
+        tenant.tag(_async_jobs[job_id])
     except Exception:
         _async_jobs[job_id]["status"] = "failed"
 
     return {"job_id": job_id, "status": "queued", "estimated_seconds": est}
 
 @app.get("/v1/batch/async/{job_id}")
-def get_async_batch(job_id: str, key_record: dict = Depends(verify_api_key)):
+def get_async_batch(job_id: str, tenant: TenantContext = Depends(get_tenant_context)):
     if job_id not in _async_jobs:
         raise HTTPException(status_code=404, detail="Job not found or expired")
     job = _async_jobs[job_id]
+    tenant.assert_owns(job)
     return {"status": job["status"], "progress": job["progress"], "result": job.get("result")}
 
 
@@ -6301,27 +6305,29 @@ class TwinRequest(BaseModel):
     domain: str = "general"
 
 @app.post("/v1/simulate/twin")
-def simulate_twin(req: TwinRequest, key_record: dict = Depends(verify_api_key)):
+def simulate_twin(req: TwinRequest, key_record: dict = Depends(verify_api_key),
+                  tenant: TenantContext = Depends(get_tenant_context)):
     _check_rate_limit(key_record)
     job_id = str(uuid.uuid4())
-    kh = _safe_key_hash(key_record)
     # Run counterfactual inline, store as async result
     try:
         cf_req = CounterfactualRequest(memory_state=req.memory_state, action_type=req.action_type,
                                         domain=req.domain, scenarios=["current", "refreshed", "healed", "verified", "no_memory"])
         # Simulate inline
         cf_result = simulate_counterfactual(cf_req, key_record)
-        _twin_jobs[job_id] = {"status": "complete", "result": cf_result, "api_key_hash": kh, "created_at": _time.time()}
+        _twin_jobs[job_id] = {"status": "complete", "result": cf_result, "created_at": _time.time()}
     except Exception as _te:
-        _twin_jobs[job_id] = {"status": "failed", "error": str(_te)[:200], "api_key_hash": kh, "created_at": _time.time()}
+        _twin_jobs[job_id] = {"status": "failed", "error": str(_te)[:200], "created_at": _time.time()}
+    tenant.tag(_twin_jobs[job_id])
     redis_set(f"twin_job:{job_id}", _twin_jobs[job_id], ttl=300)
     return {"job_id": job_id, "status": "processing"}
 
 @app.get("/v1/simulate/twin/{job_id}")
-def get_twin_result(job_id: str, key_record: dict = Depends(verify_api_key)):
+def get_twin_result(job_id: str, tenant: TenantContext = Depends(get_tenant_context)):
     job = _twin_jobs.get(job_id) or redis_get(f"twin_job:{job_id}")
     if not job:
         raise HTTPException(status_code=404, detail="Twin job not found or expired")
+    tenant.assert_owns(job)
     return {"job_id": job_id, "status": job.get("status", "unknown"), "result": job.get("result")}
 
 
