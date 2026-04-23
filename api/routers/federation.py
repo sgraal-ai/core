@@ -23,9 +23,10 @@ class FederationCheckRequest(BaseModel):
 @router.post("/v1/federation/contribute")
 def federation_contribute(req: FederationContributeRequest, key_record: dict = Depends(verify_api_key)):
     """Contribute anonymized vaccine to shared federation."""
-    _sig = hashlib.sha256(req.vaccine_signature.encode()).hexdigest()[:16]
+    _sig = hashlib.sha256(req.vaccine_signature.encode()).hexdigest()[:32]
+    _key_hash = key_record.get("key_hash", "anonymous")
     entry = {"signature": _sig, "attack_type": req.attack_type,
-             "domain": req.domain, "contributed_by": "anonymous", "contributed_at": _time.time()}
+             "domain": req.domain, "contributed_by": _key_hash, "contributed_at": _time.time()}
     _evict_if_full(_federation_registry, "_federation_registry")
     _federation_registry[_sig] = entry
     return {"contributed": True, "federation_size": len(_federation_registry)}
@@ -44,7 +45,7 @@ def federation_check(req: FederationCheckRequest, key_record: dict = Depends(ver
     matched_types = set()
     for e in req.memory_state:
         content = e.get("content", "") if isinstance(e, dict) else str(e)
-        _hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+        _hash = hashlib.sha256(content.encode()).hexdigest()[:32]
         vax = _federation_registry.get(_hash)
         if vax:
             matched += 1
