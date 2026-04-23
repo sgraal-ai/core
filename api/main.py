@@ -6241,6 +6241,8 @@ def restore_snapshot(snapshot_id: str, req: RestoreRequest, key_record: dict = D
     snap = _snapshots.get(snapshot_id)
     if not snap:
         raise HTTPException(status_code=404, detail="Snapshot not found")
+    if snap.get("key_hash") and snap["key_hash"] != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Not authorized to restore this snapshot")
     # Create pre-restore auto-snapshot
     _pre_sid = str(uuid.uuid4())
     _pre_snap = {"snapshot_id": _pre_sid, "agent_id": snap["agent_id"], "label": "auto: pre-restore",
@@ -6561,8 +6563,11 @@ def export_passport(req: PassportExportRequest, key_record: dict = Depends(verif
     # Signature with key versioning
     _key_version = "v1"
     _signing_key = os.getenv("PASSPORT_SIGNING_KEY_V1", "")
-    if not _signing_key and os.getenv("SGRAAL_TEST_MODE"):
-        _signing_key = "dev_passport_key_not_for_production"
+    if not _signing_key:
+        if os.getenv("SGRAAL_TEST_MODE"):
+            _signing_key = "dev_passport_key_not_for_production"
+        else:
+            raise HTTPException(status_code=503, detail="Passport signing key not configured")
     _sig_data = f"{pid}:{kh}:{req.agent_id}:{valid_until}:{omega_avg}"
     import hmac as _passport_sign_hmac
     _signature = _passport_sign_hmac.new(_signing_key.encode(), _sig_data.encode(), hashlib.sha256).hexdigest()
@@ -6595,7 +6600,10 @@ def import_passport(req: PassportImportRequest, key_record: dict = Depends(verif
     if not passport:
         raise HTTPException(status_code=404, detail="Passport not found or expired")
     # Validate signature with version-matched key — recompute HMAC, don't trust caller value
+    _ALLOWED_KEY_VERSIONS = ("v1",)
     _kv = req.signature_key_version
+    if _kv not in _ALLOWED_KEY_VERSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported key version. Allowed: {_ALLOWED_KEY_VERSIONS}")
     _sk = os.getenv(f"PASSPORT_SIGNING_KEY_{_kv.upper()}", "")
     if not _sk:
         if os.getenv("SGRAAL_TEST_MODE"):
