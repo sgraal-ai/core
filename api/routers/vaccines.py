@@ -1,7 +1,7 @@
 """Vaccine and compromised agent endpoints."""
 from fastapi import APIRouter, Depends, Query
 
-from api.main import verify_api_key, _decrypt_vaccine, UPSTASH_REDIS_URL, UPSTASH_REDIS_TOKEN
+from api.main import verify_api_key, _decrypt_vaccine, _safe_key_hash, UPSTASH_REDIS_URL, UPSTASH_REDIS_TOKEN
 from api.redis_state import redis_get, redis_set, redis_delete, _get_session as _get_redis_session
 
 router = APIRouter(tags=["vaccines"])
@@ -26,6 +26,13 @@ def list_vaccines(domain: str = Query("general"), key_record: dict = Depends(ver
 @router.delete("/v1/vaccines/{signature_id}")
 def delete_vaccine(signature_id: str, domain: str = Query("general"), key_record: dict = Depends(verify_api_key)):
     """Remove a vaccine signature."""
+    # Tenant check: verify the vaccine belongs to the requesting tenant
+    _vax_raw = redis_get(f"vaccine:{signature_id}")
+    if _vax_raw:
+        _vax = _decrypt_vaccine(_vax_raw)
+        if isinstance(_vax, dict) and _vax.get("key_hash") and _vax.get("key_hash") != _safe_key_hash(key_record):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Cannot delete another tenant's vaccine")
     redis_delete(f"vaccine:{signature_id}")
     # Also remove from vaccine index so list_vaccines stays consistent
     _vax_idx_key = f"vaccine_index:{domain}"
@@ -60,9 +67,16 @@ def list_compromised_agents(key_record: dict = Depends(verify_api_key)):
 
 @router.delete("/v1/compromised-agents/{agent_id}")
 def remove_compromised_agent(agent_id: str, key_record: dict = Depends(verify_api_key)):
-    """Remove an agent from the compromised set."""
-    agents = redis_get("compromised_agents", [])
+    """Remove an agent from the compromised set (tenant-scoped)."""
+    _kh = _safe_key_hash(key_record)
+    _tenant_key = f"compromised_agents:{_kh}"
+    agents = redis_get(_tenant_key, [])
     if isinstance(agents, list) and agent_id in agents:
         agents.remove(agent_id)
-        redis_set("compromised_agents", agents, ttl=604800)
+        redis_set(_tenant_key, agents, ttl=604800)
+    # Also remove from global list for backward compat
+    global_agents = redis_get("compromised_agents", [])
+    if isinstance(global_agents, list) and agent_id in global_agents:
+        global_agents.remove(agent_id)
+        redis_set("compromised_agents", global_agents, ttl=604800)
     return {"removed": agent_id}

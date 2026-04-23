@@ -124,7 +124,9 @@ def delete_sla_rule(rule_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     kh = _safe_key_hash(key_record)
     existing = _sla_rules.get(rule_id)
-    if existing and existing.get("key_hash") != kh:
+    if not existing:
+        raise HTTPException(status_code=404, detail="SLA rule not found")
+    if existing.get("key_hash") != kh:
         raise HTTPException(status_code=403, detail="Cannot delete another tenant's SLA rule")
     _sla_rules.pop(rule_id, None)
     return {"deleted": rule_id}

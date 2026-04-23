@@ -1028,7 +1028,7 @@ def auth_github_callback(code: str = Query(...), state: str = Query(...), sgraal
             )
             if existing.ok and existing.json():
                 # Return existing — redirect with message
-                return RedirectResponse(url=f"https://app.sgraal.com?existing=true&email={primary_email}", status_code=302)
+                return RedirectResponse(url=f"https://app.sgraal.com?existing=true&email={urllib.parse.quote(primary_email, safe='')}", status_code=302)
 
         # Create new key via signup flow
         api_key = f"sg_live_{secrets.token_urlsafe(32)}"
@@ -2493,12 +2493,17 @@ def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify
             },
         },
     }
-    # W3C proof block (override the simple proof)
+    # W3C proof block (override the simple proof) — use HMAC proof, not raw input_hash
+    _kh = _safe_key_hash(key_record)
+    try:
+        _proof_val = _cert_proof_value(cert.get("credentialSubject", {}), _kh)
+    except Exception:
+        _proof_val = ""
     cert["proof"] = {
         "type": "SgraalGovernanceProof2026",
         "created": datetime.fromtimestamp(cert["issued_at"], tz=timezone.utc).isoformat(),
         "verificationMethod": "https://sgraal.com/keys/v1",
-        "proofValue": (_outcome or {}).get("input_hash", ""),
+        "proofValue": _proof_val,
         "deterministic": True,
         "reproducible": True,
         "proof_version": "v1",
@@ -2876,8 +2881,9 @@ def decision_heatmap(days: int = Query(7), domain: Optional[str] = None,
 @app.get("/v1/analytics/omega-distribution")
 def omega_distribution(days: int = Query(7), key_record: dict = Depends(verify_api_key)):
     """Omega score distribution in 10-point buckets."""
+    _kh = _safe_key_hash(key_record)
     buckets = {f"{i*10}-{i*10+10}": 0 for i in range(10)}
-    _omegas = [od.get("omega_mem_final", 0) for od in list(_outcomes.values())[-1000:]]
+    _omegas = [od.get("omega_mem_final", 0) for od in list(_outcomes.values())[-1000:] if od.get("key_hash") == _kh]
     for o in _omegas:
         _b = min(int(o // 10), 9)
         _key = f"{_b*10}-{_b*10+10}"
@@ -3273,7 +3279,7 @@ def passport_with_fidelity(req: PassportWithFidelityRequest, key_record: dict = 
 @app.post("/v1/sleeper/detect")
 def detect_sleeper(req: dict = {}, key_record: dict = Depends(verify_api_key)):
     """Detect sleeper patterns and raise write firewall if found."""
-    namespace = req.get("namespace", _safe_key_hash(key_record))
+    namespace = _safe_key_hash(key_record)
     entries = req.get("memory_state", [])
     sleeper_detected = False
     for e in entries:
@@ -3728,10 +3734,11 @@ def get_badge():
 @app.get("/v1/badge/status/{api_key_id}")
 def get_badge_status(api_key_id: str):
     """Public endpoint: check if an API key is governance-certified."""
-    # Look up governance score from recent outcomes
+    # Look up governance score from recent outcomes filtered by api_key_id
+    _kh = hashlib.sha256(api_key_id.encode()).hexdigest() if api_key_id else ""
     _score = None
     _total = 0
-    _decisions = [od.get("recommended_action", "USE_MEMORY") for od in list(_outcomes.values())[-1000:]]
+    _decisions = [od.get("recommended_action", "USE_MEMORY") for od in list(_outcomes.values())[-1000:] if od.get("key_hash") == _kh]
     _total = len(_decisions)
     if _total >= 10:
         _blocks = sum(1 for d in _decisions if d == "BLOCK")
@@ -4541,10 +4548,11 @@ def update_decay_config(req: DecayConfigRequest, key_record: dict = Depends(veri
 
 @app.get("/v1/store/memories/{memory_id}/versions")
 def list_versions(memory_id: str, key_record: dict = Depends(verify_api_key)):
+    _kh = _safe_key_hash(key_record)
     versions = []
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
-            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/memory_versions?memory_id=eq.{memory_id}&order=version_number.desc&limit=10",
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/memory_versions?memory_id=eq.{memory_id}&api_key_hash=eq.{_kh}&order=version_number.desc&limit=10",
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
             if r.ok:
                 versions = r.json()
@@ -4554,9 +4562,10 @@ def list_versions(memory_id: str, key_record: dict = Depends(verify_api_key)):
 
 @app.get("/v1/store/memories/{memory_id}/versions/{version}")
 def get_version(memory_id: str, version: int, key_record: dict = Depends(verify_api_key)):
+    _kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
-            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/memory_versions?memory_id=eq.{memory_id}&version_number=eq.{version}",
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/memory_versions?memory_id=eq.{memory_id}&version_number=eq.{version}&api_key_hash=eq.{_kh}",
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
             if r.ok and r.json():
                 return r.json()[0]
@@ -4567,6 +4576,18 @@ def get_version(memory_id: str, version: int, key_record: dict = Depends(verify_
 @app.post("/v1/store/memories/{memory_id}/rollback/{version}")
 def rollback_version(memory_id: str, version: int, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    _kh = _safe_key_hash(key_record)
+    # Verify ownership via Supabase before allowing rollback
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            r = http_requests.get(f"{SUPABASE_URL}/rest/v1/memory_versions?memory_id=eq.{memory_id}&api_key_hash=eq.{_kh}&limit=1",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if r.ok and not r.json():
+                raise HTTPException(status_code=403, detail="Memory does not belong to this tenant")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
     return {"memory_id": memory_id, "rolled_back_to": version, "status": "ok"}
 
 
@@ -4680,7 +4701,7 @@ def list_templates(key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/templates/{name}")
 def delete_template(name: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    _templates.pop(f"{key_record.get('key_hash','default')}:{name}", None)
+    _templates.pop(f"{_safe_key_hash(key_record)}:{name}", None)
     return {"deleted": name}
 @app.post("/v1/preflight/from-template/{name}")
 def preflight_from_template(name: str, key_record: dict = Depends(verify_api_key)):
@@ -5052,7 +5073,7 @@ def memory_access_log(memory_id: str, key_record: dict = Depends(verify_api_key)
     entries = []
     if UPSTASH_REDIS_URL and UPSTASH_REDIS_TOKEN:
         try:
-            _alk = f"access_log:{key_record.get('key_hash','default')}:{memory_id}"
+            _alk = f"access_log:{_safe_key_hash(key_record)}:{memory_id}"
             r = _get_redis_session().get(f"{UPSTASH_REDIS_URL}/LRANGE/{_alk}/0/99",
                 headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
             if r.ok: entries = r.json().get("result", [])
@@ -5773,6 +5794,7 @@ def scan_memories(req: SleepScanRequest, key_record: dict = Depends(verify_api_k
         "sleepers_found": len(sleepers), "sleepers": sleepers[:50],
         "scan_duration_ms": _scan_duration, "quota_used": _quota_used,
         "scan_depth": req.scan_depth, "agent_id": req.agent_id,
+        "key_hash": kh,
     }
     _sleeper_scans[scan_id] = result
     _sleeper_latest[f"{kh}:{req.agent_id}"] = scan_id
@@ -5810,6 +5832,9 @@ def get_scan(scan_id: str, key_record: dict = Depends(verify_api_key)):
     result = _sleeper_scans.get(scan_id)
     if not result:
         raise HTTPException(status_code=404, detail="Scan not found")
+    _kh = _safe_key_hash(key_record)
+    if result.get("key_hash") and result.get("key_hash") != _kh:
+        raise HTTPException(status_code=403, detail="Scan does not belong to this tenant")
     return result
 
 
@@ -6995,6 +7020,9 @@ def list_truth_subs(key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/truth/subscriptions/{sub_id}")
 def delete_truth_sub(sub_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    sub = _truth_subs.get(sub_id)
+    if sub and sub.get("key_hash") != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Cannot delete another tenant's subscription")
     _truth_subs.pop(sub_id, None)
     return {"deleted": sub_id}
 
@@ -7284,7 +7312,8 @@ def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_a
     if not timeline:
         result = {"forensics_id": fid, "timeline": [], "root_cause": "insufficient_data",
                   "recommendation": "Enable audit logging and retry after sufficient activity is recorded.",
-                  "root_cause_entry_id": None, "affected_decisions": 0, "contamination_chain": []}
+                  "root_cause_entry_id": None, "affected_decisions": 0, "contamination_chain": [],
+                  "key_hash": kh}
         _forensics[fid] = result
         _persist_store(f"forensics_report:{fid}", result, ttl=90*86400)
         return result
@@ -7294,7 +7323,7 @@ def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_a
     result = {"forensics_id": fid, "timeline": timeline[:20], "root_cause": "stale_data_propagation",
               "root_cause_entry_id": root_cause_entry, "affected_decisions": len(timeline),
               "contamination_chain": chain, "recommendation": f"Quarantine {root_cause_entry} and re-verify downstream",
-              "forensics_report_url": f"/v1/forensics/{fid}/report"}
+              "forensics_report_url": f"/v1/forensics/{fid}/report", "key_hash": kh}
     _forensics[fid] = result
     _persist_store(f"forensics_report:{fid}", result, ttl=90*86400)
     return result
@@ -7318,7 +7347,8 @@ def get_forensics_report(forensics_id: str, key_record: dict = Depends(verify_ap
 
 @app.get("/v1/forensics/list")
 def list_forensics(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
-    return {"forensics": list(_forensics.values())[-50:]}
+    _kh = _safe_key_hash(key_record)
+    return {"forensics": [f for f in _forensics.values() if f.get("key_hash") == _kh][-50:]}
 
 
 # ---- #46 Agent Black Box Recorder ----
@@ -7373,21 +7403,26 @@ class LifecyclePolicyRequest(BaseModel):
 @app.post("/v1/lifecycle/policy")
 def create_lifecycle_policy(req: LifecyclePolicyRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    _lifecycle_policies[req.agent_id] = req.model_dump()
-    _persist_store(f"lifecycle_policy:{req.agent_id}", req.model_dump())
+    _kh = _safe_key_hash(key_record)
+    _policy_key = f"{_kh}:{req.agent_id}"
+    _policy_data = {**req.model_dump(), "key_hash": _kh}
+    _lifecycle_policies[_policy_key] = _policy_data
+    _persist_store(f"lifecycle_policy:{_policy_key}", _policy_data)
     return {"created": True, "agent_id": req.agent_id, "policy": req.model_dump()}
 
 @app.get("/v1/lifecycle/policy")
 def get_lifecycle_policy(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
+    _kh = _safe_key_hash(key_record)
     if agent_id:
-        p = _lifecycle_policies.get(agent_id)
+        p = _lifecycle_policies.get(f"{_kh}:{agent_id}")
         return {"policy": p} if p else {"policy": None}
-    return {"policies": list(_lifecycle_policies.values())}
+    return {"policies": [v for v in _lifecycle_policies.values() if v.get("key_hash") == _kh]}
 
 @app.post("/v1/lifecycle/execute")
 def execute_lifecycle(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    policy = _lifecycle_policies.get(agent_id, {})
+    _kh = _safe_key_hash(key_record)
+    policy = _lifecycle_policies.get(f"{_kh}:{agent_id}", {})
     deleted, archived, transferred, held = 0, 0, 0, 0
     pii_stripped = 0
     _PII_FIELDS = {"content", "metadata.email", "metadata.name", "metadata.phone", "metadata.ssn", "metadata.address"}
@@ -7500,9 +7535,12 @@ def get_fidelity(entry_id: str, key_record: dict = Depends(verify_api_key)):
 
 @app.post("/v1/fidelity/verify")
 def verify_fidelity(req: dict):
-    """Public — no auth."""
+    """Public — requires key_hash in request (derived from API key by the caller)."""
     eid = req.get("entry_id", "")
-    kh = req.get("key_hash", "default")
+    kh = req.get("key_hash", "")
+    if not kh:
+        return {"valid": False, "entry_id_hash": hashlib.sha256(eid.encode()).hexdigest()[:16],
+                "fidelity_score": None, "expired": True}
     cert = _fidelity_certs.get(f"{kh}:{eid}") or redis_get(f"fidelity_cert:{kh}:{eid}")
     if not cert:
         return {"valid": False, "entry_id_hash": hashlib.sha256(eid.encode()).hexdigest()[:16],
@@ -8055,21 +8093,22 @@ def recover_assess(req: RecoverAssessRequest, key_record: dict = Depends(verify_
     if not req.memory_state:
         raise HTTPException(status_code=400, detail="memory_state required")
 
-    # Run preflight for current state
-    from fastapi.testclient import TestClient as _RC
-    _rc = _RC(app)
-    _rk = "sg_test_key_001"
-    for _ak in API_KEYS:
-        if API_KEYS[_ak] == key_record.get("customer_id"):
-            _rk = _ak
-            break
-    _pf = _rc.post("/v1/preflight", headers={"Authorization": f"Bearer {_rk}"}, json={
-        "memory_state": req.memory_state[:20], "action_type": "reversible",
-        "domain": req.domain, "agent_id": req.agent_id, "dry_run": True,
-    })
-    if _pf.status_code != 200:
-        return {"error": f"preflight failed: {_pf.status_code}"}
-    _pf_data = _pf.json()
+    # Run preflight for current state via internal call (no TestClient)
+    _pf_req = PreflightRequest(
+        memory_state=[MemoryEntryRequest(
+            id=e.get("id", f"r{i}"), content=e.get("content", ""),
+            type=e.get("type", "semantic"),
+            timestamp_age_days=e.get("timestamp_age_days", 0),
+            source_trust=e.get("source_trust", 0.9),
+            source_conflict=e.get("source_conflict", 0.1),
+            downstream_count=e.get("downstream_count", 0),
+        ) for i, e in enumerate(req.memory_state[:20])],
+        action_type="reversible", domain=req.domain,
+        agent_id=req.agent_id, dry_run=True,
+    )
+    _pf_data = _preflight_internal(_pf_req, key_record)
+    if not isinstance(_pf_data, dict):
+        return {"error": "preflight failed"}
     current_omega = _pf_data.get("omega_mem_final", 0)
 
     # Assess each entry
@@ -9156,17 +9195,6 @@ def benchmark_run(req: BenchmarkRunRequest, key_record: dict = Depends(verify_ap
         return {"error": "No corpus cases found", "total_cases": 0}
 
     # Run each case through the FULL preflight path (includes detection layers)
-    from fastapi.testclient import TestClient as _BenchClient
-    _bc = _BenchClient(app)
-    # Find a usable API key for internal calls
-    _bench_key = None
-    for _ak in API_KEYS:
-        _bench_key = _ak
-        break
-    if not _bench_key:
-        _bench_key = "sg_test_key_001"
-    _bench_auth = {"Authorization": f"Bearer {_bench_key}"}
-
     round_results: dict = {}
     for case in cases:
         rnd = case["round"]
@@ -9176,14 +9204,25 @@ def benchmark_run(req: BenchmarkRunRequest, key_record: dict = Depends(verify_ap
         rr["total"] += 1
 
         try:
-            _pf_resp = _bc.post("/v1/preflight", headers=_bench_auth, json={
-                "memory_state": case["memory_state"],
-                "action_type": case.get("action_type", "reversible"),
-                "domain": case.get("domain", "general"),
-                "dry_run": True,
-            })
-            if _pf_resp.status_code == 200:
-                actual = _pf_resp.json().get("recommended_action", "USE_MEMORY")
+            _raw_entries = []
+            for i, e in enumerate(case["memory_state"]):
+                _entry_dict = dict(e) if isinstance(e, dict) else {"id": f"b{i}", "content": str(e), "type": "semantic"}
+                if "id" not in _entry_dict:
+                    _entry_dict["id"] = f"b{i}"
+                if "content" not in _entry_dict:
+                    _entry_dict["content"] = ""
+                if "type" not in _entry_dict:
+                    _entry_dict["type"] = "semantic"
+                _raw_entries.append(_entry_dict)
+            _pf_req = PreflightRequest(
+                memory_state=_raw_entries,
+                action_type=case.get("action_type", "reversible"),
+                domain=case.get("domain", "general"),
+                dry_run=True,
+            )
+            _pf_result = _preflight_internal(_pf_req, key_record)
+            if isinstance(_pf_result, dict):
+                actual = _pf_result.get("recommended_action", "USE_MEMORY")
             else:
                 actual = "ERROR"
         except Exception:

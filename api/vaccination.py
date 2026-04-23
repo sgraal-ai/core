@@ -54,13 +54,10 @@ def encrypt_vaccine(data: dict, attestation_secret: str = "") -> str:
             ct_tag = AESGCM(aes_key).encrypt(nonce, plaintext, None)
             return _b64.b64encode(b"AES1" + nonce + ct_tag).decode("ascii")
         except ImportError:
-            import logging as _log_vax
-            _log_vax.getLogger("sgraal.vaccination").critical(
+            raise RuntimeError(
                 "cryptography package not installed — vaccine encryption unavailable. "
                 "Install with: pip install cryptography"
             )
-            # Fall through to raw JSON (no encryption) rather than weak XOR
-            return _json.dumps(data)
     except Exception:
         return _json.dumps(data)
 
