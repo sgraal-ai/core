@@ -2541,17 +2541,16 @@ def get_certificate_by_id(certificate_id: str, key_record: dict = Depends(verify
 # ---- Governance Score ----
 
 @app.get("/v1/governance-score")
-def get_governance_score(key_record: dict = Depends(verify_api_key)):
+def get_governance_score(tenant: TenantContext = Depends(get_tenant_context)):
     """Compute per-API-key governance score from audit history."""
-    _kh = _safe_key_hash(key_record)
     # Try to get recent decisions from Redis ring buffer
-    _hist = redis_get(f"te_history:{_kh}:general", [])
+    _hist = redis_get(f"te_history:{tenant.key_hash}:general", [])
     if not isinstance(_hist, list):
         _hist = []
     # Also check in-memory outcomes for this key (tenant-filtered)
     _decisions = []
     for _oid, _od in list(_outcomes.items())[-1000:]:
-        if _od.get("key_hash") == _kh:
+        if _od.get("key_hash") == tenant.key_hash:
             _decisions.append(_od.get("recommended_action", "USE_MEMORY"))
     total = len(_decisions)
     if total < 10:
@@ -2848,9 +2847,9 @@ def get_replay_history(key_record: dict = Depends(verify_api_key)):
 
 @app.get("/v1/analytics/decision-heatmap")
 def decision_heatmap(days: int = Query(7), domain: Optional[str] = None,
-                     key_record: dict = Depends(verify_api_key)):
+                     tenant: TenantContext = Depends(get_tenant_context)):
     """Decision heatmap by hour and day of week."""
-    _kh = _safe_key_hash(key_record)
+    _kh = tenant.key_hash
     _days_of_week = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     heatmap = []
     _peak_blocks = 0
@@ -2885,9 +2884,9 @@ def decision_heatmap(days: int = Query(7), domain: Optional[str] = None,
 
 
 @app.get("/v1/analytics/omega-distribution")
-def omega_distribution(days: int = Query(7), key_record: dict = Depends(verify_api_key)):
+def omega_distribution(days: int = Query(7), tenant: TenantContext = Depends(get_tenant_context)):
     """Omega score distribution in 10-point buckets."""
-    _kh = _safe_key_hash(key_record)
+    _kh = tenant.key_hash
     buckets = {f"{i*10}-{i*10+10}": 0 for i in range(10)}
     _omegas = [od.get("omega_mem_final", 0) for od in list(_outcomes.values())[-1000:] if od.get("key_hash") == _kh]
     for o in _omegas:
@@ -2905,9 +2904,9 @@ def omega_distribution(days: int = Query(7), key_record: dict = Depends(verify_a
 
 
 @app.get("/v1/analytics/attack-surface-trend")
-def attack_surface_trend(days: int = Query(30), key_record: dict = Depends(verify_api_key)):
+def attack_surface_trend(days: int = Query(30), tenant: TenantContext = Depends(get_tenant_context)):
     """Attack surface level trend over time."""
-    _kh = _safe_key_hash(key_record)
+    _kh = tenant.key_hash
     _attack_counts: dict = {}
     _trend_data: list = []
     for _od in list(_outcomes.values())[-2000:]:
@@ -3085,11 +3084,13 @@ def get_insights(agent_id: str = Query(""), domain: str = Query("general"), key_
 
 @app.get("/v1/agent/timeline")
 def agent_timeline(agent_id: Optional[str] = None, limit: int = Query(50, le=200),
-                   days: int = Query(7), key_record: dict = Depends(verify_api_key)):
+                   days: int = Query(7), tenant: TenantContext = Depends(get_tenant_context)):
     """Agent lifecycle timeline from audit history."""
     events = []
     _block = _warn = _use = 0
     for _oid, _od in list(_outcomes.items())[-limit:]:
+        if _od.get("key_hash") != tenant.key_hash:
+            continue
         if agent_id and _od.get("agent_id") != agent_id:
             continue
         _dec = _od.get("recommended_action", "USE_MEMORY")
@@ -10173,7 +10174,8 @@ def sla_tiers():
     }
 
 @app.get("/v1/governance-score/{agent_id}")
-def governance_score_history(agent_id: str, limit: int = 100, key_record: dict = Depends(verify_api_key)):
+def governance_score_history(agent_id: str, limit: int = 100, key_record: dict = Depends(verify_api_key),
+                             tenant: TenantContext = Depends(get_tenant_context)):
     """Return historical governance scores for an agent (from audit_log).
 
     NOTE: historical audit rows store only omega. For entries without the
@@ -10182,13 +10184,13 @@ def governance_score_history(agent_id: str, limit: int = 100, key_record: dict =
     for calls made after the governance_score feature shipped.
     """
     _check_rate_limit(key_record, allow_demo=True)
-    if key_record.get("demo"):
+    if tenant.is_demo:
         raise HTTPException(status_code=403, detail="Demo key cannot access governance history")
     history: list = []
     _sb = supabase_service_client or supabase_client
     if _sb:
         try:
-            kh = _safe_key_hash(key_record)
+            kh = tenant.key_hash
             lim = max(1, min(int(limit), 500))
             q = (
                 _sb.table("audit_log")
