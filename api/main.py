@@ -6799,7 +6799,8 @@ class ArbitrateRequest(BaseModel):
     domain: str = "general"
 
 @app.post("/v1/court/arbitrate")
-def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api_key)):
+def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api_key),
+                    tenant: TenantContext = Depends(get_tenant_context)):
     _check_rate_limit(key_record)
     if len(req.entries) < 2:
         raise HTTPException(status_code=400, detail="At least 2 entries required for arbitration")
@@ -6832,22 +6833,20 @@ def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api
         pass
     confidence = round(1 - (scored[0]["omega"] / 100), 2) if scored else 0
     vid = str(uuid.uuid4())
-    _verdict_kh = _safe_key_hash(key_record)
     verdict = {"verdict_id": vid, "winner_entries": winners, "loser_entries": losers,
                "confidence": confidence, "arbitration_method": "omega_scoring + causal_inference",
                "z3_proof": _z3_proof, "explanation": f"Winner has omega={scored[0]['omega']:.1f}, most reliable by {len(scored)} entry analysis",
                "overridable": False, "authority": "formal_verification",
-               "key_hash": _verdict_kh,
                "created_at": datetime.now(timezone.utc).isoformat()}
+    tenant.tag(verdict)
     _evict_if_full(_court_verdicts, "_court_verdicts")
     _court_verdicts[vid] = verdict
     _persist_store(f"court_verdict:{vid}", verdict, ttl=90*86400)
     return verdict
 
 @app.get("/v1/court/verdicts")
-def list_verdicts(key_record: dict = Depends(verify_api_key)):
-    _kh = _safe_key_hash(key_record)
-    return {"verdicts": [v for v in list(_court_verdicts.values())[-50:] if v.get("key_hash") == _kh]}
+def list_verdicts(tenant: TenantContext = Depends(get_tenant_context)):
+    return {"verdicts": tenant.filter_list(list(_court_verdicts.values())[-50:])}
 
 class EnforceRequest(BaseModel):
     confirm: bool = False
@@ -7327,23 +7326,23 @@ class ForensicsRequest(BaseModel):
     lookback_hours: int = 168
 
 @app.post("/v1/forensics/analyze")
-def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_api_key)):
+def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_api_key),
+                      tenant: TenantContext = Depends(get_tenant_context)):
     _check_rate_limit(key_record)
     fid = str(uuid.uuid4())
-    kh = _safe_key_hash(key_record)
     # Build timeline from audit log
     timeline = []
     if supabase_client:
         try:
-            entries = supabase_client.table("audit_log").select("*").eq("api_key_id", kh).order("created_at", desc=True).limit(100).execute().data or []
+            entries = supabase_client.table("audit_log").select("*").eq("api_key_id", tenant.key_hash).order("created_at", desc=True).limit(100).execute().data or []
             timeline = [{"event": e.get("event_type"), "decision": e.get("decision"),
                          "omega": e.get("omega_mem_final"), "timestamp": e.get("created_at")} for e in entries]
         except Exception: pass
     if not timeline:
         result = {"forensics_id": fid, "timeline": [], "root_cause": "insufficient_data",
                   "recommendation": "Enable audit logging and retry after sufficient activity is recorded.",
-                  "root_cause_entry_id": None, "affected_decisions": 0, "contamination_chain": [],
-                  "key_hash": kh}
+                  "root_cause_entry_id": None, "affected_decisions": 0, "contamination_chain": []}
+        tenant.tag(result)
         _forensics[fid] = result
         _persist_store(f"forensics_report:{fid}", result, ttl=90*86400)
         return result
@@ -7353,7 +7352,8 @@ def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_a
     result = {"forensics_id": fid, "timeline": timeline[:20], "root_cause": "stale_data_propagation",
               "root_cause_entry_id": root_cause_entry, "affected_decisions": len(timeline),
               "contamination_chain": chain, "recommendation": f"Quarantine {root_cause_entry} and re-verify downstream",
-              "forensics_report_url": f"/v1/forensics/{fid}/report", "key_hash": kh}
+              "forensics_report_url": f"/v1/forensics/{fid}/report"}
+    tenant.tag(result)
     _forensics[fid] = result
     _persist_store(f"forensics_report:{fid}", result, ttl=90*86400)
     return result
@@ -7376,9 +7376,8 @@ def get_forensics_report(forensics_id: str, key_record: dict = Depends(verify_ap
     return _MdResp(content=md, media_type="text/markdown")
 
 @app.get("/v1/forensics/list")
-def list_forensics(agent_id: str = "", key_record: dict = Depends(verify_api_key)):
-    _kh = _safe_key_hash(key_record)
-    return {"forensics": [f for f in _forensics.values() if f.get("key_hash") == _kh][-50:]}
+def list_forensics(agent_id: str = "", tenant: TenantContext = Depends(get_tenant_context)):
+    return {"forensics": tenant.filter_list(list(_forensics.values())[-50:])}
 
 
 # ---- #46 Agent Black Box Recorder ----
