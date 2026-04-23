@@ -3844,7 +3844,9 @@ def run_calibration(req: CalibrationRunRequest, key_record: dict = Depends(verif
     _quota_cost = len(cases)
     _quota_warning = f"This run will consume {_quota_cost} preflight calls" if _quota_cost > 100 else None
     _is_demo_caller = key_record.get("demo", False)
-    engine = CalibrationEngine(api_url="https://api.sgraal.com", api_key="sg_demo_playground")
+    # Use caller's API key for calibration, not hardcoded demo key
+    _cal_api_key = key_record.get("raw_key", "sg_demo_playground")
+    engine = CalibrationEngine(api_url="https://api.sgraal.com", api_key=_cal_api_key)
     report = engine.run_corpus_cases(cases)
     report.corpus_name = req.corpus
     report_dict = report.to_dict()
@@ -15035,7 +15037,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # Naturalness runs FIRST as context-setter (weakest signal)
     # Fix 12: suppress naturalness override when genuine corroboration detected
     _nat_level = response.get("naturalness_level", "ORGANIC")
-    _genuine_corr = response.get("genuine_corroboration", False)
+    _genuine_corr = response.get("genuine_corroboration_applied", False)
     if _nat_level == "FABRICATED" and not _genuine_corr:
         _nat_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER", "ASK_USER": "BLOCK"}
         _nat_cur = response["recommended_action"]
@@ -15073,7 +15075,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     if _id_drift == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_identity", "MANIPULATED flag")
     elif _id_drift == "SUSPICIOUS":
-        _id_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER", "ASK_USER": "BLOCK"}
+        _id_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _id_cur = response["recommended_action"]
         if _id_cur in _id_sev_map:
             _set_action(_id_sev_map[_id_cur], "detection_identity", "SUSPICIOUS escalation")
@@ -15189,7 +15191,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 response.get("sync_bleed") == "MANIPULATED",
                 response.get("confidence_calibration_check") == "MANIPULATED",
             ] if v)
-            if _manip_layers_deferred >= 1 and not response.get("_vaccination_stored"):
+            if _manip_layers_deferred >= 2 and omega_out > 60 and not response.get("_vaccination_stored"):
                 _det_results_d = {
                     "timestamp_integrity": response.get("timestamp_integrity", "VALID"),
                     "identity_drift": response.get("identity_drift", "CLEAN"),

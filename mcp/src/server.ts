@@ -71,6 +71,7 @@ async function main() {
         });
 
         const isBlocked = result.recommended_action === "BLOCK";
+        const requiresConfirmation = result.recommended_action === "ASK_USER";
 
         return {
           content: [
@@ -79,7 +80,7 @@ async function main() {
               text: formatResult(result),
             },
           ],
-          isError: isBlocked,
+          isError: isBlocked || requiresConfirmation,
         };
       } catch (error) {
         return {
