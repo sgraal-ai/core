@@ -5166,12 +5166,13 @@ def create_dev_key(name: str = "default", key_record: dict = Depends(verify_api_
     _check_rate_limit(key_record)
     new_key = f"sg_dev_{secrets.token_urlsafe(32)}"
     key_hash = hashlib.sha256(new_key.encode()).hexdigest()
-    _dev_keys[key_hash] = {"hash": key_hash, "name": name, "created_at": datetime.now(timezone.utc).isoformat(), "active": True}
+    _dev_keys[key_hash] = {"hash": key_hash, "name": name, "created_at": datetime.now(timezone.utc).isoformat(), "active": True, "parent_key_hash": _safe_key_hash(key_record)}
     return {"api_key": new_key, "name": name, "id": key_hash[:16]}
 
 @app.get("/v1/api-keys")
 def list_dev_keys(key_record: dict = Depends(verify_api_key)):
-    return {"keys": [{"id": v["hash"][:16], "name": v.get("name", "Key"), "key_truncated": f"sg_live_...{v['hash'][-4:]}", "active": v.get("active", True), "created": v.get("created_at", ""), "last_used": v.get("last_used", "Unknown")} for v in _dev_keys.values()]}
+    _kh = _safe_key_hash(key_record)
+    return {"keys": [{"id": v["hash"][:16], "name": v.get("name", "Key"), "key_truncated": f"sg_live_...{v['hash'][-4:]}", "active": v.get("active", True), "created": v.get("created_at", ""), "last_used": v.get("last_used", "Unknown")} for v in _dev_keys.values() if v.get("parent_key_hash") == _kh]}
 
 class GenerateKeyRequest(BaseModel):
     name: str = "New Key"
@@ -7599,13 +7600,10 @@ def get_fidelity(entry_id: str, key_record: dict = Depends(verify_api_key)):
     return cert
 
 @app.post("/v1/fidelity/verify")
-def verify_fidelity(req: dict):
-    """Public — requires key_hash in request (derived from API key by the caller)."""
+def verify_fidelity(req: dict, key_record: dict = Depends(verify_api_key)):
+    """Verify fidelity certificate — key_hash derived server-side from API key."""
     eid = req.get("entry_id", "")
-    kh = req.get("key_hash", "")
-    if not kh:
-        return {"valid": False, "entry_id_hash": hashlib.sha256(eid.encode()).hexdigest()[:16],
-                "fidelity_score": None, "expired": True}
+    kh = _safe_key_hash(key_record)
     cert = _fidelity_certs.get(f"{kh}:{eid}") or redis_get(f"fidelity_cert:{kh}:{eid}")
     if not cert:
         return {"valid": False, "entry_id_hash": hashlib.sha256(eid.encode()).hexdigest()[:16],
@@ -8520,10 +8518,13 @@ def advanced_compress_memory(req: AdvancedCompressRequest, key_record: dict = De
 def fleet_compromised_sources(days: int = Query(7), key_record: dict = Depends(verify_api_key)):
     """Identify sources appearing in multiple compromised preflight calls."""
     _check_rate_limit(key_record)
+    _kh = _safe_key_hash(key_record)
     cutoff = _time.time() - days * 86400
     source_counts: dict[str, dict] = {}  # source_id → {count, agents, first, last, level}
 
     for _oid, _od in list(_outcomes.items()):
+        if _od.get("key_hash") != _kh:
+            continue
         ts = _od.get("_ts", 0)
         if ts < cutoff:
             continue
@@ -8579,10 +8580,13 @@ def fleet_compromised_sources(days: int = Query(7), key_record: dict = Depends(v
 def fleet_divergence(key_record: dict = Depends(verify_api_key)):
     """Detect agents whose omega is diverging from fleet mean."""
     _check_rate_limit(key_record)
+    _kh = _safe_key_hash(key_record)
 
     # Collect last 10 omegas per agent
     agent_omegas: dict[str, list[float]] = {}
     for _oid, _od in list(_outcomes.items()):
+        if _od.get("key_hash") != _kh:
+            continue
         aid = _od.get("agent_id")
         omega = _od.get("omega_mem_final")
         if not aid or omega is None:
@@ -8659,11 +8663,14 @@ def fleet_divergence(key_record: dict = Depends(verify_api_key)):
 def fleet_gaming_detection(days: int = Query(7), key_record: dict = Depends(verify_api_key)):
     """Detect agents potentially gaming the scoring system."""
     _check_rate_limit(key_record)
+    _kh = _safe_key_hash(key_record)
     cutoff = _time.time() - days * 86400
 
     # Collect per-agent stats
     agent_stats: dict[str, dict] = {}
     for _oid, _od in list(_outcomes.items()):
+        if _od.get("key_hash") != _kh:
+            continue
         ts = _od.get("_ts", 0)
         if ts < cutoff:
             continue
@@ -8754,9 +8761,12 @@ def analytics_decision_entropy(agent_id: str = Query(""), days: int = Query(30),
         raise HTTPException(status_code=400, detail="agent_id is required")
 
     # Collect decisions from outcomes
+    _kh = _safe_key_hash(key_record)
     decisions = []
     cutoff = _time.time() - days * 86400
     for _oid, _od in list(_outcomes.items()):
+        if _od.get("key_hash") != _kh:
+            continue
         if _od.get("agent_id") == agent_id and _od.get("_ts", 0) > cutoff:
             act = _od.get("recommended_action", "USE_MEMORY")
             decisions.append(act)
@@ -8844,6 +8854,7 @@ def analytics_decision_entropy(agent_id: str = Query(""), days: int = Query(30),
 @app.get("/v1/analytics/module-health")
 def analytics_module_health(key_record: dict = Depends(verify_api_key)):
     """Aggregate module activation data across recent preflight calls."""
+    _kh = _safe_key_hash(key_record)
     _modules = ["s_freshness", "s_drift", "s_provenance", "s_propagation", "r_recall",
                 "r_encode", "s_interference", "s_recovery", "r_belief", "s_relevance"]
 
@@ -8851,6 +8862,8 @@ def analytics_module_health(key_record: dict = Depends(verify_api_key)):
     breakdowns = []
     cutoff = _time.time() - 86400  # 24h
     for _oid, _od in list(_outcomes.items()):
+        if _od.get("key_hash") != _kh:
+            continue
         if _od.get("_ts", 0) > cutoff:
             cb = _od.get("component_breakdown")
             if isinstance(cb, dict):
@@ -8893,6 +8906,7 @@ def analytics_module_health(key_record: dict = Depends(verify_api_key)):
 @app.get("/v1/analytics/temporal-patterns")
 def analytics_temporal_patterns(days: int = Query(7), key_record: dict = Depends(verify_api_key)):
     """Analyze omega and decision distributions by time-of-day and day-of-week."""
+    _kh = _safe_key_hash(key_record)
     _day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
     # Collect from outcomes
@@ -8902,6 +8916,8 @@ def analytics_temporal_patterns(days: int = Query(7), key_record: dict = Depends
     cutoff = _time.time() - days * 86400
 
     for _oid, _od in list(_outcomes.items()):
+        if _od.get("key_hash") != _kh:
+            continue
         ts = _od.get("_ts", 0)
         if ts < cutoff:
             continue

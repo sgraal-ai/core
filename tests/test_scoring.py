@@ -12373,14 +12373,14 @@ class TestFidelityScore:
             "entries": [_fresh_entry(id="fid_verify")]
         }, headers=AUTH)
         r2 = client.post("/v1/fidelity/verify", json={
-            "entry_id": "fid_verify", "key_hash": "None"
-        })
+            "entry_id": "fid_verify"
+        }, headers=AUTH)
         assert r2.status_code == 200
 
     def test_expired_returns_expired(self):
         r = client.post("/v1/fidelity/verify", json={
-            "entry_id": "nonexistent_xyz_fid", "key_hash": "none"
-        })
+            "entry_id": "nonexistent_xyz_fid"
+        }, headers=AUTH)
         assert r.json()["expired"] is True
 
     def test_get_by_entry_id(self):

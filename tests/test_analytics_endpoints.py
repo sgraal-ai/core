@@ -13,6 +13,8 @@ AUTH = {"Authorization": "Bearer sg_test_key_001"}
 
 def _seed_outcomes(agent_id, decisions, domain="general"):
     """Seed outcomes with a sequence of decisions for testing."""
+    import hashlib
+    _kh = hashlib.sha256("sg_test_key_001".encode()).hexdigest()
     for i, dec in enumerate(decisions):
         oid = f"anal_{agent_id}_{i}_{int(time.time()*1000)}"
         _outcome_set(oid, {
@@ -26,6 +28,7 @@ def _seed_outcomes(agent_id, decisions, domain="general"):
                                     "s_interference": 5, "s_recovery": 40, "r_belief": 30, "s_relevance": 3},
             "domain": domain,
             "_ts": time.time() - (len(decisions) - i) * 60,
+            "key_hash": _kh,
         })
 
 
