@@ -80,7 +80,7 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 ATTESTATION_SECRET = os.getenv("ATTESTATION_SECRET", "")
-if not ATTESTATION_SECRET and (os.getenv("SGRAAL_TEST_MODE") or os.getenv("ENV", "").lower() != "production"):
+if not ATTESTATION_SECRET and os.getenv("SGRAAL_TEST_MODE"):
     ATTESTATION_SECRET = "dev_attestation_not_for_production"
 
 # #39: Signal vector logging to Redis — disabled by default (storage cost with no reader).
@@ -6448,15 +6448,17 @@ def export_passport(req: PassportExportRequest, key_record: dict = Depends(verif
     # Signature with key versioning
     _key_version = "v1"
     _signing_key = os.getenv("PASSPORT_SIGNING_KEY_V1", "")
-    if not _signing_key and (os.getenv("SGRAAL_TEST_MODE") or os.getenv("ENV", "").lower() != "production"):
+    if not _signing_key and os.getenv("SGRAAL_TEST_MODE"):
         _signing_key = "dev_passport_key_not_for_production"
     _sig_data = f"{pid}:{kh}:{req.agent_id}:{valid_until}:{omega_avg}"
-    _signature = hashlib.sha256((_sig_data + _signing_key).encode()).hexdigest()
+    import hmac as _passport_sign_hmac
+    _signature = _passport_sign_hmac.new(_signing_key.encode(), _sig_data.encode(), hashlib.sha256).hexdigest()
     passport = {
         "passport_id": pid, "agent_id": req.agent_id,
         "issued_at": issued.isoformat(), "valid_until": valid_until,
         "issuer": "sgraal.com", "memory_state": req.memory_state,
         "omega_avg": omega_avg, "entry_count": len(req.memory_state),
+        "source_key_hash": kh,
         "provenance_summary": "all_entries_scored", "freshness_summary": "current",
         "conflict_summary": "no_critical_conflicts" if omega_avg < 50 else "conflicts_present",
         "assurance": round(max(0, 100 - omega_avg), 1),
@@ -6483,7 +6485,7 @@ def import_passport(req: PassportImportRequest, key_record: dict = Depends(verif
     _kv = req.signature_key_version
     _sk = os.getenv(f"PASSPORT_SIGNING_KEY_{_kv.upper()}", "")
     if not _sk:
-        if os.getenv("SGRAAL_TEST_MODE") or os.getenv("ENV", "").lower() != "production":
+        if os.getenv("SGRAAL_TEST_MODE"):
             _sk = "dev_passport_key_not_for_production"
         else:
             raise HTTPException(status_code=503, detail=f"Passport signing key {_kv} not configured")
@@ -6491,7 +6493,7 @@ def import_passport(req: PassportImportRequest, key_record: dict = Depends(verif
     _source_kh = passport.get("source_key_hash", _safe_key_hash(key_record))
     _sig_data = f"{passport['passport_id']}:{_source_kh}:{passport['agent_id']}:{passport['valid_until']}:{passport['omega_avg']}"
     import hmac as _passport_hmac
-    _expected_sig = hashlib.sha256((_sig_data + _sk).encode()).hexdigest()
+    _expected_sig = _passport_hmac.new(_sk.encode(), _sig_data.encode(), hashlib.sha256).hexdigest()
     if not _passport_hmac.compare_digest(_expected_sig, req.signature):
         raise HTTPException(status_code=403, detail="Invalid passport signature")
     # Check expiry
@@ -16816,6 +16818,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     _final_omega_attest = response.get("omega_mem_final", omega_out)
     _attest_msg_final = f"{_input_hash_full}:{_final_omega_attest}:{_blessed_action}:{request_id}"
     response["proof_signature"] = _hmac_final.new(ATTESTATION_SECRET.encode(), _attest_msg_final.encode(), hashlib.sha256).hexdigest()
+
+    # Update _trace with the FINAL decision (not the pre-override engine result)
+    if "_trace" in response:
+        response["_trace"]["decision"] = _blessed_action
 
     # FIX 4: store fleet health vector ONLY when the FINAL decision is USE_MEMORY
     if not _is_dry_run and _redis_enabled and _blessed_action == "USE_MEMORY":
