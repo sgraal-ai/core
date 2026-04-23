@@ -6179,6 +6179,7 @@ def create_snapshot(req: SnapshotRequest, key_record: dict = Depends(verify_api_
         "entry_count": len(entries_raw), "omega_avg": omega_avg,
         "compressed": _compressed, "size_bytes": _size,
         "_payload": payload.hex() if _compressed else _json.dumps(entries_raw),
+        "key_hash": kh,
     }
     _snapshots[sid] = snap
     redis_set(f"memory_snapshot:{kh}:{req.agent_id}:{sid}", {k: v for k, v in snap.items() if k != "_payload"}, ttl=90*86400)
@@ -6228,8 +6229,13 @@ def restore_snapshot(snapshot_id: str, req: RestoreRequest, key_record: dict = D
 
 @app.get("/v1/memory/diff/{snapshot_id_a}/{snapshot_id_b}")
 def diff_snapshots(snapshot_id_a: str, snapshot_id_b: str, key_record: dict = Depends(verify_api_key)):
+    _kh = _safe_key_hash(key_record)
     a = _snapshots.get(snapshot_id_a, {})
     b = _snapshots.get(snapshot_id_b, {})
+    if a and a.get("key_hash") and a["key_hash"] != _kh:
+        raise HTTPException(status_code=403, detail="Not authorized to access this snapshot")
+    if b and b.get("key_hash") and b["key_hash"] != _kh:
+        raise HTTPException(status_code=403, detail="Not authorized to access this snapshot")
     omega_a = a.get("omega_avg", 0)
     omega_b = b.get("omega_avg", 0)
     count_a = a.get("entry_count", 0)
@@ -6878,12 +6884,14 @@ class EnforceRequest(BaseModel):
     confirm: bool = False
 
 @app.post("/v1/court/enforce/{verdict_id}")
-def enforce_verdict(verdict_id: str, req: EnforceRequest, key_record: dict = Depends(verify_api_key)):
+def enforce_verdict(verdict_id: str, req: EnforceRequest, key_record: dict = Depends(verify_api_key),
+                    tenant: TenantContext = Depends(get_tenant_context)):
     _check_rate_limit(key_record)
     if verdict_id not in _court_verdicts:
         _cv = _load_store(f"court_verdict:{verdict_id}")
         if _cv: _court_verdicts[verdict_id] = _cv
         else: raise HTTPException(status_code=404, detail="Verdict not found")
+    tenant.assert_owns(_court_verdicts[verdict_id])
     # Idempotent check — Redis first, then in-memory
     if verdict_id not in _court_enforced:
         _ce = _load_store(f"court_verdict_enforced:{verdict_id}")
@@ -7799,14 +7807,15 @@ class ImmunityCertRequest(BaseModel):
 @app.post("/v1/certificate/generate")
 def generate_immunity(req: ImmunityCertRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
-    # Max 1 active per agent
-    if req.agent_id in _immunity_active:
-        existing = _immunity_active[req.agent_id]
+    kh = _safe_key_hash(key_record)
+    # Max 1 active per agent (keyed by tenant:agent)
+    _imm_key = f"{kh}:{req.agent_id}"
+    if _imm_key in _immunity_active:
+        existing = _immunity_active[_imm_key]
         if existing in _immunity_jobs and _immunity_jobs[existing].get("status") == "processing":
             raise HTTPException(status_code=409, detail=_json.dumps(
                 {"error": "certificate_in_progress", "job_id": existing}))
     # Thorough: max 1 per 7 days per key+agent
-    kh = _safe_key_hash(key_record)
     if req.level == "thorough":
         _thorough_key = f"{kh}:{req.agent_id}"
         last = _immunity_thorough_last.get(_thorough_key, 0)
@@ -7815,7 +7824,7 @@ def generate_immunity(req: ImmunityCertRequest, key_record: dict = Depends(verif
         _immunity_thorough_last[_thorough_key] = _time.time()
     job_id = str(uuid.uuid4())
     cert_id = str(uuid.uuid4())
-    _immunity_active[req.agent_id] = job_id
+    _immunity_active[_imm_key] = job_id
     # Simulate testing
     if req.level == "standard":
         attempts = {"poison": 1000, "injection": 500, "conflict": 500}
@@ -7830,8 +7839,8 @@ def generate_immunity(req: ImmunityCertRequest, key_record: dict = Depends(verif
             "certificate_url": f"/v1/certificate/{cert_id}", "passed": score >= 90,
             "agent_id": req.agent_id, "level": req.level}
     _immunity_certs[cert_id] = cert
-    _immunity_jobs[job_id] = {"status": "complete", "certificate_id": cert_id, "result": cert}
-    del _immunity_active[req.agent_id]
+    _immunity_jobs[job_id] = {"status": "complete", "certificate_id": cert_id, "result": cert, "key_hash": kh}
+    del _immunity_active[_imm_key]
     redis_set(f"immunity_cert:{cert_id}", cert, ttl=90*86400)
     return {"job_id": job_id, "status": "processing", "certificate_id": cert_id}
 
@@ -7845,6 +7854,8 @@ def get_certificate(cert_id: str, key_record: dict = Depends(verify_api_key)):
 def certificate_status(job_id: str, key_record: dict = Depends(verify_api_key)):
     j = _immunity_jobs.get(job_id)
     if not j: raise HTTPException(status_code=404, detail="Job not found")
+    if j.get("key_hash") and j["key_hash"] != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Not authorized to access this job")
     return j
 
 @app.get("/v1/certificate/verify/{cert_id}")
@@ -7887,7 +7898,7 @@ def redteam_run(req: RedTeamRequest, key_record: dict = Depends(verify_api_key))
     report = {"job_id": job_id, "status": "complete", "attack_results": results,
               "overall_resilience_score": overall, "critical_vulnerabilities": sum(1 for r in results if r.get("resilience", 1) < 0.9 and not r.get("skipped")),
               "recommendations": ["Review entries vulnerable to " + r["attack_type"] for r in results if r.get("resilience", 1) < 0.95 and not r.get("skipped")],
-              "memory_readiness_grade": grade}
+              "memory_readiness_grade": grade, "key_hash": kh}
     _redteam_jobs[job_id] = report
     # Webhook
     if req.report_webhook:
@@ -7900,12 +7911,16 @@ def redteam_run(req: RedTeamRequest, key_record: dict = Depends(verify_api_key))
 def redteam_status(job_id: str, key_record: dict = Depends(verify_api_key)):
     j = _redteam_jobs.get(job_id)
     if not j: raise HTTPException(status_code=404, detail="Job not found")
+    if j.get("key_hash") and j["key_hash"] != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Not authorized to access this job")
     return {"job_id": job_id, "status": j.get("status", "unknown"), "progress": 100}
 
 @app.get("/v1/redteam/report/{job_id}")
 def redteam_report(job_id: str, key_record: dict = Depends(verify_api_key)):
     j = _redteam_jobs.get(job_id)
     if not j: raise HTTPException(status_code=404, detail="Job not found")
+    if j.get("key_hash") and j["key_hash"] != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Not authorized to access this job")
     return j
 
 
@@ -7964,7 +7979,7 @@ def lab_run(req: LabRunRequest, key_record: dict = Depends(verify_api_key)):
               "readiness_score": score,
               "memory_readiness_certificate": "PASSED" if score >= 80 else "NEEDS_IMPROVEMENT",
               "recommendations": [f"Improve resilience to {f['scenario']}" for f in failures],
-              "billed": False}
+              "billed": False, "key_hash": _safe_key_hash(key_record)}
     _lab_jobs[job_id] = report
     return {"job_id": job_id, "status": "processing"}
 
@@ -7972,6 +7987,8 @@ def lab_run(req: LabRunRequest, key_record: dict = Depends(verify_api_key)):
 def lab_report(job_id: str, key_record: dict = Depends(verify_api_key)):
     j = _lab_jobs.get(job_id)
     if not j: raise HTTPException(status_code=404, detail="Job not found")
+    if j.get("key_hash") and j["key_hash"] != _safe_key_hash(key_record):
+        raise HTTPException(status_code=403, detail="Not authorized to access this job")
     return j
 
 

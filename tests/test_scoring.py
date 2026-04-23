@@ -12572,14 +12572,17 @@ class TestImmunityCertificate:
         assert "certificate_id" in r.json()
 
     def test_409_on_duplicate(self):
-        from api.main import _immunity_active, _immunity_jobs
-        _immunity_active["imm_dup"] = "fake_job"
+        from api.main import _immunity_active, _immunity_jobs, _safe_key_hash
+        import hashlib
+        _kh = hashlib.sha256("sg_test_key_001".encode()).hexdigest()
+        _imm_key = f"{_kh}:imm_dup"
+        _immunity_active[_imm_key] = "fake_job"
         _immunity_jobs["fake_job"] = {"status": "processing"}
         r = client.post("/v1/certificate/generate", json={
             "agent_id": "imm_dup", "memory_state": [_fresh_entry()]
         }, headers=AUTH)
         assert r.status_code == 409
-        del _immunity_active["imm_dup"]
+        del _immunity_active[_imm_key]
         del _immunity_jobs["fake_job"]
 
     @pytest.mark.skip(reason="Requires persistent Redis state across test runs")
