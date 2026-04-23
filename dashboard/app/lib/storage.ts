@@ -19,19 +19,37 @@ export function removeApiKey(): void {
   sessionStorage.removeItem("sgraal_api_key");
 }
 
+function _isValidApiUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname;
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname.endsWith(".sgraal.com") ||
+      hostname === "sgraal.com"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function getApiUrl(): string {
   if (!isBrowser) return "https://api.sgraal.com";
-  return localStorage.getItem("sgraal_api_url") ?? "https://api.sgraal.com";
+  const stored = sessionStorage.getItem("sgraal_api_url");
+  if (stored && _isValidApiUrl(stored)) return stored;
+  return "https://api.sgraal.com";
 }
 
 export function setApiUrl(url: string): void {
   if (!isBrowser) return;
-  localStorage.setItem("sgraal_api_url", url);
+  if (!_isValidApiUrl(url)) return;
+  sessionStorage.setItem("sgraal_api_url", url);
 }
 
 export function removeApiUrl(): void {
   if (!isBrowser) return;
-  localStorage.removeItem("sgraal_api_url");
+  sessionStorage.removeItem("sgraal_api_url");
 }
 
 export function getItem(key: string): string | null {
