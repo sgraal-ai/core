@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import logging
+import threading
 import urllib.parse
 from typing import Optional
 import requests as _requests_lib
@@ -17,22 +18,28 @@ UPSTASH_REDIS_TOKEN = os.getenv("UPSTASH_REDIS_TOKEN") or os.getenv("UPSTASH_RED
 # Eliminates 1,240 new TCP connections/sec at 10 RPS → ~10 persistent connections
 # ---------------------------------------------------------------------------
 _session: Optional[_requests_lib.Session] = None
+_session_lock = threading.Lock()
 
 def _get_session() -> _requests_lib.Session:
     """Lazy-init a shared requests.Session with connection pooling."""
     global _session
-    if _session is None:
-        _session = _requests_lib.Session()
+    if _session is not None:
+        return _session
+    with _session_lock:
+        if _session is not None:
+            return _session
+        s = _requests_lib.Session()
         # Pool up to 20 connections to the Redis host
         adapter = _requests_lib.adapters.HTTPAdapter(
             pool_connections=10,
             pool_maxsize=20,
             max_retries=0,  # We handle retries at the application level
         )
-        _session.mount("https://", adapter)
-        _session.mount("http://", adapter)
+        s.mount("https://", adapter)
+        s.mount("http://", adapter)
         if UPSTASH_REDIS_TOKEN:
-            _session.headers.update({"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"})
+            s.headers.update({"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"})
+        _session = s
     return _session
 
 def _headers():
@@ -56,17 +63,26 @@ def redis_get(key: str, default=None):
     return default
 
 def redis_set(key: str, value, ttl: int = 0):
-    """Set JSON value in Redis. Silent on failure."""
+    """Set JSON value in Redis. Silent on failure.
+    Uses POST body for payloads > 4KB to avoid URL length limits."""
     if not redis_available():
         return
     try:
         s = _get_session()
         data = json.dumps(value)
         _enc_key = urllib.parse.quote(key, safe='')
-        url = f"{UPSTASH_REDIS_URL}/SET/{_enc_key}/{urllib.parse.quote(data, safe='')}"
-        if ttl > 0:
-            url += f"/EX/{ttl}"
-        s.post(url, timeout=2)
+        if len(data) > 4096:
+            # Large payload: use Upstash REST pipeline with POST body
+            cmd = ["SET", key, data]
+            if ttl > 0:
+                cmd.extend(["EX", str(ttl)])
+            s.post(f"{UPSTASH_REDIS_URL}/pipeline",
+                   json=[cmd], timeout=2)
+        else:
+            url = f"{UPSTASH_REDIS_URL}/SET/{_enc_key}/{urllib.parse.quote(data, safe='')}"
+            if ttl > 0:
+                url += f"/EX/{ttl}"
+            s.post(url, timeout=2)
     except Exception as e:
         logger.debug("redis_set %s failed: %s", key, e)
 
