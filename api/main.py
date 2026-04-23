@@ -3977,26 +3977,41 @@ class TeamAPIKeyRequest(BaseModel):
 @app.post("/v1/teams")
 def create_team(req: TeamCreateRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    # Override owner_email with authenticated key's email to prevent spoofing
+    _owner_email = key_record.get("email", req.owner_email)
     team_id = str(uuid.uuid4())
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             http_requests.post(f"{SUPABASE_URL}/rest/v1/teams",
-                json={"id": team_id, "name": req.name, "owner_email": req.owner_email},
+                json={"id": team_id, "name": req.name, "owner_email": _owner_email},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
             http_requests.post(f"{SUPABASE_URL}/rest/v1/team_members",
-                json={"team_id": team_id, "user_email": req.owner_email, "role": "admin", "status": "active"},
+                json={"team_id": team_id, "user_email": _owner_email, "role": "admin", "status": "active"},
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                          "Content-Type": "application/json", "Prefer": "return=minimal"}, timeout=5)
         except Exception:
             pass
-    return {"team_id": team_id, "name": req.name, "owner_email": req.owner_email}
+    return {"team_id": team_id, "name": req.name, "owner_email": _owner_email}
 
 @app.post("/v1/teams/invite")
 def invite_member(req: TeamInviteRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
     if req.role not in _ROLE_SCOPES:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {list(_ROLE_SCOPES.keys())}")
+    # Verify caller is admin of team_id before inserting
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        _caller_email = key_record.get("email", key_record.get("customer_id", ""))
+        try:
+            _admin_check = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/team_members?team_id=eq.{req.team_id}&user_email=eq.{_caller_email}&role=eq.admin&select=role",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if _admin_check.ok and not _admin_check.json():
+                raise HTTPException(status_code=403, detail="Only team admins can invite members")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
             http_requests.post(f"{SUPABASE_URL}/rest/v1/team_members",
@@ -4054,6 +4069,19 @@ def remove_member(email: str, team_id: str, key_record: dict = Depends(verify_ap
 @app.post("/v1/teams/api-keys")
 def create_team_key(req: TeamAPIKeyRequest, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    # Verify caller is a member of team_id before creating key
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        _caller_email = key_record.get("email", key_record.get("customer_id", ""))
+        try:
+            _member_check = http_requests.get(
+                f"{SUPABASE_URL}/rest/v1/team_members?team_id=eq.{req.team_id}&user_email=eq.{_caller_email}&select=role",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if _member_check.ok and not _member_check.json():
+                raise HTTPException(status_code=403, detail="Only team members can create team API keys")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
     new_key = f"sg_team_{secrets.token_urlsafe(32)}"
     key_hash = hashlib.sha256(new_key.encode()).hexdigest()
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
