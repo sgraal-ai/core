@@ -696,10 +696,7 @@ logger.info("Audit log retention: %d days (set SGRAAL_AUDIT_RETENTION_DAYS to ch
 
 # ---------------------------------------------------------------------------
 # IP-based rate limiting for public (unauthenticated) endpoints
-# ---------------------------------------------------------------------------
-_PUBLIC_RL_LIMIT = 60  # requests per minute per IP per endpoint
-_PUBLIC_RL_WINDOW = 60  # seconds
-
+# _PUBLIC_RL_LIMIT and _PUBLIC_RL_WINDOW imported from api.helpers
 # _extract_client_ip — imported from api.helpers
 
 def _check_public_rate_limit(request: Request, endpoint_name: str) -> dict:
@@ -4356,14 +4353,14 @@ def preflight_stream(req: PreflightRequest, key_record: dict = Depends(verify_ap
     return StreamingResponse(_generate(), media_type="text/event-stream")
 
 
-# ---- #22 Memory Diff ----
+# ---- #22 Memory Diff (v2 — structured) ----
 
-class MemoryDiffRequest(BaseModel):
+class MemoryDiffV2Request(BaseModel):
     memory_state_before: list[dict]
     memory_state_after: list[dict]
 
 @app.post("/v1/memory/diff", operation_id="memory_diff_v2")
-def memory_diff_v2(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_key)):
+def memory_diff_v2(req: MemoryDiffV2Request, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record, allow_demo=True)
     before_ids = {e["id"]: e for e in req.memory_state_before}
     after_ids = {e["id"]: e for e in req.memory_state_after}
