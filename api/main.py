@@ -810,6 +810,15 @@ def verify_api_key(
 
     raise HTTPException(status_code=401, detail="Invalid API key")
 
+
+# ---- Tenant isolation context (Phase 2a) ----
+from api.tenant import TenantContext, create_tenant_context
+
+def get_tenant_context(key_record: dict = Depends(verify_api_key)) -> TenantContext:
+    """FastAPI dependency — extracts TenantContext from authenticated key."""
+    return create_tenant_context(key_record, _safe_key_hash)
+
+
 class MemoryEntryRequest(BaseModel):
     id: str
     content: str
