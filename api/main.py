@@ -3991,6 +3991,8 @@ def invite_member(req: TeamInviteRequest, key_record: dict = Depends(verify_api_
 
 @app.get("/v1/teams/members")
 def list_members(team_id: str, key_record: dict = Depends(verify_api_key)):
+    # Verify caller is a member of the team before listing
+    _caller_id = key_record.get("customer_id", "")
     members = []
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
@@ -4000,6 +4002,10 @@ def list_members(team_id: str, key_record: dict = Depends(verify_api_key)):
                 members = r.json()
         except Exception:
             pass
+    # Only return members if the caller is a member of this team
+    _caller_in_team = any(m.get("email") == _caller_id or m.get("user_id") == _caller_id for m in members)
+    if not _caller_in_team and members:
+        raise HTTPException(status_code=403, detail="Not a member of this team")
     return {"team_id": team_id, "members": members}
 
 @app.delete("/v1/teams/members/{email}")
@@ -4045,8 +4051,21 @@ def create_team_key(req: TeamAPIKeyRequest, key_record: dict = Depends(verify_ap
 
 @app.get("/v1/teams/api-keys")
 def list_team_keys(team_id: str, key_record: dict = Depends(verify_api_key)):
+    # Verify caller is a member of this team
+    _caller_id = key_record.get("customer_id", "")
+    _is_member = False
     keys = []
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            _mr = http_requests.get(f"{SUPABASE_URL}/rest/v1/team_members?team_id=eq.{team_id}&select=email,user_id",
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
+            if _mr.ok:
+                _members = _mr.json()
+                _is_member = any(m.get("email") == _caller_id or m.get("user_id") == _caller_id for m in _members)
+        except Exception:
+            pass
+        if not _is_member:
+            raise HTTPException(status_code=403, detail="Not a member of this team")
         try:
             r = http_requests.get(f"{SUPABASE_URL}/rest/v1/team_api_keys?team_id=eq.{team_id}&select=id,name,scopes,created_at",
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
@@ -6804,10 +6823,12 @@ def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api
         pass
     confidence = round(1 - (scored[0]["omega"] / 100), 2) if scored else 0
     vid = str(uuid.uuid4())
+    _verdict_kh = _safe_key_hash(key_record)
     verdict = {"verdict_id": vid, "winner_entries": winners, "loser_entries": losers,
                "confidence": confidence, "arbitration_method": "omega_scoring + causal_inference",
                "z3_proof": _z3_proof, "explanation": f"Winner has omega={scored[0]['omega']:.1f}, most reliable by {len(scored)} entry analysis",
                "overridable": False, "authority": "formal_verification",
+               "key_hash": _verdict_kh,
                "created_at": datetime.now(timezone.utc).isoformat()}
     _evict_if_full(_court_verdicts, "_court_verdicts")
     _court_verdicts[vid] = verdict
@@ -6816,7 +6837,8 @@ def court_arbitrate(req: ArbitrateRequest, key_record: dict = Depends(verify_api
 
 @app.get("/v1/court/verdicts")
 def list_verdicts(key_record: dict = Depends(verify_api_key)):
-    return {"verdicts": list(_court_verdicts.values())[-50:]}
+    _kh = _safe_key_hash(key_record)
+    return {"verdicts": [v for v in list(_court_verdicts.values())[-50:] if v.get("key_hash") == _kh]}
 
 class EnforceRequest(BaseModel):
     confirm: bool = False

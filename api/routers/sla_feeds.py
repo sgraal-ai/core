@@ -134,7 +134,7 @@ def delete_sla_rule(rule_id: str, key_record: dict = Depends(verify_api_key)):
 
 @router.get("/v1/sla/report")
 def sla_report(key_record: dict = Depends(verify_api_key)):
-    """SLA dashboard — computed from in-memory metrics + audit_log."""
+    """SLA dashboard — aggregated platform metrics (not per-tenant). Per-tenant SLA requires metrics refactor."""
     times = sorted(_metrics.response_times) if _metrics.response_times else []
     n = len(times)
 
@@ -186,6 +186,7 @@ def sla_report(key_record: dict = Depends(verify_api_key)):
         for b in buckets:
             b["pct"] = round((b["pct"] / n) * 100, 1)
     return {
+        "scope": "platform",
         "uptime": uptime, "days_since_incident": days_since_incident,
         "p50": p50, "p95": p95, "p99": p99,
         "error_rate": error_rate, "block_rate": block_rate,
