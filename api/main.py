@@ -9920,9 +9920,10 @@ def list_aging_rules(key_record: dict = Depends(verify_api_key)):
 @app.delete("/v1/aging-rules/{rule_id}")
 def delete_aging_rule(rule_id: str, key_record: dict = Depends(verify_api_key)):
     _check_rate_limit(key_record)
+    kh = _safe_key_hash(key_record)
     if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         try:
-            http_requests.delete(f"{SUPABASE_URL}/rest/v1/aging_rules?id=eq.{rule_id}",
+            http_requests.delete(f"{SUPABASE_URL}/rest/v1/aging_rules?id=eq.{rule_id}&api_key_hash=eq.{kh}",
                 headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
         except Exception:
             pass
@@ -15135,7 +15136,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _koop = response.get("koopman", {})
         _pred5 = _koop.get("prediction_5") if isinstance(_koop, dict) else None
         if _pred5 is not None and float(_pred5) > 60:
-            _steps_to_block = 5 if float(_pred5) > 80 else 3 if float(_pred5) > 70 else 5
+            _steps_to_block = 1 if float(_pred5) > 80 else 3 if float(_pred5) > 70 else 5
             response["forecast_warning"] = True
             response["forecast_horizon"] = _steps_to_block
             response["forecast_integrated"] = True
@@ -15340,6 +15341,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                     "timestamp_integrity": response.get("timestamp_integrity", "VALID"),
                     "identity_drift": response.get("identity_drift", "CLEAN"),
                     "consensus_collapse": response.get("consensus_collapse", "CLEAN"),
+                    "provenance_chain_integrity": response.get("provenance_chain_integrity", "CLEAN"),
+                    "sync_bleed": response.get("sync_bleed", "CLEAN"),
+                    "confidence_calibration_check": response.get("confidence_calibration_check", "CLEAN"),
                 }
                 _sig_d = _extract_attack_signature(req.memory_state, _det_results_d, req.domain, content_hash=_input_hash_full[:16])
                 redis_set(f"vaccine:{_sig_d['signature_id']}", _encrypt_vaccine(_sig_d), ttl=604800)
@@ -15477,7 +15481,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     response["_trace"] = {
         "span": "preflight",
         "api_key_id": _safe_key_hash(key_record),
-        "decision": result.recommended_action,
+        "decision": None,  # Set to _blessed_action after _finalize_decision()
         "omega_score": omega_out,
         "request_id": request_id,
         "duration_ms": _duration_ms,
@@ -16927,7 +16931,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             if isinstance(_hook_out, tuple) and len(_hook_out) == 2:
                 _new_omega, _new_decision = _hook_out
                 if abs(float(_new_omega) - _current_omega) > 1e-9:
-                    response["omega_mem_final"] = round(float(_new_omega), 2)
+                    if float(_new_omega) >= _current_omega:
+                        response["omega_mem_final"] = round(float(_new_omega), 2)
+                    else:
+                        response["plugin_omega_downgrade_blocked"] = True
                 if _new_decision != _current_decision:
                     _cur_sev = _SEVERITY.get(_current_decision, 0)
                     _new_sev = _SEVERITY.get(str(_new_decision), 0)
