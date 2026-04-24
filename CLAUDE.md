@@ -91,6 +91,19 @@ Compare-And-Swap pattern for concurrent Redis updates: `redis_mvcc_get(key)` →
 
 23 intermediate events across 4 phases: 15 scoring module_complete → 6 detection_complete (layer states) → 1 invariant_check → 1 complete (final decision). Progress percentage monotonically increases. Events emitted post-computation (pipeline runs first, results replayed as stream).
 
+### Dict eviction (#374)
+
+31 global in-memory dicts registered for periodic eviction via `_run_periodic_cleanup`. TTL-based (default 24h) and size-cap (10000 entries) eviction prevents unbounded memory growth on long-running processes.
+
+### Diagnostic response fields (#480-484)
+
+5 informational fields in preflight response (do NOT affect `recommended_action`):
+- `risk_type_shift` — dominant risk component change between preflights
+- `duplicate_entries` — content-hash duplicates within memory_state
+- `repair_calibration_error` — projected vs actual omega improvement
+- `peak_degradation_hour` — worst time-of-day for memory health
+- `counterfactual_block_value` — fleet BLOCK confirmation rate
+
 ### Other key subsystems
 
 - **Plugin system** — registry-only, per-tenant isolation, no remote code upload
@@ -135,7 +148,7 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,643 passing (as of 2026-04-23)
+- pytest: 2,658 passing (as of 2026-04-23)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
 - Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate
 - R2 F1: 1.0000 (must not regress)
