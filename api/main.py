@@ -17593,6 +17593,103 @@ def preflight(req: PreflightRequest, request: Request, key_record: dict = Depend
     return _preflight_internal(req, key_record, client_ip=client_ip)
 
 
+# ---- Behavioral Profile ----
+
+@app.get("/v1/agent/{agent_id}/behavioral-profile")
+def get_behavioral_profile(agent_id: str, tenant: TenantContext = Depends(get_tenant_context)):
+    """Return behavioral profile for an agent based on outcome history."""
+    # Check Redis cache first
+    _cache_key = f"behavioral_profile:{tenant.key_hash}:{agent_id}"
+    _cached = redis_get(_cache_key)
+    if _cached and isinstance(_cached, dict):
+        return _cached
+
+    # Filter outcomes by tenant + agent_id
+    _filtered = []
+    for _oid, _od in list(_outcomes.items()):
+        if _od.get("key_hash") == tenant.key_hash and _od.get("agent_id") == agent_id:
+            _filtered.append(_od)
+
+    if not _filtered:
+        _empty = {
+            "agent_id": agent_id,
+            "call_frequency": {"hourly": [], "daily": []},
+            "action_escalation": {"ratio": None, "trend": None},
+            "domain_switching": {"primary": None, "distribution": {}},
+            "decision_distribution": {"USE_MEMORY": 0, "WARN": 0, "ASK_USER": 0, "BLOCK": 0},
+            "omega_history": {"mean": None, "stddev": None, "max": None, "samples": 0},
+        }
+        redis_set(_cache_key, _empty, ttl=300)
+        return _empty
+
+    # Call frequency — hourly (24 buckets) and daily (7 buckets)
+    _hourly = [0] * 24
+    _daily = [0] * 7
+    for _od in _filtered:
+        _ts = _od.get("created_at", "")
+        if _ts:
+            try:
+                _dt = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
+                _hourly[_dt.hour] += 1
+                _daily[_dt.weekday()] += 1
+            except (ValueError, TypeError):
+                pass
+
+    # Action escalation — ratio of severe (ASK_USER/BLOCK) to total, trend
+    _severe = sum(1 for _od in _filtered if _od.get("recommended_action") in ("ASK_USER", "BLOCK"))
+    _total = len(_filtered)
+    _ratio = round(_severe / _total, 4) if _total else 0
+    # Trend: compare first half vs second half
+    _half = _total // 2
+    if _half > 0:
+        _first_severe = sum(1 for _od in _filtered[:_half] if _od.get("recommended_action") in ("ASK_USER", "BLOCK"))
+        _second_severe = sum(1 for _od in _filtered[_half:] if _od.get("recommended_action") in ("ASK_USER", "BLOCK"))
+        _first_rate = _first_severe / _half
+        _second_rate = _second_severe / (_total - _half)
+        _trend = "increasing" if _second_rate > _first_rate + 0.05 else "decreasing" if _second_rate < _first_rate - 0.05 else "stable"
+    else:
+        _trend = "insufficient_data"
+
+    # Domain switching
+    _domain_counts: dict[str, int] = {}
+    for _od in _filtered:
+        _d = _od.get("domain", "general")
+        _domain_counts[_d] = _domain_counts.get(_d, 0) + 1
+    _primary_domain = max(_domain_counts, key=_domain_counts.get) if _domain_counts else None
+    _domain_dist = {k: round(v / _total, 4) for k, v in _domain_counts.items()} if _total else {}
+
+    # Decision distribution
+    _dec_dist = {"USE_MEMORY": 0, "WARN": 0, "ASK_USER": 0, "BLOCK": 0}
+    for _od in _filtered:
+        _dec = _od.get("recommended_action", "USE_MEMORY")
+        if _dec in _dec_dist:
+            _dec_dist[_dec] += 1
+
+    # Omega history
+    _omegas = [_od.get("omega_mem_final", 0) for _od in _filtered if "omega_mem_final" in _od]
+    _n_samples = len(_omegas)
+    if _n_samples > 0:
+        _mean = round(sum(_omegas) / _n_samples, 2)
+        _max_omega = round(max(_omegas), 2)
+        _variance = sum((_o - _mean) ** 2 for _o in _omegas) / _n_samples
+        _stddev = round(_variance ** 0.5, 2)
+    else:
+        _mean = None
+        _max_omega = None
+        _stddev = None
+
+    _result = {
+        "agent_id": agent_id,
+        "call_frequency": {"hourly": _hourly, "daily": _daily},
+        "action_escalation": {"ratio": _ratio, "trend": _trend},
+        "domain_switching": {"primary": _primary_domain, "distribution": _domain_dist},
+        "decision_distribution": _dec_dist,
+        "omega_history": {"mean": _mean, "stddev": _stddev, "max": _max_omega, "samples": _n_samples},
+    }
+    redis_set(_cache_key, _result, ttl=300)
+    return _result
+
+
 # ---- Router includes ----
 # All routers are imported and included at the bottom so the main module's
 # globals (verify_api_key, _check_rate_limit, API_KEYS, app) are fully defined
