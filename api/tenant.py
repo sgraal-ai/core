@@ -63,8 +63,9 @@ class TenantContext:
 
     def supabase_filter(self, url: str) -> str:
         """Append api_key_hash=eq.{key_hash} filter to a Supabase REST URL."""
+        import urllib.parse
         sep = "&" if "?" in url else "?"
-        return f"{url}{sep}api_key_hash=eq.{self.key_hash}"
+        return f"{url}{sep}api_key_hash=eq.{urllib.parse.quote(self.key_hash, safe='')}"
 
 
 def create_tenant_context(key_record: dict, safe_key_hash_fn) -> TenantContext:

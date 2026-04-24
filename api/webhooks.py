@@ -139,7 +139,13 @@ def _dispatch_webhooks(decision: str, request_id: str, omega: float, entry_ids: 
                     timeout=5,
                 )
             except Exception as exc:
-                logger.warning("Webhook dispatch failed for %s: %s", url, exc)
+                # Mask URL to hostname only to avoid leaking paths/tokens in logs
+                try:
+                    from urllib.parse import urlparse as _wh_urlparse
+                    _masked_host = _wh_urlparse(url).hostname or "unknown"
+                except Exception:
+                    _masked_host = "unknown"
+                logger.warning("Webhook dispatch failed for %s: %s", _masked_host, exc)
 
         threading.Thread(target=_send, daemon=True).start()
 

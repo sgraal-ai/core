@@ -339,11 +339,13 @@ def _check_public_rate_limit(request: Request, endpoint_name: str,
         count = int(incr_r.json().get("result", 0))
         # Set TTL only on first request in window to prevent sliding window bypass
         if count == 1:
-            http_requests.post(
+            _exp_r = http_requests.post(
                 f"{upstash_url}/EXPIRE/{rl_key}/{_PUBLIC_RL_WINDOW}",
                 headers={"Authorization": f"Bearer {upstash_token}"},
                 timeout=1,
             )
+            if not _exp_r.ok:
+                logger.warning("EXPIRE failed for rate limit key %s: %s", rl_key, _exp_r.status_code)
         remaining = max(0, _PUBLIC_RL_LIMIT - count)
         if count > _PUBLIC_RL_LIMIT:
             reset_ts = int(_time.time()) + _PUBLIC_RL_WINDOW

@@ -243,7 +243,9 @@ async def _scheduler_daily_snapshot():
 
             for aid in list(agent_ids)[:100]:  # Cap at 100 agents
                 snap_key = f"snapshot:{aid}:{today}"
-                # Find most recent outcome for this agent
+                # Find most recent outcome for this agent.
+                # Relies on dict insertion order (Python 3.7+): reversed()
+                # iterates newest-first because _outcomes is append-only.
                 latest = None
                 for _oid, _od in reversed(list(_outcomes.items())):
                     if _od.get("agent_id") == aid:
@@ -1576,7 +1578,9 @@ def certify_memory(req: CertifyRequest, key_record: dict = Depends(verify_api_ke
     import json as _json_mod
     _check_rate_limit(key_record)
 
-    # Run preflight internally — direct call, no TestClient or test key
+    # Run preflight internally — direct call, no TestClient or test key.
+    # dry_run=True is intentional: certification should not incur billing
+    # charges or side effects (audit_log writes, webhook dispatch, etc.).
     try:
         _pf_req = PreflightRequest(
             memory_state=[MemoryEntryRequest(**e) if isinstance(e, dict) else e for e in req.memory_state[:20]],
@@ -1855,10 +1859,11 @@ def production_validation(key_record: dict = Depends(verify_api_key)):
     if _sb:
         try:
             # Pull latest 5,000 rows for this tenant
+            # audit_log stores kh[:16] as api_key_id
             result = (
                 _sb.table("audit_log")
                 .select("*")
-                .eq("api_key_id", kh)
+                .eq("api_key_id", kh[:16])
                 .order("created_at", desc=True)
                 .limit(5000)
                 .execute()
@@ -2737,6 +2742,7 @@ class MemoryDiffRequest(BaseModel):
 @app.post("/v1/memory-diff")
 def memory_diff(req: MemoryDiffRequest, key_record: dict = Depends(verify_api_key)):
     """Compare two memory states and show what changed."""
+    _check_rate_limit(key_record, allow_demo=True)
     before_ids = {e.get("id") if isinstance(e, dict) else e.id for e in req.before}
     after_ids = {e.get("id") if isinstance(e, dict) else e.id for e in req.after}
     before_map = {(e.get("id") if isinstance(e, dict) else e.id): e for e in req.before}
@@ -2861,6 +2867,8 @@ def get_replay_history(key_record: dict = Depends(verify_api_key)):
 def decision_heatmap(days: int = Query(7), domain: Optional[str] = None,
                      tenant: TenantContext = Depends(get_tenant_context)):
     """Decision heatmap by hour and day of week."""
+    # TODO: `days` parameter is accepted but not used for filtering yet;
+    # currently returns all available data regardless of time window.
     _kh = tenant.key_hash
     _days_of_week = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     heatmap = []
@@ -2986,9 +2994,10 @@ def get_insights(agent_id: str = Query(""), domain: str = Query("general"), key_
     _recent_action = None
     _recent_domain = domain
 
-    # Check in-memory outcomes (newest first)
+    # Check in-memory outcomes (newest first), filtered by tenant
+    _insights_kh = _safe_key_hash(key_record)
     for _oid, _od in reversed(list(_outcomes.items())):
-        if _od.get("agent_id") == agent_id:
+        if _od.get("agent_id") == agent_id and _od.get("key_hash") == _insights_kh:
             _mem_state = _od.get("memory_state", [])
             _recent_omega = _od.get("omega_mem_final")
             _recent_action = _od.get("recommended_action")
@@ -3320,7 +3329,7 @@ def detect_sleeper(req: dict = {}, key_record: dict = Depends(verify_api_key)):
         redis_set(_fw_key, _after, ttl=86400)
         fw_updated = True
     return {
-        "sleeper_detected": sleeper_detected, "namespace": namespace,
+        "sleeper_detected": sleeper_detected,
         "write_firewall_updated": fw_updated,
         "write_firewall_threshold_before": _before, "write_firewall_threshold_after": _after,
     }
@@ -3804,9 +3813,11 @@ _CEF_SEVERITY = {"USE_MEMORY": 1, "WARN": 5, "ASK_USER": 7, "BLOCK": 10}
 def export_audit_log(format: str = Query("json"), limit: int = Query(100, le=1000),
                      since: Optional[str] = None, key_record: dict = Depends(verify_api_key)):
     """Export audit log in SIEM-compatible format (json, cef, leef)."""
-    # Get recent outcomes as audit entries
+    # Get recent outcomes as audit entries, filtered by tenant
+    _export_kh = _safe_key_hash(key_record)
     _entries = []
-    for _oid, _od in list(_outcomes.items())[-limit:]:
+    _filtered_outcomes = [(_oid, _od) for _oid, _od in _outcomes.items() if _od.get("key_hash") == _export_kh]
+    for _oid, _od in _filtered_outcomes[-limit:]:
         _entry = {
             "request_id": _od.get("request_id", _oid),
             "decision": _od.get("recommended_action", "USE_MEMORY"),
@@ -3869,8 +3880,10 @@ def run_calibration(req: CalibrationRunRequest, key_record: dict = Depends(verif
     _quota_cost = len(cases)
     _quota_warning = f"This run will consume {_quota_cost} preflight calls" if _quota_cost > 100 else None
     _is_demo_caller = key_record.get("demo", False)
-    # Use caller's API key for calibration, not hardcoded demo key
-    _cal_api_key = key_record.get("raw_key", "sg_demo_playground")
+    # Use caller's API key for calibration — never fall back to demo key
+    _cal_api_key = key_record.get("raw_key")
+    if not _cal_api_key:
+        raise HTTPException(status_code=400, detail="API key required for calibration")
     engine = CalibrationEngine(api_url="https://api.sgraal.com", api_key=_cal_api_key)
     report = engine.run_corpus_cases(cases)
     report.corpus_name = req.corpus
@@ -4509,7 +4522,7 @@ def submit_async_batch(req: AsyncBatchRequest, key_record: dict = Depends(verify
     except Exception:
         _async_jobs[job_id]["status"] = "failed"
 
-    return {"job_id": job_id, "status": "queued", "estimated_seconds": est}
+    return {"job_id": job_id, "status": _async_jobs[job_id].get("status", "queued"), "estimated_seconds": est}
 
 @app.get("/v1/batch/async/{job_id}")
 def get_async_batch(job_id: str, tenant: TenantContext = Depends(get_tenant_context)):
@@ -4720,7 +4733,11 @@ def bulk_export(agent_id: Optional[str] = None, format: str = "json", key_record
 
     if format == "csv":
         header = "id,content,memory_type,omega_score,blocked\n"
-        rows = [f'{e.get("id","")},{e.get("content","").replace(",","")},{e.get("memory_type","")},{e.get("omega_score",0)},{e.get("blocked",False)}' for e in entries]
+        def _csv_escape(val: str) -> str:
+            """Escape a CSV field: double-quote and escape inner quotes."""
+            s = str(val).replace('"', '""')
+            return f'"{s}"'
+        rows = [f'{_csv_escape(e.get("id",""))},{_csv_escape(e.get("content",""))},{_csv_escape(e.get("memory_type",""))},{e.get("omega_score",0)},{e.get("blocked",False)}' for e in entries]
         return {"format": "csv", "data": header + "\n".join(rows), "count": len(entries)}
     return {"format": "json", "data": entries, "count": len(entries)}
 
@@ -6093,7 +6110,9 @@ def playground_save(data: dict, key_record: dict = Depends(verify_api_key)):
     return {"share_id": share_id, "share_url": f"https://sgraal.com/playground?share={share_id}"}
 
 @app.get("/v1/playground/load/{share_id}")
-def playground_load(share_id: str):
+def playground_load(share_id: str, request: Request):
+    # Public endpoint with IP-based rate limiting (authentication via rate limit)
+    _check_public_rate_limit(request, "playground_load")
     data = redis_get(f"playground_share:{share_id}")
     if not data:
         raise HTTPException(status_code=404, detail="Share link expired or not found")
@@ -6637,9 +6656,12 @@ def import_passport(req: PassportImportRequest, key_record: dict = Depends(verif
 
 @app.get("/v1/memory/passport/{passport_id}/verify")
 def verify_passport(passport_id: str):
-    """Public endpoint — no auth required."""
+    """Public endpoint — no auth required. Returns validity only, no tenant-sensitive data."""
     passport = _passports.get(passport_id) or redis_get(f"memory_passport:{passport_id}")
     if not passport:
+        return {"valid": False, "expired": True, "agent_id_hash": None, "signature_key_version": None}
+    # Tenant check: passport must have a source_key_hash to be valid
+    if not passport.get("source_key_hash"):
         return {"valid": False, "expired": True, "agent_id_hash": None, "signature_key_version": None}
     expired = False
     try:
@@ -6990,12 +7012,18 @@ def set_commons_policy(req: CommonsPolicyRequest, key_record: dict = Depends(ver
     _check_rate_limit(key_record)
     if req.commons_id not in _commons:
         raise HTTPException(status_code=404, detail="Commons not found")
+    _policy_kh = _safe_key_hash(key_record)
+    if _commons[req.commons_id].get("key_hash") != _policy_kh:
+        raise HTTPException(status_code=403, detail="Commons does not belong to this tenant")
     pk = f"{req.commons_id}:{req.agent_id}"
     _commons_policies[pk] = {"can_read": req.can_read, "can_write": req.can_write, "agent_id": req.agent_id}
     return {"policy_set": True, "commons_id": req.commons_id, "agent_id": req.agent_id}
 
 @app.get("/v1/commons/{commons_id}/activity")
 def commons_activity(commons_id: str, key_record: dict = Depends(verify_api_key)):
+    _activity_kh = _safe_key_hash(key_record)
+    if commons_id in _commons and _commons[commons_id].get("key_hash") != _activity_kh:
+        raise HTTPException(status_code=403, detail="Commons does not belong to this tenant")
     return {"commons_id": commons_id, "activity": _commons_activity.get(commons_id, [])[-100:]}
 
 @app.get("/v1/commons")
@@ -7288,7 +7316,13 @@ def register_rollback(req: RollbackRegisterRequest, key_record: dict = Depends(v
     return {"registered": True, "action_id": req.action_id, "expires_at": _rollback_actions[req.action_id]["expires_at"]}
 
 def _call_webhook_with_retry(url: str, payload: dict, max_retries: int = 3) -> tuple:
-    """Call webhook with exponential backoff. Returns (success, attempts)."""
+    """Call webhook with exponential backoff. Returns (success, attempts).
+
+    NOTE: Uses synchronous time.sleep() for backoff delays, which blocks the
+    current worker thread. This is acceptable for webhook retries (rare, short
+    delays capped at 1s in practice) but should be replaced with async retry
+    if webhook volume grows.
+    """
     delays = [1, 5, 30]
     for i in range(max_retries):
         try:
@@ -7307,6 +7341,9 @@ def trigger_rollback(action_id: str, key_record: dict = Depends(verify_api_key))
     action = _rollback_actions.get(action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Rollback action not found or expired")
+    _rollback_kh = _safe_key_hash(key_record)
+    if action.get("key_hash") != _rollback_kh:
+        raise HTTPException(status_code=403, detail="Rollback action does not belong to this tenant")
     webhook_status = "not_configured"
     webhook_failed = False
     if action.get("rollback_webhook"):
@@ -7639,6 +7676,7 @@ def certify_fidelity(req: dict, key_record: dict = Depends(verify_api_key)):
         cert = {"entry_id": eid, "fidelity_score": score, "freshness": round(fresh, 3),
                 "provenance": round(prov, 3), "consistency": round(consist, 3),
                 "certified_at": datetime.now(timezone.utc).isoformat()}
+        _evict_if_full(_fidelity_certs, "_fidelity_certs")
         _fidelity_certs[f"{kh}:{eid}"] = cert
         redis_set(f"fidelity_cert:{kh}:{eid}", cert, ttl=30*86400)
         certs.append(cert)
@@ -7840,6 +7878,7 @@ def token_waste(period_days: int = 30, agent_id: str = "", key_record: dict = De
             "estimated_tokens_wasted": int(wasted), "estimated_cost_usd": cost,
             "savings_if_filtered": savings, "roi_multiple": roi,
             "top_wasteful_entries": top_entries,
+            "scope": "platform",  # Metrics are platform-wide, not per-agent
             "recommendation": "Filter blocked entries from retrieval pipeline" if blocked > 0 else "Memory quality is good"}
 
 
@@ -9435,7 +9474,7 @@ def benchmark_run(req: BenchmarkRunRequest, key_record: dict = Depends(verify_ap
     # Store results
     if req.store_results:
         _persist_store_bg(f"benchmark:history:{ts_now}", result_obj, ttl=7776000)  # 90 days
-        _persist_store_bg("benchmark:latest", result_obj, ttl=0)
+        _persist_store_bg("benchmark:latest", result_obj, ttl=7776000)  # 90 days
 
     return result_obj
 
@@ -12127,6 +12166,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                               "timestamp_age_days": e.timestamp_age_days, "source_trust": e.source_trust,
                               "source_conflict": e.source_conflict, "downstream_count": e.downstream_count}
                              for e in entries[:20]],
+            "key_hash": _pf_tenant,
         })
 
     # Increment Global State Vector
@@ -13806,7 +13846,6 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             response["owa_provenance"] = {"owa_score": owa.owa_score, "weights_used": owa.weights_used, "orness": owa.orness}
             if "component_breakdown" in response:
                 _owa_risk = (1.0 - owa.owa_score) * 100
-                _owa_risk = (1.0 - owa.owa_score) * 100
                 _existing_prov_owa = response["component_breakdown"].get("s_provenance", 0)
                 response["component_breakdown"]["s_provenance"] = round(min(100, _existing_prov_owa + (_owa_risk - _existing_prov_owa) * 0.8), 2)
     except Exception as _e:
@@ -14616,6 +14655,8 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     entry_ids = [e.id for e in entries]
 
     # Metrics + tracing
+    # TODO: record_preflight uses the engine's pre-override decision here;
+    # the FINAL post-override decision is only known after _finalize_decision() below.
     _duration = _time.monotonic() - _t_start
     _metrics.record_preflight(result.recommended_action, omega_out, _duration)
     # #83 Named Pattern Detection
@@ -15356,8 +15397,8 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 _sig_d = _extract_attack_signature(req.memory_state, _det_results_d, req.domain, content_hash=_input_hash_full[:16])
                 redis_set(f"vaccine:{_sig_d['signature_id']}", _encrypt_vaccine(_sig_d), ttl=604800)
                 _vax_idx_key_d = f"vaccine_index:{_pf_tenant}:{req.domain}"
-                import urllib.parse as _urlp_d
-                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key_d}/{_urlp_d.quote(_sig_d['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
+                # urllib.parse imported at module top (line 19)
+                _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LPUSH/{_vax_idx_key_d}/{urllib.parse.quote(_sig_d['signature_id'], safe='')}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/{_vax_idx_key_d}/0/99", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/{_vax_idx_key_d}/604800", headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=2)
                 response["_vaccination_stored"] = True
@@ -15446,7 +15487,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                          "genuine_corroboration", "consensus_collapse_initial", "genuine_corroboration_applied",
                          "consensus_detection_method", "memory_location_analysis",
                          "proof_signature", "attestation_version", "attestable", "cloud_events",
-                         "otel", "fairness_flags", "action_checkpoint", "zk_proof", "federation_check", "omega_adjusted",
+                         "otel", "fairness_flags", "zk_proof", "federation_check",
                          "omega_detection_adjusted", "omega_adjustment_reason", "detection_omega_contribution",
                          "provenance_signature", "provenance_signed", "replay_available",
                          "content_independence_score", "content_too_similar",
@@ -15576,9 +15617,9 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         response["cross_domain_block"] = False
 
     # Feature 4: Portable safety attestation
-    import hmac as _hmac_mod
+    # Uses module-level _hmac (import hmac as _hmac at line 20)
     _attest_msg = f"{_input_hash_full}:{omega_out}:{response.get('recommended_action', 'USE_MEMORY')}:{request_id}"
-    response["proof_signature"] = _hmac_mod.new(ATTESTATION_SECRET.encode(), _attest_msg.encode(), hashlib.sha256).hexdigest()
+    response["proof_signature"] = _hmac.new(ATTESTATION_SECRET.encode(), _attest_msg.encode(), hashlib.sha256).hexdigest()
     response["attestation_version"] = "1.0"
     response["attestable"] = True
     response["replay_available"] = True
@@ -16834,6 +16875,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     except Exception as _e:
         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
+    # Reconciliation: ensure days_until_block_confidence_available is always present
+    if "days_until_block" in response and "days_until_block_confidence_available" not in response:
+        response["days_until_block_confidence_available"] = response.get("days_until_block_confidence") is not None
+
     # A3: Expected savings per BLOCK
     # Only populated for BLOCK/WARN/ASK_USER decisions. Uses P(failure|omega) from
     # calibration (sigmoid fit, inflection at omega=46) times domain transaction value.
@@ -17011,10 +17056,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
 
     # Recompute attestation signature against the FINAL decision and omega,
     # not the pre-override snapshot computed earlier in the pipeline.
-    import hmac as _hmac_final
+    # Reuse module-level _hmac (import hmac as _hmac at line 20)
     _final_omega_attest = response.get("omega_mem_final", omega_out)
     _attest_msg_final = f"{_input_hash_full}:{_final_omega_attest}:{_blessed_action}:{request_id}"
-    response["proof_signature"] = _hmac_final.new(ATTESTATION_SECRET.encode(), _attest_msg_final.encode(), hashlib.sha256).hexdigest()
+    response["proof_signature"] = _hmac.new(ATTESTATION_SECRET.encode(), _attest_msg_final.encode(), hashlib.sha256).hexdigest()
 
     # Update _trace with the FINAL decision (not the pre-override engine result)
     if "_trace" in response:

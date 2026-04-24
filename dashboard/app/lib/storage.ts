@@ -52,11 +52,19 @@ export function removeApiUrl(): void {
   sessionStorage.removeItem("sgraal_api_url");
 }
 
+/**
+ * Read a non-sensitive preference from localStorage.
+ * Do NOT use for API keys, tokens, or credentials — use getApiKey() instead.
+ */
 export function getItem(key: string): string | null {
   if (!isBrowser) return null;
   return localStorage.getItem(key);
 }
 
+/**
+ * Store a non-sensitive preference in localStorage.
+ * Do NOT use for API keys, tokens, or credentials — use setApiKey() instead.
+ */
 export function setItem(key: string, value: string): void {
   if (!isBrowser) return;
   localStorage.setItem(key, value);

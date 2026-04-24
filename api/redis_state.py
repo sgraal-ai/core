@@ -36,7 +36,7 @@ def _get_session() -> _requests_lib.Session:
             max_retries=0,  # We handle retries at the application level
         )
         s.mount("https://", adapter)
-        s.mount("http://", adapter)
+        # Only HTTPS — no HTTP adapter mounted (Upstash requires TLS)
         if UPSTASH_REDIS_TOKEN:
             s.headers.update({"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"})
         _session = s
