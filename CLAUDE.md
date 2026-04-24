@@ -132,7 +132,8 @@ Compare-And-Swap pattern for concurrent Redis updates: `redis_mvcc_get(key)` →
 - **W3C VCs** — `POST /v1/certify` issues SgraalProof2026 credentials
 - **Memory Vaccination** — attack signatures encrypted at rest (AES-256-GCM), fleet-wide immunity, deferred vaccination after detection overrides
 - **RL Q-learning** — per-domain Q-tables, updated via `/v1/outcome`
-- **Bridge SDKs** (27 integrations) — cloudflare-sgraal, mem0-sgraal, sgraal-llamaindex, etc.
+- **Bridge SDKs** (23 verified) — Python, Go, Java, Rust, C#, MCP, Mem0, LangChain, LlamaIndex, CrewAI, AutoGen, Semantic Kernel, Haystack, OpenAI, Cloudflare, n8n, Dify, Langflow, Flowise, Zapier, Make, Edge, CLI
+- **Claimed but not implemented** (10) — embed SDK, LLM wrapper, normalizer, pydantic-ai, vercel-ai, bedrock, azure-ai, google-adk, langsmith, langfuse. Referenced in backlog/docs but no code in repo.
 - **MCP server** — `@sgraal/mcp` npm package for Claude Desktop
 - **Dashboard** — Next.js at app.sgraal.com, connected to live API
 - **Landing page** — Static HTML at sgraal.com (web-static/)
