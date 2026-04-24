@@ -666,6 +666,12 @@ def _validate_required_secrets():
                 f"All secrets must be at least {_MIN_SECRET_LEN} characters. "
                 f"Generate with: openssl rand -hex 32. See KEYS.md."
             )
+    # Missing secrets in production are also fatal (empty HMAC key = trivially forgeable)
+    if missing and os.getenv("ENV", "").lower() == "production":
+        raise RuntimeError(
+            f"FATAL: required secrets not set in production — {', '.join(missing)}. "
+            f"See KEYS.md."
+        )
 
 
 # Supabase retry queue for compliance-critical writes
@@ -793,9 +799,10 @@ def verify_api_key(
     except Exception:
         pass  # Redis down — fall through to Supabase
 
-    if supabase_service_client:
+    _sb_auth = supabase_service_client or supabase_client
+    if _sb_auth:
         result = (
-            supabase_service_client.table("api_keys")
+            _sb_auth.table("api_keys")
             .select("key_hash, customer_id, tier, calls_this_month")
             .eq("key_hash", key_hash)
             .execute()
@@ -4303,7 +4310,8 @@ def search_memories(query: str = "", agent_id: Optional[str] = None, key_record:
             if agent_id:
                 url += f"&agent_id=eq.{agent_id}"
             if query:
-                url += f"&content=ilike.*{query}*"
+                import urllib.parse as _search_urlp
+                url += f"&content=ilike.*{_search_urlp.quote(query, safe='')}*"
             r = http_requests.get(url, headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}, timeout=5)
             if r.ok:
                 results = r.json()
