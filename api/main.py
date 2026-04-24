@@ -6656,7 +6656,8 @@ def import_passport(req: PassportImportRequest, key_record: dict = Depends(verif
 
 @app.get("/v1/memory/passport/{passport_id}/verify")
 def verify_passport(passport_id: str):
-    """Public endpoint — no auth required. Returns validity only, no tenant-sensitive data."""
+    """Public endpoint — no auth required. Returns validity only, no tenant-sensitive data.
+    TENANT_EXEMPT: public verification returns hashed agent_id + expiry status only."""
     passport = _passports.get(passport_id) or redis_get(f"memory_passport:{passport_id}")
     if not passport:
         return {"valid": False, "expired": True, "agent_id_hash": None, "signature_key_version": None}

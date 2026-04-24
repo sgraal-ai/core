@@ -40,6 +40,7 @@ EXEMPT_FUNCTIONS = {
     "verify_attestation", "verify_provenance", "verify_fidelity",
     "playground_share", "playground_load",
     "get_badge_status",  # Public badge check
+    "verify_passport",   # Public read-only: returns validity + hashed agent_id only, no tenant data
     # Internal/system-wide
     "_lifespan", "_run_periodic_cleanup", "_scheduler_scoring_drift",
     "_scheduler_daily_snapshot", "_scheduler_sleeper_scan",
