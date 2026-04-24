@@ -83,6 +83,14 @@ SIR epidemiology analog: computes fresh-entry ratio vs domain-specific critical 
 
 Lyapunov analog: `stability_delta` (float [-1, +1]) and `stability_trend` (stabilizing/stable/destabilizing). Informational only — does not affect `recommended_action`. Computed from omega change since last preflight for the same (tenant, agent_id).
 
+### MVCC Redis state versioning (api/redis_state.py)
+
+Compare-And-Swap pattern for concurrent Redis updates: `redis_mvcc_get(key)` → (value, version), `redis_mvcc_update(key, updater_fn, ttl, max_retries)` → MVCCResult. Uses Lua script for atomicity. Versioned values stored as `{_v: N, _d: data}`. Legacy unversioned values treated as version 0. Opt-in — existing writes don't require MVCC.
+
+### SSE streaming (POST /v1/preflight/stream)
+
+23 intermediate events across 4 phases: 15 scoring module_complete → 6 detection_complete (layer states) → 1 invariant_check → 1 complete (final decision). Progress percentage monotonically increases. Events emitted post-computation (pipeline runs first, results replayed as stream).
+
 ### Other key subsystems
 
 - **Plugin system** — registry-only, per-tenant isolation, no remote code upload
@@ -127,7 +135,7 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,627 passing (as of 2026-04-23)
+- pytest: 2,643 passing (as of 2026-04-23)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
 - Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate
 - R2 F1: 1.0000 (must not regress)
