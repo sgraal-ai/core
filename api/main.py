@@ -17167,8 +17167,9 @@ def check_memories(req: CheckRequest, key_record: dict = Depends(verify_api_key)
             "secret_detected": True,
             "secrets_found": n_secrets,
         }
-        # Store details for details_url
-        _persist_store_bg(f"check_details:{request_id}", {
+        # Store details for details_url (tenant-scoped)
+        _check_kh = _safe_key_hash(key_record)
+        _persist_store_bg(f"check_details:{_check_kh}:{request_id}", {
             "request_id": request_id,
             "check_response": _check_response,
             "secret_hits": secret_hits,
@@ -17282,8 +17283,9 @@ def check_memories(req: CheckRequest, key_record: dict = Depends(verify_api_key)
 
     safe = decision in ("USE_MEMORY", "WARN")
 
-    # Store full preflight result for details endpoint
-    _persist_store_bg(f"check_details:{request_id}", {
+    # Store full preflight result for details endpoint (tenant-scoped)
+    _check_kh2 = _safe_key_hash(key_record)
+    _persist_store_bg(f"check_details:{_check_kh2}:{request_id}", {
         "request_id": request_id,
         "check_response": {"safe": safe, "reason": reason, "action": action, "omega": omega, "decision": decision},
         "preflight_result": pf_result,
@@ -17306,7 +17308,8 @@ def check_memories(req: CheckRequest, key_record: dict = Depends(verify_api_key)
 def check_details(request_id: str, key_record: dict = Depends(verify_api_key)):
     """Retrieve the full preflight response for a /v1/check call.
     Available for 1 hour after the check was made."""
-    details = _load_store(f"check_details:{request_id}")
+    _det_kh = _safe_key_hash(key_record)
+    details = _load_store(f"check_details:{_det_kh}:{request_id}")
     if not details:
         raise HTTPException(status_code=404, detail="Check details not found or expired (TTL: 1 hour)")
     return details
