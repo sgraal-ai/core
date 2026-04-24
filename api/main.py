@@ -8605,6 +8605,75 @@ def advanced_compress_memory(req: AdvancedCompressRequest, key_record: dict = De
 
 # ---- Fleet Intelligence endpoints ----
 
+
+class FleetHealthPhaseRequest(BaseModel):
+    entries: list[dict]
+    domain: str = "general"
+
+
+# Domain-specific critical fresh-entry thresholds (p_c = 1/R₀)
+# Derived from SIR epidemiology analog: below p_c, healing dies out
+_DOMAIN_PC = {
+    "general": 0.08,
+    "coding": 0.12,
+    "customer_support": 0.10,
+    "legal": 0.18,
+    "fintech": 0.28,
+    "medical": 0.22,
+}
+
+
+@app.post("/v1/fleet/health-phase")
+def fleet_health_phase(req: FleetHealthPhaseRequest, tenant: TenantContext = Depends(get_tenant_context)):
+    """SIR-analog fleet memory health phase assessment.
+
+    Computes the current fresh-entry ratio and compares against the
+    domain-specific critical threshold p_c. Below p_c, healing dies out
+    (sub-critical); above p_c, healing spreads (super-critical).
+    """
+    if not req.entries:
+        raise HTTPException(status_code=400, detail="entries cannot be empty")
+
+    n = len(req.entries)
+    # Count fresh entries: age < Weibull half-life for their type
+    from scoring_engine.omega_mem import WEIBULL_LAMBDA, WEIBULL_LAMBDA_DEFAULT
+    import math
+    _HALFLIFE = {}
+    for mtype, lam in WEIBULL_LAMBDA.items():
+        _HALFLIFE[mtype] = round(math.log(2) / lam, 1) if lam > 0 else 999
+    _HALFLIFE_DEFAULT = round(math.log(2) / WEIBULL_LAMBDA_DEFAULT, 1)
+
+    fresh_count = 0
+    for e in req.entries:
+        mtype = e.get("type", "semantic")
+        age = e.get("timestamp_age_days", 0)
+        hl = _HALFLIFE.get(mtype, _HALFLIFE_DEFAULT)
+        if age < hl:
+            fresh_count += 1
+
+    current_ratio = round(fresh_count / n, 4)
+    p_c = _DOMAIN_PC.get(req.domain, _DOMAIN_PC["general"])
+    margin = round(current_ratio - p_c, 4)
+
+    if current_ratio < p_c * 0.8:
+        phase = "sub_critical"
+    elif current_ratio < p_c * 1.2:
+        phase = "critical"
+    else:
+        phase = "super_critical"
+
+    return {
+        "phase": phase,
+        "current_ratio": current_ratio,
+        "fresh_count": fresh_count,
+        "total_entries": n,
+        "p_c_threshold": p_c,
+        "margin": margin,
+        "domain": req.domain,
+        "tenant_hash": tenant.key_hash[:8],
+    }
+
+
 @app.get("/v1/fleet/compromised-sources")
 def fleet_compromised_sources(days: int = Query(7), key_record: dict = Depends(verify_api_key)):
     """Identify sources appearing in multiple compromised preflight calls."""
