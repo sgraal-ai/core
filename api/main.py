@@ -7430,15 +7430,19 @@ def forensics_analyze(req: ForensicsRequest, key_record: dict = Depends(verify_a
     return result
 
 @app.get("/v1/forensics/{forensics_id}")
-def get_forensics(forensics_id: str, key_record: dict = Depends(verify_api_key)):
+def get_forensics(forensics_id: str, key_record: dict = Depends(verify_api_key),
+                  tenant: TenantContext = Depends(get_tenant_context)):
     r = _forensics.get(forensics_id) or _load_store(f"forensics_report:{forensics_id}")
     if not r: raise HTTPException(status_code=404, detail="Forensics not found")
+    tenant.assert_owns(r)
     return r
 
 @app.get("/v1/forensics/{forensics_id}/report")
-def get_forensics_report(forensics_id: str, key_record: dict = Depends(verify_api_key)):
+def get_forensics_report(forensics_id: str, key_record: dict = Depends(verify_api_key),
+                         tenant: TenantContext = Depends(get_tenant_context)):
     r = _forensics.get(forensics_id) or _load_store(f"forensics_report:{forensics_id}")
     if not r: raise HTTPException(status_code=404, detail="Forensics not found")
+    tenant.assert_owns(r)
     md = f"# Forensics Report {forensics_id}\n\n"
     md += f"## Root Cause\n{r.get('root_cause', 'unknown')}\n\n"
     md += f"## Affected Decisions\n{r.get('affected_decisions', 0)}\n\n"
@@ -7481,9 +7485,13 @@ def get_blackbox(capsule_id: str, tenant: TenantContext = Depends(get_tenant_con
     return c
 
 @app.get("/v1/blackbox/{capsule_id}/verify")
-def verify_blackbox(capsule_id: str, key_record: dict = Depends(verify_api_key)):
+def verify_blackbox(capsule_id: str, key_record: dict = Depends(verify_api_key),
+                    tenant: TenantContext = Depends(get_tenant_context)):
     c = _blackbox.get(capsule_id) or _load_store(f"blackbox_capsule:{capsule_id}")
     if not c: return {"valid": False, "hash_matches": False, "tampered": True}
+    # Soft ownership check — legacy capsules without key_hash are allowed (read-only verify)
+    if c.get("key_hash") and not tenant.owns(c):
+        raise HTTPException(status_code=403, detail="Not authorized for this capsule")
     expected = hashlib.sha256(f"{c['capsule_id']}:{c['timestamp']}:{c['agent_id']}:{c['why_explanation']}".encode()).hexdigest()
     matches = c.get("hash") == expected
     return {"valid": matches, "hash_matches": matches, "tampered": not matches}
@@ -9852,9 +9860,11 @@ def verify_audit_integrity(key_record: dict = Depends(verify_api_key)):
         raise HTTPException(status_code=403, detail="Demo key cannot verify audit logs")
     tampered = 0
     total = 0
-    if supabase_client:
+    _kh = _safe_key_hash(key_record)
+    _sb_integrity = supabase_service_client or supabase_client
+    if _sb_integrity:
         try:
-            entries = supabase_client.table("audit_log").select("*").limit(200).execute().data or []
+            entries = _sb_integrity.table("audit_log").select("*").eq("api_key_id", _kh).limit(200).execute().data or []
             total = len(entries)
             for e in entries:
                 expected = hashlib.sha256(f"{e.get('created_at','')}{e.get('api_key_id','')}{e.get('decision','')}{e.get('omega_score','')}".encode()).hexdigest()[:16]
