@@ -65,6 +65,24 @@ A2 axiom: identical memory state + identical healing_counter = identical Ω_MEM 
 
 All MANIPULATED → BLOCK. Corroboration gates prevent single-signal escalation. `_compute_attack_surface_score` composites all 6 layers. Plugin `on_preflight_complete` hook enforces security monotonicity (cannot downgrade decisions).
 
+### Invariant validation (api/invariants.py)
+
+Explicit 4-invariant check before the 83-module pipeline:
+- I1 Identity Invariance — duplicate IDs with different content → fast-path BLOCK
+- I2 Time Validity — negative ages → fast-path BLOCK; past-year markers → ambiguous
+- I3 Evidence Independence — >80% identical trust/conflict → ambiguous
+- I4 Provenance Integrity — circular chains → fast-path BLOCK
+
+Clear violations skip the scoring engine entirely. Response includes `invariant_check` field.
+
+### Fleet health phase (POST /v1/fleet/health-phase)
+
+SIR epidemiology analog: computes fresh-entry ratio vs domain-specific critical threshold p_c. Returns `sub_critical` / `critical` / `super_critical` phase. Domain thresholds: general=0.08, coding=0.12, fintech=0.28, medical=0.22.
+
+### Decision stability (stability_delta in preflight response)
+
+Lyapunov analog: `stability_delta` (float [-1, +1]) and `stability_trend` (stabilizing/stable/destabilizing). Informational only — does not affect `recommended_action`. Computed from omega change since last preflight for the same (tenant, agent_id).
+
 ### Other key subsystems
 
 - **Plugin system** — registry-only, per-tenant isolation, no remote code upload
@@ -109,7 +127,7 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,604 passing (as of 2026-04-23)
+- pytest: 2,627 passing (as of 2026-04-23)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
 - Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate
 - R2 F1: 1.0000 (must not regress)
