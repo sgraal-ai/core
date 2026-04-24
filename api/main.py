@@ -5718,13 +5718,13 @@ def async_preflight(req: PreflightRequest, key_record: dict = Depends(verify_api
                    "assurance_score": result.assurance_score, "component_breakdown": result.component_breakdown},
         "created_at": _time.time(),
     }
-    redis_set(f"async_preflight_job:{job_id}", _async_preflight_jobs[job_id], ttl=300)
+    redis_set(f"async_preflight_job:{kh}:{job_id}", _async_preflight_jobs[job_id], ttl=300)
     return {"job_id": job_id, "status": "processing"}
 
 @app.get("/v1/preflight/async/{job_id}")
 def get_async_preflight(job_id: str, key_record: dict = Depends(verify_api_key)):
     kh = _safe_key_hash(key_record)
-    job = _async_preflight_jobs.get(job_id) or redis_get(f"async_preflight_job:{job_id}")
+    job = _async_preflight_jobs.get(job_id) or redis_get(f"async_preflight_job:{kh}:{job_id}")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found or expired")
     if job.get("api_key_hash") != kh:
