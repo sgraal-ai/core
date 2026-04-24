@@ -35,7 +35,7 @@ scoring_engine/                       — Pure Python scoring (no dependencies o
 
 ### Core scoring
 
-`scoring_engine/omega_mem.py` — 10 risk components (s_freshness, s_drift, s_provenance, s_propagation, r_recall, r_encode, s_interference, s_recovery, r_belief, s_relevance), scaled by action-type and domain multipliers. s_recovery has **negative weight** (-0.10) — recovery capability reduces risk. Weights sum to 0.95 (0.99 with PageRank). Normalized by sum(abs(weights)) so omega is always [0, 100].
+`scoring_engine/omega_mem.py` — 10 risk components (s_freshness, s_drift, s_provenance, s_propagation, r_recall, r_encode, s_interference, s_recovery, r_belief, s_relevance), scaled by action-type and domain multipliers. s_recovery has **negative weight** (-0.10) — recovery capability reduces risk. Weights: Σwᵢ = 0.99, Σ|wᵢ| = 1.19. **Normalization**: omega = raw_sum / Σ|wᵢ|, then clamp to [0, 100]. This is NOT a simple sum-to-100 — see `docs/proofs/weight_normalization.md` for the formal proof that ω ∈ [0, 100]. Runtime assertion: `Σ|wᵢ| > 0` verified at module load.
 
 S_freshness uses Weibull decay per memory type: tool_state (λ=0.15, fast) > shared_workflow > episodic > preference > semantic > policy > identity (λ=0.002, near-permanent).
 
@@ -100,11 +100,17 @@ Compare-And-Swap pattern for concurrent Redis updates: `redis_mvcc_get(key)` →
 - `calibrated_thresholds` — per-tenant effective warn/block thresholds from historical traffic (null if <20 samples)
 - `twin_entries` — correlated injection detection via content similarity (count, density, flag, pairs)
 
+### Mathematical proofs (docs/proofs/)
+
+- `weight_normalization.md` — proves ω ∈ [0, 100] via Σ|wᵢ| normalization + clamping (NOT sum-to-100)
+- `omega_truncated_norm.md` — proves omega satisfies non-negativity (P1), definiteness (P2), subadditivity (P3); documents it is NOT a true norm due to truncation and negative recovery weight
+
 ### Analysis scripts (scripts/)
 
 - `analyze_s_relevance_impact.py` — corpus-wide s_relevance=0 counterfactual analysis
 - `analyze_churn_risk.py` — per-tenant call frequency trend and churn prediction
 - `analyze_detection_ordering.py` — which detection layers fire first in the kill chain
+- `compute_kappa_mem.py` — κ_MEM percolation threshold computation (memory phase constant)
 
 ### Dict eviction (#374)
 
@@ -163,7 +169,7 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,686 passing (as of 2026-04-23)
+- pytest: 2,695 passing (as of 2026-04-23)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
 - Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate
 - R2 F1: 1.0000 (must not regress)
