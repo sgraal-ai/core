@@ -8819,7 +8819,7 @@ def analytics_decision_entropy(agent_id: str = Query(""), days: int = Query(30),
     if supabase_service_client and len(decisions) < 5:
         try:
             _kh = _safe_key_hash(key_record)
-            r = supabase_service_client.table("audit_log").select("decision").eq("agent_id", agent_id).order("created_at", desc=True).limit(200).execute()
+            r = supabase_service_client.table("audit_log").select("decision").eq("api_key_id", _kh).eq("agent_id", agent_id).order("created_at", desc=True).limit(200).execute()
             if r.data:
                 for row in reversed(r.data):
                     d = row.get("decision")
@@ -9090,10 +9090,12 @@ def simulate_rollout(req: SimulateRequest, key_record: dict = Depends(verify_api
         timestamp_age_days=e.get("timestamp_age_days",0), source_trust=e.get("source_trust",0.9),
         source_conflict=e.get("source_conflict",0.1), downstream_count=e.get("downstream_count",0))
         for i,e in enumerate(req.memory_state)]
+    import copy as _rollout_copy
     timeline = []
     first_failure = None
     safe = 0
     for step in range(steps):
+        entries = _rollout_copy.deepcopy(entries)
         for me in entries: me.timestamp_age_days += 1
         r = _sim_compute(entries)
         omega = r.omega_mem_final
@@ -12839,16 +12841,16 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
                 for _ca_id in _new_agents:
                     try:
                         _get_redis_session().post(
-                            f"{UPSTASH_REDIS_URL}/RPUSH/compromised_agents/{urllib.parse.quote(_ca_id, safe='')}",
+                            f"{UPSTASH_REDIS_URL}/RPUSH/compromised_agents:{_pf_tenant}/{urllib.parse.quote(_ca_id, safe='')}",
                             headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
                     except Exception as _e:
                         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
                 if _new_agents:
                     # Cap list at 500 and set TTL
                     try:
-                        _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/compromised_agents/-500/-1",
+                        _get_redis_session().post(f"{UPSTASH_REDIS_URL}/LTRIM/compromised_agents:{_pf_tenant}/-500/-1",
                             headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
-                        _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/compromised_agents/604800",
+                        _get_redis_session().post(f"{UPSTASH_REDIS_URL}/EXPIRE/compromised_agents:{_pf_tenant}/604800",
                             headers={"Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}"}, timeout=1)
                     except Exception as _e:
                         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
