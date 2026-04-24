@@ -94,6 +94,18 @@ Compare-And-Swap pattern for concurrent Redis updates: `redis_mvcc_get(key)` →
 
 23 intermediate events across 4 phases: 15 scoring module_complete → 6 detection_complete (layer states) → 1 invariant_check → 1 complete (final decision). Progress percentage monotonically increases. Events emitted post-computation (pipeline runs first, results replayed as stream).
 
+### Preflight diagnostic fields (Sprint 62)
+
+- `sphere_position` — decision sphere coordinates (x=omega, y=attack_surface, z=fresh_ratio, zone=safe/warn/ask/block)
+- `calibrated_thresholds` — per-tenant effective warn/block thresholds from historical traffic (null if <20 samples)
+- `twin_entries` — correlated injection detection via content similarity (count, density, flag, pairs)
+
+### Analysis scripts (scripts/)
+
+- `analyze_s_relevance_impact.py` — corpus-wide s_relevance=0 counterfactual analysis
+- `analyze_churn_risk.py` — per-tenant call frequency trend and churn prediction
+- `analyze_detection_ordering.py` — which detection layers fire first in the kill chain
+
 ### Dict eviction (#374)
 
 31 global in-memory dicts registered for periodic eviction via `_run_periodic_cleanup`. TTL-based (default 24h) and size-cap (10000 entries) eviction prevents unbounded memory growth on long-running processes.
@@ -151,7 +163,7 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,673 passing (as of 2026-04-23)
+- pytest: 2,686 passing (as of 2026-04-23)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
 - Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate
 - R2 F1: 1.0000 (must not regress)
