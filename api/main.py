@@ -17786,6 +17786,111 @@ def minimum_viable_memory(req: MvmemRequest, key_record: dict = Depends(verify_a
     }
 
 
+# ---- Recovery Endpoint ----
+
+class RecoverRequest(BaseModel):
+    agent_id: str
+    target_omega: float = 30.0
+    commit: bool = False
+    memory_state: Optional[list[dict]] = None
+    domain: str = "general"
+
+
+@app.post("/v1/recover")
+def recover(req: RecoverRequest, tenant: TenantContext = Depends(get_tenant_context),
+            key_record: dict = Depends(verify_api_key)):
+    """Recovery endpoint: dry-run assessment or committed recovery actions."""
+    _check_rate_limit(key_record)
+
+    # Find agent's most recent memory state from outcomes
+    _agent_memory_state = req.memory_state
+    _current_omega = None
+    if not _agent_memory_state:
+        for _oid, _od in reversed(list(_outcomes.items())):
+            if _od.get("key_hash") == tenant.key_hash and _od.get("agent_id") == req.agent_id:
+                _agent_memory_state = _od.get("memory_state", [])
+                _current_omega = _od.get("omega_mem_final")
+                break
+
+    if not _agent_memory_state:
+        return {
+            "agent_id": req.agent_id,
+            "status": "no_data",
+            "message": "No memory state found for this agent",
+            "planned_actions": [],
+            "projected_omega": None,
+            "current_omega": None,
+        }
+
+    # Run assess internally
+    _assess_req = RecoverAssessRequest(
+        memory_state=_agent_memory_state,
+        agent_id=req.agent_id,
+        domain=req.domain,
+    )
+    _assess_result = recover_assess(_assess_req, key_record)
+    if _current_omega is None:
+        _current_omega = _assess_result.get("current_omega", 0)
+
+    _planned_actions = []
+    for step in _assess_result.get("recovery_steps", []):
+        _planned_actions.append({
+            "entry_id": step["entry_id"],
+            "action": step["recommended_action"],
+            "estimated_omega_reduction": step["estimated_omega_reduction"],
+        })
+
+    _projected_omega = _assess_result.get("estimated_omega_after_recovery", _current_omega)
+
+    if not req.commit:
+        # Dry-run mode
+        return {
+            "agent_id": req.agent_id,
+            "status": "dry_run",
+            "current_omega": round(_current_omega, 2),
+            "projected_omega": round(_projected_omega, 2),
+            "target_omega": req.target_omega,
+            "planned_actions": _planned_actions,
+            "overall_recoverability": _assess_result.get("overall_recoverability", "UNKNOWN"),
+        }
+
+    # Commit mode: execute recovery actions
+    _actions_taken = []
+    _request_id = str(uuid.uuid4())
+    for action_item in _planned_actions:
+        _eid = action_item["entry_id"]
+        _action = action_item["action"]
+        if _action == "REFETCH":
+            # Reset timestamp_age_days to 0 in healing counter tracking
+            _set_healing_counter(_eid, 0)
+            _actions_taken.append({"entry_id": _eid, "action": "REFETCH", "result": "timestamp_reset"})
+        elif _action in ("QUARANTINE", "VERIFY_WITH_SOURCE"):
+            # Increment healing counter
+            _prev = _get_healing_counter(_eid)
+            _set_healing_counter(_eid, _prev + 1)
+            _actions_taken.append({"entry_id": _eid, "action": _action, "result": "healing_counter_incremented",
+                                   "counter": _prev + 1})
+
+    # Create audit log entry
+    _audit_log("recover", _request_id, key_record, "RECOVER", _current_omega, {
+        "agent_id": req.agent_id,
+        "actions_taken": len(_actions_taken),
+        "target_omega": req.target_omega,
+        "projected_omega": _projected_omega,
+    })
+
+    return {
+        "agent_id": req.agent_id,
+        "status": "committed",
+        "request_id": _request_id,
+        "current_omega": round(_current_omega, 2),
+        "projected_omega": round(_projected_omega, 2),
+        "target_omega": req.target_omega,
+        "actions_taken": _actions_taken,
+        "overall_recoverability": _assess_result.get("overall_recoverability", "UNKNOWN"),
+    }
+
+
 # ---- Router includes ----
 # All routers are imported and included at the bottom so the main module's
 # globals (verify_api_key, _check_rate_limit, API_KEYS, app) are fully defined
