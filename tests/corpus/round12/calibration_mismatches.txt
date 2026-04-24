@@ -1,0 +1,66 @@
+Round 12 Calibration Mismatches — 9 cases
+Generated: 2026-04-19T16:41:15Z
+
+Case: R12-CC-009
+  Intended label: UNDERCONFIDENT
+  Computed label: OVERCONFIDENT
+  model_confidence: 0.52
+  expected_confidence: 0.241
+  confidence_delta: 0.2790
+
+Case: R12-CC-010
+  Intended label: UNDERCONFIDENT
+  Computed label: OVERCONFIDENT
+  model_confidence: 0.58
+  expected_confidence: 0.112
+  confidence_delta: 0.4680
+
+Case: R12-CC-011
+  Intended label: UNDERCONFIDENT
+  Computed label: OVERCONFIDENT
+  model_confidence: 0.62
+  expected_confidence: 0.328
+  confidence_delta: 0.2920
+
+Case: R12-CC-012
+  Intended label: UNDERCONFIDENT
+  Computed label: CALIBRATED
+  model_confidence: 0.48
+  expected_confidence: 0.252
+  confidence_delta: 0.2280
+
+Case: R12-CC-013
+  Intended label: UNDERCONFIDENT
+  Computed label: CALIBRATED
+  model_confidence: 0.65
+  expected_confidence: 0.594
+  confidence_delta: 0.0560
+
+Case: R12-CC-014
+  Intended label: UNDERCONFIDENT
+  Computed label: CALIBRATED
+  model_confidence: 0.55
+  expected_confidence: 0.326
+  confidence_delta: 0.2240
+
+Case: R12-CC-015
+  Intended label: CALIBRATED
+  Computed label: OVERCONFIDENT
+  model_confidence: 0.91
+  expected_confidence: 0.586
+  confidence_delta: 0.3240
+
+Case: R12-CC-019
+  Intended label: CALIBRATED
+  Computed label: OVERCONFIDENT
+  model_confidence: 0.92
+  expected_confidence: 0.463
+  confidence_delta: 0.4570
+
+Case: R12-CC-020
+  Intended label: CALIBRATED
+  Computed label: OVERCONFIDENT
+  model_confidence: 0.93
+  expected_confidence: 0.346
+  confidence_delta: 0.5840
+
