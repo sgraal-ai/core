@@ -15250,6 +15250,117 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         response["stability_delta"] = 0.0
         response["stability_trend"] = "stable"
 
+    # -----------------------------------------------------------------------
+    # Synthesis Layer: 5 diagnostic fields (#480-484) — informational only
+    # -----------------------------------------------------------------------
+
+    # #480 risk_type_shift — detect when risk profile shifts between categories
+    try:
+        _rts_prev = _rget(f"last_preflight_summary:{_pf_tenant}:{req.agent_id or 'anonymous'}")
+        if _rts_prev and isinstance(_rts_prev, dict) and _rts_prev.get("components"):
+            _rts_prev_cb = _rts_prev["components"]
+            _rts_cur_cb = response.get("component_breakdown", {})
+            _rts_prev_top = max(_rts_prev_cb, key=lambda k: _rts_prev_cb.get(k, 0), default="s_freshness")
+            _rts_cur_top = max(_rts_cur_cb, key=lambda k: _rts_cur_cb.get(k, 0), default="s_freshness")
+            _rts_magnitude = round(abs(_rts_cur_cb.get(_rts_cur_top, 0) - _rts_prev_cb.get(_rts_prev_top, 0)) / 100, 2)
+            response["risk_type_shift"] = {
+                "shifted": _rts_prev_top != _rts_cur_top,
+                "from": _rts_prev_top, "to": _rts_cur_top,
+                "magnitude": _rts_magnitude,
+            }
+        else:
+            response["risk_type_shift"] = {"shifted": False, "from": None, "to": None, "magnitude": 0.0}
+    except Exception:
+        response["risk_type_shift"] = {"shifted": False, "from": None, "to": None, "magnitude": 0.0}
+
+    # #481 duplicate_entries — lightweight content-hash duplicate detection
+    try:
+        _dup_groups = {}
+        for e in req.memory_state:
+            _content = (e.content if hasattr(e, "content") else e.get("content", ""))[:200]
+            _hash = hashlib.md5(_content.encode()).hexdigest()[:16]
+            _eid = e.id if hasattr(e, "id") else e.get("id", "?")
+            _dup_groups.setdefault(_hash, []).append(_eid)
+        _dups = [ids for ids in _dup_groups.values() if len(ids) > 1]
+        response["duplicate_entries"] = _dups
+    except Exception:
+        response["duplicate_entries"] = []
+
+    # #482 repair_calibration_error — compare projected vs actual improvement
+    try:
+        _rce_key = f"last_repair_projection:{_pf_tenant}:{req.agent_id or 'anonymous'}"
+        _rce_prev = _rget(_rce_key)
+        if _rce_prev and isinstance(_rce_prev, dict):
+            _rce_projected = _rce_prev.get("projected_delta", 0)
+            _rce_prev_omega = _rce_prev.get("omega", 0)
+            _rce_actual = omega_out - _rce_prev_omega
+            response["repair_calibration_error"] = {
+                "projected": round(_rce_projected, 1),
+                "actual": round(_rce_actual, 1),
+                "error": round(_rce_projected - _rce_actual, 1),
+                "samples": _rce_prev.get("samples", 0) + 1,
+            }
+        else:
+            response["repair_calibration_error"] = None
+        # Store current projection for next comparison
+        _rp = response.get("repair_plan", [])
+        if _rp and isinstance(_rp, list) and not _is_dry_run:
+            _total_proj = sum(r.get("projected_improvement", 0) for r in _rp[:5] if isinstance(r, dict))
+            redis_set(_rce_key, {"projected_delta": _total_proj, "omega": omega_out, "samples": ((_rce_prev or {}).get("samples", 0) + 1) if _rce_prev else 1}, ttl=86400)
+    except Exception:
+        response["repair_calibration_error"] = None
+
+    # #483 peak_degradation_hour — time-of-day omega degradation analysis
+    try:
+        _pdh_history = _rget(f"te_history:{_pf_tenant}:general")
+        if isinstance(_pdh_history, list) and len(_pdh_history) >= 10:
+            _hour_omegas: dict[int, list] = {}
+            for _h_entry in _pdh_history[-200:]:
+                if isinstance(_h_entry, dict):
+                    _h_ts = _h_entry.get("ts", "")
+                    _h_omega = _h_entry.get("omega", 0)
+                    if isinstance(_h_ts, str) and len(_h_ts) >= 13:
+                        try:
+                            _h_hour = int(_h_ts[11:13])
+                            _hour_omegas.setdefault(_h_hour, []).append(_h_omega)
+                        except (ValueError, IndexError):
+                            pass
+            if _hour_omegas:
+                _peak_hour = max(_hour_omegas, key=lambda h: sum(_hour_omegas[h]) / len(_hour_omegas[h]))
+                _peak_avg = round(sum(_hour_omegas[_peak_hour]) / len(_hour_omegas[_peak_hour]), 1)
+                response["peak_degradation_hour"] = {
+                    "peak_hour_utc": _peak_hour,
+                    "peak_omega_avg": _peak_avg,
+                    "samples": sum(len(v) for v in _hour_omegas.values()),
+                }
+            else:
+                response["peak_degradation_hour"] = None
+        else:
+            response["peak_degradation_hour"] = None
+    except Exception:
+        response["peak_degradation_hour"] = None
+
+    # #484 counterfactual_block_value — fleet-wide BLOCK confirmation rate
+    try:
+        _cbv_blocks = 0
+        _cbv_confirmed = 0
+        for _oid, _od in list(_outcomes.items())[-500:]:
+            if _od.get("key_hash") == _pf_tenant and _od.get("recommended_action") == "BLOCK":
+                _cbv_blocks += 1
+                if _od.get("status") in ("failure", "confirmed_block"):
+                    _cbv_confirmed += 1
+        if _cbv_blocks > 0:
+            response["counterfactual_block_value"] = {
+                "fleet_block_count": _cbv_blocks,
+                "confirmed_failures": _cbv_confirmed,
+                "value_rate": round(_cbv_confirmed / _cbv_blocks, 2),
+                "window_days": 30,
+            }
+        else:
+            response["counterfactual_block_value"] = None
+    except Exception:
+        response["counterfactual_block_value"] = None
+
     # FIX 11: Track outcomes per bucket for calibrated thresholds
     try:
         _ob_key = f"{key_record.get('key_hash','default')}:{req.domain}"
