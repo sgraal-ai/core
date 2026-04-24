@@ -15181,6 +15181,35 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     except Exception as _e:
         _scoring_warnings.append({"module": "unknown_module", "error": str(_e)[:200]})
 
+    # Stability delta — Lyapunov analog (informational only, does NOT affect decision)
+    # V(x_t) = omega_adjusted, ΔV = V(current) - V(previous)
+    # ΔV > 0: destabilizing, ΔV < 0: stabilizing
+    try:
+        _stability_prev_key = f"last_preflight:{_pf_tenant}:{req.agent_id or 'anonymous'}"
+        _stability_prev = _rget(_stability_prev_key)
+        if _stability_prev is not None and isinstance(_stability_prev, (int, float)):
+            _omega_now_stab = response.get("omega_adjusted", omega_out)
+            _n_entries_now = len(req.memory_state)
+            _delta_omega = _omega_now_stab - float(_stability_prev)
+            # Normalize to [-1, +1] range: sigmoid of omega delta / 20
+            _raw_delta = _delta_omega / 20.0
+            _stability_delta = round(max(-1.0, min(1.0, _raw_delta)), 3)
+            if _stability_delta < -0.05:
+                _stability_trend = "stabilizing"
+            elif _stability_delta > 0.05:
+                _stability_trend = "destabilizing"
+            else:
+                _stability_trend = "stable"
+            response["stability_delta"] = _stability_delta
+            response["stability_trend"] = _stability_trend
+        else:
+            response["stability_delta"] = 0.0
+            response["stability_trend"] = "stable"
+            response["stability_note"] = "first_call"
+    except Exception:
+        response["stability_delta"] = 0.0
+        response["stability_trend"] = "stable"
+
     # FIX 11: Track outcomes per bucket for calibrated thresholds
     try:
         _ob_key = f"{key_record.get('key_hash','default')}:{req.domain}"
