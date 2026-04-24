@@ -14809,14 +14809,14 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     _suppress_auto_inference = getattr(req, 'outcome_context', None) == "refresh"
     try:
         _agent_id = req.agent_id or "anonymous"
-        _last_pf_key = f"last_preflight:{key_record.get('key_hash', 'default')}:{_agent_id}"
+        _last_pf_key = f"last_preflight:{_pf_tenant}:{_agent_id}"
         _prev_omega = _rget(_last_pf_key)
         auto_inferred = None
         if _suppress_auto_inference:
             response["auto_inference_suppressed"] = True
         elif _prev_omega is not None and isinstance(_prev_omega, (int, float)):
             # Only infer outcome if previous action was a healing/blocking action
-            _prev_summary_key = f"last_preflight_summary:{key_record.get('key_hash', 'default')}:{_agent_id}"
+            _prev_summary_key = f"last_preflight_summary:{_pf_tenant}:{_agent_id}"
             _prev_sum = _rget(_prev_summary_key)
             _prev_action = _prev_sum.get("action", "USE_MEMORY") if isinstance(_prev_sum, dict) else "USE_MEMORY"
             if _prev_action in ("BLOCK", "ASK_USER", "WARN"):
@@ -15051,7 +15051,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
 
     # FIX 10: "Why did this change?" auto diff
     try:
-        _diff_key = f"last_preflight_summary:{key_record.get('key_hash','default')}:{req.agent_id or 'anonymous'}"
+        _diff_key = f"last_preflight_summary:{_pf_tenant}:{req.agent_id or 'anonymous'}"
         _prev_summary = _rget(_diff_key)
         if _prev_summary and isinstance(_prev_summary, dict):
             _prev_omega = _prev_summary.get("omega", 0)
@@ -15206,7 +15206,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     _prev_decision = None
     if _is_stateful:
         try:
-            _diff_key_hyst = f"last_preflight_summary:{key_record.get('key_hash','default')}:{req.agent_id or 'anonymous'}"
+            _diff_key_hyst = f"last_preflight_summary:{_pf_tenant}:{req.agent_id or 'anonymous'}"
             _prev_sum = _rget(_diff_key_hyst)
             if _prev_sum and isinstance(_prev_sum, dict):
                 _prev_decision = _prev_sum.get("action")
