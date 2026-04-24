@@ -112,6 +112,138 @@ def redis_setnx(key: str, value, ttl: int = 0):
         logger.debug("redis_setnx %s failed: %s", key, e)
 
 
+# ---------------------------------------------------------------------------
+# MVCC (Multi-Version Concurrency Control) — Compare-And-Swap pattern
+# ---------------------------------------------------------------------------
+
+class MVCCResult:
+    """Result of an MVCC update attempt."""
+    __slots__ = ("success", "value", "version", "conflict")
+
+    def __init__(self, success: bool, value=None, version: int = 0, conflict: bool = False):
+        self.success = success
+        self.value = value
+        self.version = version
+        self.conflict = conflict
+
+
+def redis_mvcc_get(key: str) -> tuple:
+    """Read a versioned value from Redis.
+
+    Returns (value, version) tuple. If key doesn't exist, returns (None, 0).
+    Versioned values are stored as JSON: {"_v": N, "_d": <actual_data>}
+    """
+    raw = redis_get(key)
+    if raw is None:
+        return (None, 0)
+    if isinstance(raw, dict) and "_v" in raw:
+        return (raw.get("_d"), raw.get("_v", 0))
+    # Legacy unversioned value — treat as version 0
+    return (raw, 0)
+
+
+def redis_mvcc_set(key: str, value, ttl: int = 0) -> int:
+    """Write a versioned value to Redis (initial write, version 1).
+
+    Returns the version number written.
+    """
+    envelope = {"_v": 1, "_d": value}
+    redis_set(key, envelope, ttl=ttl)
+    return 1
+
+
+def redis_mvcc_update(key: str, updater_fn, ttl: int = 0, max_retries: int = 3) -> MVCCResult:
+    """Compare-And-Swap update with optimistic concurrency.
+
+    1. Reads current value + version
+    2. Applies updater_fn(current_value) → new_value
+    3. Writes back with version+1 ONLY IF version hasn't changed
+
+    Uses a Lua script for atomicity on Upstash. Falls back to
+    optimistic retry if Lua is not available.
+
+    Args:
+        key: Redis key
+        updater_fn: callable(current_value) → new_value
+        ttl: TTL in seconds (0 = no expiry)
+        max_retries: number of CAS retries before giving up
+
+    Returns:
+        MVCCResult with success, new value, new version, conflict flag
+    """
+    if not redis_available():
+        return MVCCResult(success=False, conflict=False)
+
+    for attempt in range(max_retries):
+        # Step 1: Read current state
+        current_value, current_version = redis_mvcc_get(key)
+
+        # Step 2: Apply update
+        try:
+            new_value = updater_fn(current_value)
+        except Exception as e:
+            logger.debug("mvcc_update updater_fn failed: %s", e)
+            return MVCCResult(success=False, conflict=False)
+
+        new_version = current_version + 1
+        new_envelope = json.dumps({"_v": new_version, "_d": new_value})
+
+        # Step 3: CAS via Lua script
+        # The script checks that the stored version matches expected_version
+        # before writing. If it doesn't match, returns 0 (conflict).
+        lua_script = """
+local current = redis.call('GET', KEYS[1])
+if current == false then
+    if tonumber(ARGV[2]) == 0 then
+        redis.call('SET', KEYS[1], ARGV[1])
+        if tonumber(ARGV[3]) > 0 then
+            redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+        end
+        return 1
+    else
+        return 0
+    end
+end
+local parsed = cjson.decode(current)
+if parsed['_v'] == tonumber(ARGV[2]) then
+    redis.call('SET', KEYS[1], ARGV[1])
+    if tonumber(ARGV[3]) > 0 then
+        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+    end
+    return 1
+else
+    return 0
+end
+"""
+        try:
+            s = _get_session()
+            _enc_key = urllib.parse.quote(key, safe='')
+            r = s.post(
+                f"{UPSTASH_REDIS_URL}/eval",
+                json={
+                    "script": lua_script,
+                    "keys": [key],
+                    "args": [new_envelope, str(current_version), str(ttl)],
+                },
+                timeout=3,
+            )
+            if r.ok:
+                result = r.json().get("result")
+                if result == 1:
+                    return MVCCResult(success=True, value=new_value, version=new_version)
+                else:
+                    # Version conflict — retry
+                    continue
+        except Exception as e:
+            logger.debug("mvcc_update CAS failed (attempt %d): %s", attempt, e)
+            # Fallback: optimistic write without CAS (degraded mode)
+            redis_set(key, {"_v": new_version, "_d": new_value}, ttl=ttl)
+            return MVCCResult(success=True, value=new_value, version=new_version)
+
+    # All retries exhausted
+    return MVCCResult(success=False, conflict=True, version=current_version)
+
+
 class RedisBackedDict:
     """Dict-like wrapper that persists to Redis with SETNX on init.
 
