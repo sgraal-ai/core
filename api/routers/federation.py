@@ -34,8 +34,10 @@ def federation_contribute(req: FederationContributeRequest, key_record: dict = D
 
 @router.get("/v1/federation/vaccines")
 def federation_list(key_record: dict = Depends(verify_api_key)):
-    """List all federated vaccine signatures."""
-    return {"vaccines": list(_federation_registry.values())[-100:], "total": len(_federation_registry)}
+    """List all federated vaccine signatures (contributed_by redacted)."""
+    _vaccines = [{k: v for k, v in entry.items() if k != "contributed_by"}
+                 for entry in list(_federation_registry.values())[-100:]]
+    return {"vaccines": _vaccines, "total": len(_federation_registry)}
 
 
 @router.post("/v1/federation/check")

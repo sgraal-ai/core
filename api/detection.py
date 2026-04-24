@@ -508,6 +508,11 @@ def _check_consensus_collapse(memory_state: list, _preprocessed: list = None) ->
         _has_any_chain = len(_nonempty_chains) >= 1
         _content_independent = (1.0 - _max_jaccard) >= 0.3
         _has_fed_asymmetry = any("federation_" in f for f in _flags)
+        # NOTE: _already_manipulated only sees CC-internal flags. Other detection layers
+        # (timestamp, identity, provenance) run independently — their MANIPULATED state is
+        # composed at the attack_surface_score level, not here. This gate can clear CC
+        # SUSPICIOUS flags even when another layer is MANIPULATED, which lowers the compound
+        # attack_surface_score but does not affect the other layers' individual BLOCK decisions.
         _already_manipulated = any("manipulated" in f for f in _flags)
         if (_diverse_chains or (_conflict_var > 0.0001 and _has_any_chain)) and _content_independent and not _has_fed_asymmetry and not _already_manipulated:
             _genuine = True
