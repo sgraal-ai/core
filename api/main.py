@@ -12059,10 +12059,25 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         {"identity_drift": _early_levels[1]},
         {"consensus_collapse": _early_levels[2]},
     )
+    # Explicit 4-invariant validation — fast-path on structural impossibilities
+    from api.invariants import check_invariants as _check_inv
+    _inv_result = _check_inv(
+        [e.__dict__ if hasattr(e, '__dict__') else e for e in req.memory_state],
+        req.action_type,
+    )
     _early_level = _early_as.get("attack_surface_level", "NONE")
     _early_exit = False
     _early_exit_reason = None
-    if _manip_count >= 1 and _early_level in ("HIGH", "CRITICAL"):
+    if _inv_result["fast_path_block"]:
+        _scoring_skipped = True
+        _early_exit = True
+        _early_exit_reason = f"Invariant {_inv_result['violated_invariant']} clear violation"
+        from scoring_engine.omega_mem import PreflightResult
+        result = PreflightResult(omega_mem_final=100.0, recommended_action="BLOCK", assurance_score=0.0,
+                             explainability_note=f"Invariant fast-path: {_early_exit_reason}",
+                             component_breakdown={}, repair_plan=[], healing_counter=0)
+        _module_times = {"scoring_engine": 0.0}
+    elif _manip_count >= 1 and _early_level in ("HIGH", "CRITICAL"):
         _scoring_skipped = True
         _early_exit = True
         _early_exit_reason = f"MANIPULATED detection at {_early_level} level ({_manip_count} MANIPULATED + {_susp_count} SUSPICIOUS)"
@@ -12477,6 +12492,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         "scoring_skipped": _scoring_skipped,
         "early_exit": _early_exit,
         "early_exit_reason": _early_exit_reason,
+        "invariant_check": _inv_result,
         "deterministic": True,
         "reproducible": True,
         "proof_version": "v1",
