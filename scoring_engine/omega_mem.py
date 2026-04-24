@@ -79,6 +79,10 @@ WEIBULL_LAMBDA = {
 WEIBULL_K = 1.0  # shape parameter (k=1 = exponential decay)
 WEIBULL_LAMBDA_DEFAULT = 0.05  # fallback for unknown types
 
+# Runtime weight validation (see docs/proofs/weight_normalization.md)
+_WEIGHT_SUM_ABS = sum(abs(w) for w in WEIGHTS.values())
+assert _WEIGHT_SUM_ABS > 0, "Weight sum(abs) must be positive for normalization"
+
 
 def _weibull_decay(age_days: float, memory_type: str) -> float:
     """Weibull decay score (0–100). Higher = more decayed = higher risk.
