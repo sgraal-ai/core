@@ -17690,6 +17690,102 @@ def get_behavioral_profile(agent_id: str, tenant: TenantContext = Depends(get_te
     return _result
 
 
+# ---- Minimum Viable Memory ----
+
+class MvmemRequest(BaseModel):
+    memory_state: list[MemoryEntryRequest]
+    action_type: Literal["informational", "reversible", "irreversible", "destructive"] = "reversible"
+    domain: Literal["general", "customer_support", "coding", "legal", "fintech", "medical"] = "general"
+    agent_id: Optional[str] = "anonymous"
+
+
+@app.post("/v1/mvmem")
+def minimum_viable_memory(req: MvmemRequest, key_record: dict = Depends(verify_api_key)):
+    """Identify the minimum subset of memory entries needed to maintain the current decision."""
+    _check_rate_limit(key_record)
+    if not req.memory_state:
+        return {
+            "original_decision": "USE_MEMORY",
+            "original_omega": 0,
+            "minimum_subset": [],
+            "removable_entries": [],
+            "estimated_savings": {"entries_removed": 0, "percent": 0},
+        }
+
+    # Run full preflight to get baseline
+    _base_req = PreflightRequest(
+        memory_state=req.memory_state,
+        action_type=req.action_type,
+        domain=req.domain,
+        agent_id=req.agent_id,
+        dry_run=True,
+    )
+    _base_result = _preflight_internal(_base_req, key_record)
+    if not isinstance(_base_result, dict):
+        raise HTTPException(status_code=500, detail="Baseline preflight failed")
+
+    _original_decision = _base_result.get("recommended_action", "USE_MEMORY")
+    _original_omega = _base_result.get("omega_mem_final", 0)
+
+    _entries = list(req.memory_state)
+    _n_total = len(_entries)
+
+    # Sample if >50 entries
+    _sampled_indices: list[int] = []
+    _unsampled_indices: list[int] = []
+    if _n_total > 50:
+        import random as _mvmem_random
+        _sampled_indices = sorted(_mvmem_random.sample(range(_n_total), 50))
+        _unsampled_indices = [i for i in range(_n_total) if i not in set(_sampled_indices)]
+    else:
+        _sampled_indices = list(range(_n_total))
+
+    _essential_ids: list[str] = []
+    _removable: list[dict] = []
+
+    for idx in _sampled_indices:
+        _entry = _entries[idx]
+        # Try removing this entry
+        _remaining = [_entries[j] for j in range(_n_total) if j != idx]
+        if not _remaining:
+            # Cannot remove the only entry — it's essential
+            _essential_ids.append(_entry.id)
+            continue
+        _test_req = PreflightRequest(
+            memory_state=_remaining,
+            action_type=req.action_type,
+            domain=req.domain,
+            agent_id=req.agent_id,
+            dry_run=True,
+        )
+        _test_result = _preflight_internal(_test_req, key_record)
+        if isinstance(_test_result, dict):
+            _test_decision = _test_result.get("recommended_action", "USE_MEMORY")
+            if _test_decision == _original_decision:
+                _removable.append({"id": _entry.id, "reason": "removal does not change decision"})
+            else:
+                _essential_ids.append(_entry.id)
+        else:
+            _essential_ids.append(_entry.id)
+
+    # Mark unsampled entries
+    for idx in _unsampled_indices:
+        _entry = _entries[idx]
+        _removable.append({"id": _entry.id, "reason": "unsampled"})
+
+    _minimum_subset = _essential_ids
+    _entries_removed = len(_removable)
+    _percent = round((_entries_removed / _n_total) * 100, 1) if _n_total else 0
+
+    return {
+        "original_decision": _original_decision,
+        "original_omega": round(_original_omega, 2),
+        "minimum_subset": _minimum_subset,
+        "removable_entries": _removable,
+        "estimated_savings": {"entries_removed": _entries_removed, "percent": _percent},
+    }
+
+
 # ---- Router includes ----
 # All routers are imported and included at the bottom so the main module's
 # globals (verify_api_key, _check_rate_limit, API_KEYS, app) are fully defined
