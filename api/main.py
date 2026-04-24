@@ -15361,6 +15361,54 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     except Exception:
         response["counterfactual_block_value"] = None
 
+    # #770 sphere_position — decision sphere coordinates (informational)
+    try:
+        _sp_x = round(response.get("omega_adjusted", omega_out) / 100.0, 3)
+        _sp_y = round({"NONE": 0, "LOW": 0.25, "MODERATE": 0.5, "HIGH": 0.75, "CRITICAL": 1.0}.get(response.get("attack_surface_level", "NONE"), 0), 3)
+        # z = fresh ratio (entries below half-life / total)
+        _sp_fresh = sum(1 for e in entries if e.timestamp_age_days < 30) / max(len(entries), 1)
+        _sp_z = round(_sp_fresh, 3)
+        _sp_zone = "safe" if _sp_x < 0.25 else "warn_boundary" if _sp_x < 0.45 else "ask_user_boundary" if _sp_x < 0.55 else "block_zone"
+        response["sphere_position"] = {"x": _sp_x, "y": _sp_y, "z": _sp_z, "zone": _sp_zone}
+    except Exception:
+        response["sphere_position"] = {"x": 0, "y": 0, "z": 0.5, "zone": "safe"}
+
+    # #771 calibrated_thresholds — per-tenant effective thresholds (informational)
+    try:
+        _ct_key = f"te_history:{_pf_tenant}:general"
+        _ct_hist = _rget(_ct_key, [])
+        if isinstance(_ct_hist, list) and len(_ct_hist) >= 20:
+            _ct_warn_omegas = sorted([h.get("omega", 0) for h in _ct_hist if isinstance(h, dict) and h.get("action") == "WARN"])
+            _ct_block_omegas = sorted([h.get("omega", 0) for h in _ct_hist if isinstance(h, dict) and h.get("action") == "BLOCK"])
+            _ct_r_warn = round(_ct_warn_omegas[int(len(_ct_warn_omegas) * 0.95)] if _ct_warn_omegas else 25, 1)
+            _ct_r_block = round(_ct_block_omegas[int(len(_ct_block_omegas) * 0.95)] if _ct_block_omegas else 55, 1)
+            response["calibrated_thresholds"] = {"r_warn": _ct_r_warn, "r_block": _ct_r_block, "samples": len(_ct_hist), "confidence": round(min(1.0, len(_ct_hist) / 200), 2)}
+        else:
+            response["calibrated_thresholds"] = None
+    except Exception:
+        response["calibrated_thresholds"] = None
+
+    # #772 twin_entries — correlated injection detection via content similarity (informational)
+    try:
+        _tw_pairs = []
+        _tw_n = len(entries)
+        if _tw_n >= 2 and _tw_n <= 100:
+            _tw_contents = [(e.id, (e.content or "")[:200]) for e in entries]
+            for i in range(len(_tw_contents)):
+                for j in range(i + 1, len(_tw_contents)):
+                    _tw_a = set(_tw_contents[i][1].lower().split())
+                    _tw_b = set(_tw_contents[j][1].lower().split())
+                    _tw_overlap = len(_tw_a & _tw_b) / max(len(_tw_a | _tw_b), 1)
+                    if _tw_overlap > 0.85:
+                        _tw_pairs.append([_tw_contents[i][0], _tw_contents[j][0]])
+            _tw_total_pairs = _tw_n * (_tw_n - 1) // 2
+            _tw_density = round(len(_tw_pairs) / max(_tw_total_pairs, 1), 4)
+            response["twin_entries"] = {"count": len(_tw_pairs), "density": _tw_density, "flag": "correlated_injection_suspected" if _tw_density > 0.05 else "clean", "pairs": _tw_pairs[:10]}
+        else:
+            response["twin_entries"] = {"count": 0, "density": 0, "flag": "clean", "pairs": []}
+    except Exception:
+        response["twin_entries"] = {"count": 0, "density": 0, "flag": "clean", "pairs": []}
+
     # FIX 11: Track outcomes per bucket for calibrated thresholds
     try:
         _ob_key = f"{key_record.get('key_hash','default')}:{req.domain}"
