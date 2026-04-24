@@ -4413,30 +4413,48 @@ def preflight_stream(req: PreflightRequest, key_record: dict = Depends(verify_ap
         healing_counter=e.healing_counter)
         for e in req.memory_state]
 
-    result = compute(entries, req.action_type, req.domain, req.current_goal_embedding)
-    cb = result.component_breakdown
+    # Run full preflight pipeline (not just scoring — includes detection layers)
+    pf_result = _preflight_internal(req, key_record)
+    if not isinstance(pf_result, dict):
+        pf_result = {"omega_mem_final": 0, "recommended_action": "USE_MEMORY", "component_breakdown": {}}
+    cb = pf_result.get("component_breakdown", {})
 
     def _generate():
         start = _st.monotonic()
-        total = len(_STREAM_MODULES)
+
+        # Phase 1: Scoring modules (15 events)
+        total_modules = len(_STREAM_MODULES)
         for idx, module in enumerate(_STREAM_MODULES):
             elapsed = round((_st.monotonic() - start) * 1000, 1)
             if elapsed > 30000:
                 yield f"data: {_json.dumps({'event': 'error', 'message': 'timeout'})}\n\n"
                 return
             score = cb.get(f"s_{module}", cb.get(f"r_{module}", 0))
-            progress = int(((idx + 1) / total) * 100)
-            if module == "final":
-                progress = 100
+            progress = int(((idx + 1) / (total_modules + 8)) * 100)
             yield f"data: {_json.dumps({'event': 'module_complete', 'module': module, 'score': score, 'progress': progress, 'module_index': idx, 'elapsed_ms': elapsed})}\n\n"
+
+        # Phase 2: Detection layers (6 events)
+        _det_layers = [
+            ("timestamp_integrity", pf_result.get("timestamp_integrity", "VALID")),
+            ("identity_drift", pf_result.get("identity_drift", "CLEAN")),
+            ("consensus_collapse", pf_result.get("consensus_collapse", "CLEAN")),
+            ("provenance_chain", pf_result.get("provenance_chain_integrity", "CLEAN")),
+            ("sync_bleed", pf_result.get("sync_bleed", "CLEAN")),
+            ("confidence_calibration", pf_result.get("confidence_calibration_check", "CLEAN")),
+        ]
+        for di, (layer, state) in enumerate(_det_layers):
+            elapsed = round((_st.monotonic() - start) * 1000, 1)
+            progress = int(((total_modules + di + 1) / (total_modules + 8)) * 100)
+            yield f"data: {_json.dumps({'event': 'detection_complete', 'layer': layer, 'state': state, 'progress': progress, 'elapsed_ms': elapsed})}\n\n"
+
+        # Phase 3: Invariant check (1 event)
         elapsed = round((_st.monotonic() - start) * 1000, 1)
-        full_response = {
-            "omega_mem_final": result.omega_mem_final,
-            "recommended_action": result.recommended_action,
-            "assurance_score": result.assurance_score,
-            "component_breakdown": cb,
-        }
-        yield f"data: {_json.dumps({'event': 'complete', 'result': full_response, 'progress': 100, 'elapsed_ms': elapsed})}\n\n"
+        inv = pf_result.get("invariant_check", {})
+        yield f"data: {_json.dumps({'event': 'invariant_check', 'result': inv, 'progress': 98, 'elapsed_ms': elapsed})}\n\n"
+
+        # Phase 4: Final decision (1 event)
+        elapsed = round((_st.monotonic() - start) * 1000, 1)
+        yield f"data: {_json.dumps({'event': 'complete', 'result': {'omega_mem_final': pf_result.get('omega_mem_final', 0), 'recommended_action': pf_result.get('recommended_action', 'USE_MEMORY'), 'assurance_score': pf_result.get('assurance_score', 0), 'attack_surface_level': pf_result.get('attack_surface_level', 'NONE'), 'stability_delta': pf_result.get('stability_delta', 0), 'stability_trend': pf_result.get('stability_trend', 'stable')}, 'progress': 100, 'elapsed_ms': elapsed})}\n\n"
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
 
