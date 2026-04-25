@@ -361,8 +361,26 @@ async def _scheduler_scoring_drift():
 
 
 @asynccontextmanager
+def _flush_state_on_shutdown():
+    """Flush dirty in-memory state to Redis on graceful shutdown.
+
+    Called during SIGTERM handling. Best-effort — if Redis is unavailable,
+    state is lost (acceptable since it's all reconstructable from Supabase).
+    """
+    try:
+        from api.redis_state import redis_set
+        # Persist Stripe retry queue
+        with _stripe_retry_lock:
+            if _stripe_retry_queue:
+                redis_set(_STRIPE_RETRY_REDIS_KEY, list(_stripe_retry_queue), ttl=604800)
+                logger.info("Shutdown: flushed %d Stripe retry items to Redis", len(_stripe_retry_queue))
+    except Exception as e:
+        logger.warning("Shutdown: failed to flush Stripe retry queue: %s", e)
+    logger.info("Shutdown: state flush complete")
+
+
 async def _lifespan(app_instance):
-    """Start background schedulers on app startup."""
+    """Start background schedulers on app startup; flush state on shutdown."""
     tasks = []
     tasks.append(asyncio.create_task(_scheduler_truth_subscription()))
     tasks.append(asyncio.create_task(_scheduler_sleeper_scan()))
@@ -371,8 +389,11 @@ async def _lifespan(app_instance):
     tasks.append(asyncio.create_task(_scheduler_scoring_drift()))
     logger.info("Background schedulers started: truth_subscription (30m), sleeper_scan (60m), daily_snapshot (24h), stripe_retry (5m), scoring_drift (24h)")
     yield
+    # Graceful shutdown: cancel schedulers, flush dirty state to Redis
+    logger.info("Shutdown initiated — cancelling schedulers and flushing state")
     for t in tasks:
         t.cancel()
+    _flush_state_on_shutdown()
 
 
 app = FastAPI(
