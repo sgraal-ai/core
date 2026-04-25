@@ -145,3 +145,25 @@ class TestTemporalPatterns:
             assert 0 <= j["peak_risk_hour"] <= 23
             assert 0 <= j["low_risk_hour"] <= 23
             assert isinstance(j["circadian_amplitude"], (int, float))
+
+
+class TestOutcomesEvictionTTL:
+    def test_outcomes_24h_ttl(self):
+        """Outcomes older than 24h are evicted; outcomes younger than 24h survive."""
+        import hashlib
+        _kh = hashlib.sha256("sg_test_key_001".encode()).hexdigest()
+        now = time.time()
+        # Insert one fresh outcome (1h old) and one stale outcome (25h old)
+        _outcome_set("evict_fresh", {"status": "open", "key_hash": _kh, "_ts": now - 3600})
+        _outcome_set("evict_stale", {"status": "open", "key_hash": _kh, "_ts": now - 90000})
+        # Trigger cleanup via a preflight call
+        r = client.post("/v1/preflight", headers=AUTH, json={
+            "memory_state": [{"id": "e1", "content": "test", "type": "semantic",
+                              "timestamp_age_days": 1, "source_trust": 0.9,
+                              "source_conflict": 0.05, "downstream_count": 1}],
+            "domain": "general", "action_type": "informational",
+        })
+        assert r.status_code == 200
+        # Fresh outcome should survive, stale should be evicted
+        assert "evict_fresh" in _outcomes, "Fresh outcome (1h old) should survive 24h TTL"
+        assert "evict_stale" not in _outcomes, "Stale outcome (25h old) should be evicted by 24h TTL"

@@ -12286,9 +12286,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
 
     # Time-based cleanup (#376) — runs every 5 minutes, replaces probabilistic 1% per call
     _run_periodic_cleanup()
-    # Also clean _outcomes (TTL 1h) and _async_preflight_jobs (TTL 1h)
+    # Also clean _outcomes (TTL 24h) and _async_preflight_jobs (TTL 1h)
+    _cutoff_outcomes = _time.time() - 86400  # 24h — outcomes needed for Q-learning feedback loop
     _cutoff = _time.time() - 3600
-    expired = [k for k, v in _outcomes.items() if v.get("_ts", 0) < _cutoff]
+    expired = [k for k, v in _outcomes.items() if v.get("_ts", 0) < _cutoff_outcomes]
     for k in expired[:200]:
         _outcomes.pop(k, None)
     expired_jobs = [k for k, v in _async_preflight_jobs.items() if v.get("created_at", 0) < _cutoff]
