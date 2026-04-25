@@ -133,5 +133,9 @@ def config_validate():
         sys.exit(1)
 
 
+from sgraal_cli.doctor import doctor
+cli.add_command(doctor)
+
+
 if __name__ == "__main__":
     cli()
