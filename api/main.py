@@ -1504,7 +1504,8 @@ def destroy_entries(req: DestroyRequest, key_record: dict = Depends(verify_api_k
     if supabase_client:
         try:
             for eid in req.entry_ids:
-                _res = supabase_client.table("memory_ledger").delete().eq("entry_id", eid).eq("agent_id", req.agent_id).execute()
+                _destroy_kh = _safe_key_hash(key_record)
+                _res = supabase_client.table("memory_ledger").delete().eq("entry_id", eid).eq("agent_id", req.agent_id).eq("api_key_hash", _destroy_kh).execute()
                 if getattr(_res, "data", None):
                     _supabase_deleted += len(_res.data)
         except Exception as _sb_e:
@@ -2476,7 +2477,8 @@ def issue_certificate(req: CertificateRequest, key_record: dict = Depends(verify
     # 3. Check Supabase audit_log
     if not _outcome and supabase_service_client:
         try:
-            _audit = supabase_service_client.table("audit_log").select("*").eq("request_id", req.request_id).execute()
+            _cert_kh = _safe_key_hash(key_record)
+            _audit = supabase_service_client.table("audit_log").select("*").eq("request_id", req.request_id).eq("api_key_id", _cert_kh).execute()
             if _audit.data and len(_audit.data) > 0:
                 _outcome = _audit.data[0]
         except Exception:
@@ -9332,7 +9334,8 @@ def list_approvals(key_record: dict = Depends(verify_api_key)):
         preflight_ids = [a.get("preflight_id", "") for a in _approvals.values() if a.get("preflight_id")]
         if preflight_ids:
             try:
-                r = _sb.table("audit_log").select("*").in_("request_id", preflight_ids[:100]).execute()
+                _appr_kh = _safe_key_hash(key_record)
+                r = _sb.table("audit_log").select("*").in_("request_id", preflight_ids[:100]).eq("api_key_id", _appr_kh).execute()
                 if r.data:
                     for row in r.data:
                         _audit_cache[row["request_id"]] = row
@@ -11755,7 +11758,8 @@ def get_repair_effectiveness(key_record: dict = Depends(verify_api_key), limit: 
     _sb = supabase_service_client or supabase_client
     if _sb:
         try:
-            q = _sb.table("outcome_log").select("*").eq("status", "success").order("closed_at", desc=True).limit(limit)
+            _repair_kh = _safe_key_hash(key_record)
+            q = _sb.table("outcome_log").select("*").eq("status", "success").eq("api_key_id", _repair_kh).order("closed_at", desc=True).limit(limit)
             r = q.execute()
             results = r.data or []
         except Exception:

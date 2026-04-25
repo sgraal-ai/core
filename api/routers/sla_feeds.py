@@ -156,13 +156,13 @@ def sla_report(key_record: dict = Depends(verify_api_key)):
     _sb = supabase_service_client or supabase_client
     if _sb:
         try:
-            q = _sb.table("audit_log").select("created_at").eq("event_type", "incident").order("created_at", desc=True).limit(1)
+            q = _sb.table("audit_log").select("created_at").eq("event_type", "incident").order("created_at", desc=True).limit(1)  # CI_TENANT_SAFE: platform-wide SLA incident tracking (scope=platform documented)
             result = q.execute()
             if result.data and len(result.data) > 0:
                 last_incident = datetime.fromisoformat(result.data[0]["created_at"].replace("Z", "+00:00"))
                 days_since_incident = (datetime.now(timezone.utc) - last_incident).days
             else:
-                q2 = _sb.table("audit_log").select("created_at").order("created_at", desc=False).limit(1)
+                q2 = _sb.table("audit_log").select("created_at").order("created_at", desc=False).limit(1)  # CI_TENANT_SAFE: platform-wide first-entry date for SLA uptime
                 r2 = q2.execute()
                 if r2.data and len(r2.data) > 0:
                     first_entry = datetime.fromisoformat(r2.data[0]["created_at"].replace("Z", "+00:00"))
