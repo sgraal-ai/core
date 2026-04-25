@@ -849,6 +849,7 @@ def verify_api_key(
 
 # ---- Tenant isolation context (Phase 2a) ----
 from api.tenant import TenantContext, create_tenant_context
+from api.decision_severity import SEVERITY as _DECISION_SEVERITY
 
 def get_tenant_context(key_record: dict = Depends(verify_api_key)) -> TenantContext:
     """FastAPI dependency — extracts TenantContext from authenticated key."""
@@ -9032,7 +9033,7 @@ def analytics_decision_entropy(agent_id: str = Query(""), days: int = Query(30),
             cur_run = 1
 
     # Decision velocity (slope of numeric encoding over time)
-    _score_map = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
+    _score_map = _DECISION_SEVERITY
     scores = [_score_map.get(d, 0) for d in decisions]
     if n >= 3:
         _mean_x = (n - 1) / 2
@@ -15483,7 +15484,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     response["stability_gauge"] = _ss["score"] if _ss and isinstance(_ss, dict) and "score" in _ss else (_lv["V"] if _lv and isinstance(_lv, dict) and "V" in _lv else 0.0)
 
     # ── Security-Monotone Decision Pipeline ──
-    _SEVERITY = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
+    _SEVERITY = _DECISION_SEVERITY
     _SEV_TO_ACTION = {0: "USE_MEMORY", 1: "WARN", 2: "ASK_USER", 3: "BLOCK"}
     _omega_now = response["omega_mem_final"]
 
@@ -16189,7 +16190,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _grok_confidence = float(_gc.get("grok_confidence", 0))
         _consensus_agents = int(_gc.get("consensus_agents", 0))
         _sgraal_decision = response.get("recommended_action", "USE_MEMORY")
-        _SEVERITY_GC = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
+        _SEVERITY_GC = _DECISION_SEVERITY
         if _grok_decision and _grok_decision != _sgraal_decision:
             response["sgraal_override"] = True
             response["override_reason"] = "formal contradiction detected"
@@ -16726,7 +16727,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # Recompute decision with adjusted thresholds (both tiers)
     # GUARD: never downgrade a BLOCK set by a detection layer override.
     # Detection layers have stronger signal than omega-based cost adjustment.
-    _SEVERITY_CD = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
+    _SEVERITY_CD = _DECISION_SEVERITY
     if _cost_adjusted:
         _orig_action = response["recommended_action"]
         if omega_out >= _adj_block:
@@ -17299,7 +17300,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
             )
             # FIX 5: escalate-only by default — plugins can only make decisions
             # stricter (USE_MEMORY→WARN→ASK_USER→BLOCK), not weaker.
-            _SEVERITY = {"USE_MEMORY": 0, "WARN": 1, "ASK_USER": 2, "BLOCK": 3}
+            _SEVERITY = _DECISION_SEVERITY
             if isinstance(_hook_out, tuple) and len(_hook_out) == 2:
                 _new_omega, _new_decision = _hook_out
                 if abs(float(_new_omega) - _current_omega) > 1e-9:
