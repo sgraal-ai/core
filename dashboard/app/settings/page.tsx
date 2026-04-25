@@ -67,7 +67,7 @@ export default function SettingsPage() {
                 Remove
               </button>
             </div>
-            <p className="text-xs text-muted">Key is stored in your browser only (localStorage).</p>
+            <p className="text-xs text-muted">Key is stored in your browser session only (sessionStorage — cleared on tab close).</p>
           </div>
         ) : (
           <div>
