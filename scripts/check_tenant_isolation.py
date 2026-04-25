@@ -5,12 +5,10 @@ Usage:
     python3 scripts/check_tenant_isolation.py [--strict]
 
 Modes:
-    Default (warn-only): prints warnings but exits 0
-    --strict: exits 1 on any violation (enable after 2026-05-01)
+    Default (strict): exits 1 on any violation
+    --warn-only: prints warnings but exits 0
 
-    # TODO(2026-05-01): Switch default to --strict mode.
-    # After this date, remove warn-only mode and make --strict the default.
-    # This gives 7 days from initial deployment (2026-04-23) for migration.
+    Hard-fail enabled 2026-04-25 after reaching 0 violations on both checks.
 """
 from __future__ import annotations
 
@@ -142,7 +140,7 @@ def check_file(filepath: Path) -> list[dict]:
 
 
 def main():
-    strict = "--strict" in sys.argv
+    strict = "--warn-only" not in sys.argv  # Default: strict (hard-fail)
     root = Path(__file__).parent.parent
 
     files_to_check = [
@@ -155,23 +153,18 @@ def main():
         if filepath.exists():
             all_violations.extend(check_file(filepath))
 
+    _dict_failed = False
     if not all_violations:
         print("tenant-isolation-check: PASS (no violations found)")
-        sys.exit(0)
-
-    print(f"tenant-isolation-check: {'FAIL' if strict else 'WARN'} ({len(all_violations)} violations)")
-    print()
-    for v in all_violations:
-        collections = ", ".join(v["collections"])
-        print(f"  {v['file']}:{v['line']} — {v['function']}() accesses [{collections}] without TenantContext")
-    print()
-    if strict:
-        print("Run with no flags for warn-only mode, or fix the violations above.")
-        sys.exit(1)
     else:
-        print("Warn-only mode. Run with --strict to fail the build.")
-        # TODO(2026-05-01): Switch to --strict by default. See module docstring.
-        sys.exit(0)
+        print(f"tenant-isolation-check: {'FAIL' if strict else 'WARN'} ({len(all_violations)} violations)")
+        print()
+        for v in all_violations:
+            collections = ", ".join(v["collections"])
+            print(f"  {v['file']}:{v['line']} — {v['function']}() accesses [{collections}] without TenantContext")
+        print()
+        if strict:
+            _dict_failed = True
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +298,30 @@ def main_supabase():
 
 
 if __name__ == "__main__":
-    main()
+    main()  # Sets _dict_failed via nonlocal — but we can't access it. Run both inline.
+    # Re-run both checks together for combined exit code
+    strict = "--warn-only" not in sys.argv
+    root = Path(__file__).parent.parent
+    files = [root / "api" / "main.py", *(root / "api" / "routers").glob("*.py")]
+
+    dict_violations = []
+    for fp in files:
+        if fp.exists():
+            dict_violations.extend(check_file(fp))
+
+    sb_violations = check_supabase()
+
     print()
-    main_supabase()
+    if not sb_violations:
+        print("supabase-tenant-check: PASS (no violations found)")
+    else:
+        print(f"supabase-tenant-check: {'FAIL' if strict else 'WARN'} ({len(sb_violations)} violations)")
+        for v in sb_violations:
+            print(f"  {v['file']}:{v['line']} — table '{v['table']}' without tenant filter")
+
+    if strict and (dict_violations or sb_violations):
+        sys.exit(1)
+    elif not dict_violations and not sb_violations:
+        sys.exit(0)
+    else:
+        sys.exit(0)

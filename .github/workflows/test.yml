@@ -29,6 +29,10 @@ jobs:
       - run: pip install -e sdk/python/ || pip install sdk/python/ || true
       - name: Clear bytecode cache
         run: find . -name "*.pyc" -delete && find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+      - name: Tenant isolation CI check (hard-fail)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/check_tenant_isolation.py
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}/sdk/python:${{ github.workspace }}

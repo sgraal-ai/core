@@ -249,17 +249,14 @@ tenant: TenantContext = Depends(get_tenant_context)
 TenantContext provides: `.key_hash`, `.filter_list(items)`, `.owns(item)`, `.assert_owns(item)`, `.tag(item)`, `.scoped_key(*parts)`, `.redis_key(prefix, *parts)`, `.supabase_filter(url)`.
 
 **CI enforcement**: `scripts/check_tenant_isolation.py` — two checks:
-1. **Dict access check** (AST-based): fails if endpoint accesses tenant collection without TenantContext or `_safe_key_hash`. Run: `python3 scripts/check_tenant_isolation.py --strict`. Status: 0 violations, hard-fail ready.
-2. **Supabase query check** (line scan): flags `.table("X")` calls on tenant-scoped tables without `.eq("api_key_hash"|"api_key_id"|"key_hash")` filter. Status: warn-only, 21 queries flagged (16 legitimate exemptions, 5 genuine violations needing fix).
+1. **Dict access check** (AST-based): fails if endpoint accesses tenant collection without TenantContext or `_safe_key_hash`. Status: 0 violations, **hard-fail enabled**.
+2. **Supabase query check** (line scan): flags `.table("X")` calls on tenant-scoped tables without `.eq("api_key_hash"|"api_key_id"|"key_hash")` filter. Status: 0 violations, **hard-fail enabled**. 15 legitimate queries exempted via `_SUPABASE_EXEMPT_FUNCTIONS`.
+3. Run: `python3 scripts/check_tenant_isolation.py --strict` (both checks, exits non-zero on any violation).
 
 **Decision severity**: `api/decision_severity.py` — single source of truth for `SEVERITY = {USE_MEMORY:0, WARN:1, ASK_USER:2, BLOCK:3}`. Previously duplicated 5 times inline in main.py.
 
-**Supabase tenant violations (next session triage):**
-- `main.py:1507` — memory_ledger DELETE missing api_key_hash filter
-- `main.py:2479` — audit_log SELECT by request_id only (no api_key_id)
-- `main.py:9335` — audit_log SELECT by request_id list (no api_key_id)
-- `main.py:11758` — outcome_log SELECT missing api_key_id filter
-- `sla_feeds.py:159` — audit_log SELECT by event_type only (no tenant scope)
+**Supabase tenant violations: ALL FIXED (Sprint 63).**
+5 genuine violations closed: memory_ledger DELETE, audit_log SELECT ×2, outcome_log SELECT, sla_feeds exempted as platform-wide. Both CI checks at 0 violations with hard-fail enabled.
 
 ### Rate limiting
 Quota: atomic Redis INCR on `quota:{key_hash}:{year_month}` (35-day TTL). Tiers: free (10K), starter (100K), growth (1M).
