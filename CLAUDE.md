@@ -237,7 +237,7 @@ web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
 
 **Landing page** (sgraal.com) — Vercel: `cd web-static && vercel --prod`
 
-**Staging** — Railway staging env, config in `railway.staging.toml`. Staging-first workflow: branch → local uvicorn test → merge to main.
+**Staging** — Railway staging env, config in `railway.staging.toml`. Staging-first workflow: branch → local uvicorn test → merge to main. **Known issue**: api-staging.sgraal.com has SSL cert mismatch (NET::ERR_CERT_COMMON_NAME_INVALID) — Railway serves *.up.railway.app cert, Cloudflare proxy is OFF. Internal-use only; fix requires enabling Cloudflare proxy or configuring Railway custom domain SSL.
 
 ## Environment Variables
 
