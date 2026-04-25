@@ -43,9 +43,11 @@ A2 axiom: identical memory state + identical healing_counter = identical Ω_MEM 
 
 ### API layer
 
-`api/main.py` — 370+ endpoints. Key endpoints:
-- `/v1/preflight` — full 83-module scoring pipeline
-- `/v1/check` — simple door (plain strings in, plain English out, no MemCube required)
+`api/main.py` — 370+ endpoints. **Recommended entry point: `/v1/check`** (plain strings in, plain English out — "safe" or "not safe"). For full scoring details, use `/v1/preflight`.
+
+Key endpoints:
+- `/v1/check` — **start here** — simple door, no MemCube required, returns safe/unsafe with plain English reason
+- `/v1/preflight` — full 83-module scoring pipeline (200+ response fields, MemCube format)
 - `/v1/mvmem` — minimum viable memory (which entries can be removed without changing the decision)
 - `/v1/recover` — full recovery pipeline (dry-run default, commit=true to execute)
 - `/v1/agent/{agent_id}/behavioral-profile` — call frequency, action escalation, domain switching per agent

@@ -14,8 +14,21 @@ pip install sgraal
 from sgraal import SgraalClient
 
 client = SgraalClient(api_key="sg_live_...")
-# Or set SGRAAL_API_KEY environment variable
 
+# Simple check — plain strings in, plain answer out
+result = client.check(
+    memories=["Customer prefers email communication", "Last order: 2024-03-15"],
+    action="Send refund confirmation email",
+)
+print(result["safe"])    # True or False
+print(result["reason"])  # Plain English explanation
+```
+
+## Full Scoring (Advanced)
+
+For the full 83-module scoring pipeline with 200+ response fields:
+
+```python
 result = client.preflight(
     memory_state=[{
         "id": "mem_001",
