@@ -617,24 +617,59 @@ def _stripe_retry_sync_to_redis() -> None:
 _stripe_retry_load_from_redis()
 
 
+_STRIPE_MAX_RETRIES = 5
+_STRIPE_BACKOFF_SECONDS = [10, 30, 90, 270, 810]  # exponential backoff
+_STRIPE_DEAD_LETTER_KEY = "sgraal:stripe_dead_letter"
+
+
+def _stripe_move_to_dead_letter(item: dict) -> None:
+    """Move permanently failed item to dead letter queue in Redis."""
+    try:
+        dl = redis_get(_STRIPE_DEAD_LETTER_KEY)
+        dl_list = dl if isinstance(dl, list) else []
+        item["dead_lettered_at"] = _time.time()
+        dl_list.append(item)
+        # Keep last 1000 dead letter items
+        if len(dl_list) > 1000:
+            dl_list = dl_list[-1000:]
+        redis_set(_STRIPE_DEAD_LETTER_KEY, dl_list, ttl=2592000)  # 30 days
+    except Exception:
+        pass
+
+
 async def _scheduler_stripe_retry():
-    """Retry failed Stripe billing events every 5 minutes, up to 3 attempts."""
+    """Retry failed Stripe billing events every 30 seconds, up to 5 attempts with exponential backoff."""
     while True:
         try:
-            await asyncio.sleep(300)  # 5 minutes
+            await asyncio.sleep(30)
             if not _stripe_retry_queue:
                 continue
+            _now = _time.time()
             with _stripe_retry_lock:
-                _to_retry = list(_stripe_retry_queue)
+                _to_retry = []
+                _keep = []
+                for item in _stripe_retry_queue:
+                    retry_count = item.get("retry_count", 0)
+                    next_retry_at = item.get("next_retry_at", 0)
+                    if _now >= next_retry_at:
+                        _to_retry.append(item)
+                    else:
+                        _keep.append(item)  # not yet due
                 _stripe_retry_queue.clear()
-            _stripe_retry_sync_to_redis()  # persist cleared state
+                _stripe_retry_queue.extend(_keep)
+
+            if not _to_retry:
+                continue
 
             _permanent_failures = 0
             _retried = 0
             for item in _to_retry:
-                if item.get("retry_count", 0) >= 3:
+                retry_count = item.get("retry_count", 0)
+                if retry_count >= _STRIPE_MAX_RETRIES:
                     _permanent_failures += 1
-                    logger.error("Stripe billing permanent failure after 3 retries: customer=%s", item.get("customer_id"))
+                    logger.error("Stripe billing permanent failure after %d retries: customer=%s",
+                                 _STRIPE_MAX_RETRIES, item.get("customer_id"))
+                    _stripe_move_to_dead_letter(item)
                     continue
                 try:
                     stripe.billing.MeterEvent.create(
@@ -643,13 +678,16 @@ async def _scheduler_stripe_retry():
                     )
                     _retried += 1
                 except Exception:
-                    item["retry_count"] = item.get("retry_count", 0) + 1
+                    item["retry_count"] = retry_count + 1
+                    backoff = _STRIPE_BACKOFF_SECONDS[min(retry_count, len(_STRIPE_BACKOFF_SECONDS) - 1)]
+                    item["next_retry_at"] = _now + backoff
                     with _stripe_retry_lock:
                         _stripe_retry_queue.append(item)
-                    _stripe_retry_sync_to_redis()  # persist re-queued item
+
+            _stripe_retry_sync_to_redis()
 
             if _retried or _permanent_failures:
-                logger.info("Stripe retry: %d retried, %d permanent failures, %d remaining",
+                logger.info("Stripe retry: %d retried, %d dead-lettered, %d remaining",
                             _retried, _permanent_failures, len(_stripe_retry_queue))
         except Exception as e:
             logger.error("Scheduler stripe_retry error: %s", e)
@@ -1420,7 +1458,9 @@ def scheduler_status(key_record: dict = Depends(verify_api_key)):
                 "status": "running",
             },
             "stripe_retry": {
-                "interval": "5m",
+                "interval": "30s",
+                "max_retries": _STRIPE_MAX_RETRIES,
+                "backoff_schedule": _STRIPE_BACKOFF_SECONDS,
                 "queue_length": len(_stripe_retry_queue),
                 "oldest_failed": min((e.get("failed_at", 0) for e in _stripe_retry_queue), default=None),
                 "status": "running",
@@ -1441,6 +1481,18 @@ def scheduler_status(key_record: dict = Depends(verify_api_key)):
         },
         "rl_persistence": _rl_persistence_status(),
     }
+
+
+@app.get("/v1/admin/stripe-dead-letter")
+def get_stripe_dead_letter(key_record: dict = Depends(verify_api_key)):
+    """Inspect Stripe retry dead letter queue. Requires authentication."""
+    _check_rate_limit(key_record)
+    try:
+        dl = redis_get(_STRIPE_DEAD_LETTER_KEY)
+        items = dl if isinstance(dl, list) else []
+    except Exception:
+        items = []
+    return {"items": items[-50:], "count": len(items), "truncated": len(items) > 50}
 
 
 def _rl_persistence_status() -> dict:
