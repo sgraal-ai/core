@@ -234,33 +234,33 @@ async def _scheduler_daily_snapshot():
 
             n_snapshotted = 0
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            # Snapshot each agent that has outcomes
-            agent_ids = set()
+            # Snapshot each agent per tenant (tenant-scoped keys)
+            tenant_agents: dict[str, set] = {}  # kh → {agent_ids}
             for _oid, _od in list(_outcomes.items()):
                 aid = _od.get("agent_id")
-                if aid:
-                    agent_ids.add(aid)
+                kh = _od.get("key_hash")
+                if aid and kh:
+                    tenant_agents.setdefault(kh, set()).add(aid)
 
-            for aid in list(agent_ids)[:100]:  # Cap at 100 agents
-                snap_key = f"snapshot:{aid}:{today}"
-                # Find most recent outcome for this agent.
-                # Relies on dict insertion order (Python 3.7+): reversed()
-                # iterates newest-first because _outcomes is append-only.
-                latest = None
-                for _oid, _od in reversed(list(_outcomes.items())):
-                    if _od.get("agent_id") == aid:
-                        latest = _od
-                        break
-                if latest:
-                    _persist_store_bg(snap_key, {
-                        "agent_id": aid,
-                        "date": today,
-                        "omega_mem_final": latest.get("omega_mem_final"),
-                        "recommended_action": latest.get("recommended_action"),
-                        "domain": latest.get("domain"),
-                        "snapshotted_at": datetime.now(timezone.utc).isoformat(),
-                    }, ttl=604800 * 4)  # 28 days
-                    n_snapshotted += 1
+            for kh, aids in tenant_agents.items():
+                for aid in list(aids)[:100]:  # Cap at 100 agents per tenant
+                    snap_key = f"snapshot:{kh}:{aid}:{today}"
+                    latest = None
+                    for _oid, _od in reversed(list(_outcomes.items())):
+                        if _od.get("agent_id") == aid and _od.get("key_hash") == kh:
+                            latest = _od
+                            break
+                    if latest:
+                        _persist_store_bg(snap_key, {
+                            "agent_id": aid,
+                            "key_hash": kh,
+                            "date": today,
+                            "omega_mem_final": latest.get("omega_mem_final"),
+                            "recommended_action": latest.get("recommended_action"),
+                            "domain": latest.get("domain"),
+                            "snapshotted_at": datetime.now(timezone.utc).isoformat(),
+                        }, ttl=604800 * 4)  # 28 days
+                        n_snapshotted += 1
 
             _persist_store_bg("scheduler:daily_snapshot:last_run", datetime.now(timezone.utc).isoformat(), ttl=604800)
             _scheduler_status["daily_snapshot"] = datetime.now(timezone.utc).isoformat()
