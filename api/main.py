@@ -15690,10 +15690,18 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     if _pc_integrity == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_provenance", "MANIPULATED flag")
     elif _pc_integrity == "SUSPICIOUS" and not _all_self_authored and not _sync_suppress_pc:
-        _pc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
+        # Deep provenance chains (3+ hops) have higher corruption risk — each hop
+        # introduces potential for drift, semantic loss, or manipulation. Escalate
+        # directly to ASK_USER instead of WARN for deep chains.
+        _pc_chain_depth = response.get("chain_depth", 0)
+        if _pc_chain_depth >= 3:
+            _pc_sev_map = {"USE_MEMORY": "ASK_USER", "WARN": "ASK_USER"}
+        else:
+            _pc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _pc_cur = response["recommended_action"]
         if _pc_cur in _pc_sev_map:
-            _set_action(_pc_sev_map[_pc_cur], "detection_provenance", "SUSPICIOUS escalation")
+            _set_action(_pc_sev_map[_pc_cur], "detection_provenance",
+                        f"SUSPICIOUS escalation (chain_depth={_pc_chain_depth})")
 
     # Sync bleed override — post-reconciliation
     # Corroboration gate: sync_bleed alone (stale majority + low Jaccard without
