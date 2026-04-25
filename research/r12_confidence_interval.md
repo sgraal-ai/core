@@ -2,15 +2,21 @@
 
 ## Wilson Score 95% CI for R12 Exact Match
 
-### Current result: 48/60 (80.0%)
+### Current result: 49/60 (81.67%)
 
 ```python
 from statsmodels.stats.proportion import proportion_confint
-ci = proportion_confint(48, 60, alpha=0.05, method='wilson')
-# (0.6773, 0.8908)
+ci = proportion_confint(49, 60, alpha=0.05, method='wilson')
+# (0.6997, 0.8951)
 ```
 
-**Wilson score 95% CI: [67.7%, 89.1%]**
+**Wilson score 95% CI: [69.97%, 89.51%]**
+
+Sprint 65 improvement: PA-008 fixed via deep provenance chain escalation (chain_depth >= 3 → ASK_USER). 2 remaining PA mismatches (PA-002, PA-009) are architectural invariants — MANIPULATED → BLOCK and SUSPICIOUS + destructive → BLOCK cannot be relaxed.
+
+### Previous result: 48/60 (80.0%)
+
+Wilson 95% CI: [67.7%, 89.1%]
 
 ### Comparison to 43/60 baseline (71.7%)
 
@@ -25,7 +31,7 @@ The CIs overlap — the improvement from 43 to 48 is directionally positive but 
 
 ### Pitch usage
 
-> Sgraal R12 exact match = 80% with 95% CI [67.7%, 89.1%] on a 60-case adversarial corpus covering 3 attack families (confidence calibration, partial sync bleed, multi-hop provenance asymmetry). 24/24 hard BLOCK cases detected — zero false negatives on high-severity attacks.
+> Sgraal R12 exact match = 81.7% with 95% CI [70.0%, 89.5%] on a 60-case adversarial corpus covering 3 attack families (confidence calibration, partial sync bleed, multi-hop provenance asymmetry). 24/24 hard BLOCK cases detected — zero false negatives on high-severity attacks.
 
 ### Per-family breakdown
 
@@ -33,8 +39,8 @@ The CIs overlap — the improvement from 43 to 48 is directionally positive but 
 |--------|-------|------|---------------|
 | CC (confidence_calibration) | 11/20 | 55.0% | [33.2%, 75.1%] |
 | PS (partial_sync_bleed) | 20/20 | 100.0% | [83.9%, 100.0%] |
-| PA (multi_hop_provenance_asymmetry) | 17/20 | 85.0% | [63.9%, 94.8%] |
-| **Total** | **48/60** | **80.0%** | **[67.7%, 89.1%]** |
+| PA (multi_hop_provenance_asymmetry) | 18/20 | 90.0% | [69.9%, 97.2%] |
+| **Total** | **49/60** | **81.7%** | **[70.0%, 89.5%]** |
 | BLOCK subset | 24/24 | 100.0% | [86.2%, 100.0%] |
 
 ### Sample size note

@@ -178,7 +178,7 @@ cd web-static && vercel --prod
 ### Baseline — do not drop below:
 - pytest: 2,728 passing (as of 2026-04-25)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
-- Round 12: 48/60 exact match (live API, confirmed 2026-04-25), 24/24 hard BLOCK, PS 20/20, CC 11/20, PA 17/20. Run: `python3 tests/corpus/run_r12.py` (live) or `--local`.
+- Round 12: 49/60 exact match (live API, confirmed 2026-04-25), 24/24 hard BLOCK, PS 20/20, CC 11/20, PA 18/20. Run: `python3 tests/corpus/run_r12.py` (live) or `--local`.
 - R2 F1: 1.0000 (must not regress)
 
 ### R12 improvement history:
@@ -187,7 +187,8 @@ cd web-static && vercel --prod
 - **#783 Phase 2** (R12 43->46, live API): Self-authored SUSPICIOUS suppression. 3 detection-driven fixes (CC-013, CC-015, CC-020). CC-005 regression caught and fixed — action_type_escalation must NOT be suppressed for self-authored entries.
 - **#822 sync-aware** (R12 46->48, live API confirmed): Sync-aware detection for PS-011 and PS-013. Suppresses provenance/sync_bleed SUSPICIOUS escalation during legitimate rolling syncs (stale entries don't outnumber current). Adds sync_version_mismatch as soft corroboration for timestamp_integrity. Zero impact on CC/R2/R3 (no sync metadata in those corpora).
 - **PA Pydantic fix**: `MemoryEntry.source` widened from `Optional[str]` to `Optional[Any]` — PA entries use dict `source` with `declared_origin`/`actual_origin`. Field was `str` since commit `9e9a600` (2026-03-23), PA corpus created later with dict format. PA unblocked: 17/20.
-- **Remaining 12 mismatches**: 5 CC cases (CC-009, CC-010, CC-012, CC-016, CC-019) are enrichment-driven omega inflation — require enrichment pipeline refactor (separate sprint). 4 CC cases (CC-004, CC-007, CC-008, CC-011) need semantic/schema capabilities not yet built. 3 PA cases (PA-002, PA-008, PA-009) are ASK_USER over/under-detection — need PA-specific threshold tuning.
+- **Sprint 65 PA threshold** (R12 48->49, live API confirmed): Deep provenance chain escalation — chain_depth >= 3 escalates SUSPICIOUS to ASK_USER instead of WARN. Fixes PA-008. PA-002 and PA-009 are architectural invariants that cannot be fixed: PA-002 (MANIPULATED → BLOCK, security-monotone) and PA-009 (SUSPICIOUS + destructive → BLOCK, CC-005 protection). See `research/r12_pa_threshold_analysis.md`.
+- **Remaining 11 mismatches**: 5 CC cases (CC-009, CC-010, CC-012, CC-016, CC-019) are enrichment-driven omega inflation — require enrichment pipeline refactor (separate sprint). 4 CC cases (CC-004, CC-007, CC-008, CC-011) need semantic/schema capabilities not yet built. 2 PA cases (PA-002, PA-009) are architectural invariants — MANIPULATED → BLOCK and SUSPICIOUS + destructive → BLOCK cannot be relaxed without compromising security guarantees.
 
 ### Session audit summary (2026-04-22/23/25):
 - **4 audits**: 111+, 46, 56, and 81 findings (294 total)
