@@ -174,5 +174,106 @@ def main():
         sys.exit(0)
 
 
+# ---------------------------------------------------------------------------
+# Phase 2: Supabase query tenant isolation check
+# ---------------------------------------------------------------------------
+
+# Supabase tables that require tenant scoping (api_key_hash or api_key_id filter)
+TENANT_SCOPED_TABLES = {
+    "audit_log",       # must filter by api_key_id
+    "api_keys",        # must filter by key_hash
+    "aging_rules",     # must filter by api_key_hash
+    "memory_store",    # must filter by api_key_hash
+    "memory_versions", # must filter by api_key_hash
+    "memory_ledger",   # must filter by entry_id + agent_id (composite)
+    "outcome_log",     # must filter by api_key_id
+    "team_members",    # must filter by team ownership
+}
+
+# Exemption marker: lines containing this comment skip the check
+_SUPABASE_EXEMPT_MARKER = "CI_TENANT_SAFE"
+
+
+def _check_supabase_tenant(filepath: Path) -> list[dict]:
+    """Check Supabase queries for missing tenant filters."""
+    violations = []
+    try:
+        lines = filepath.read_text().splitlines()
+    except (UnicodeDecodeError, FileNotFoundError):
+        return []
+
+    for i, line in enumerate(lines, 1):
+        # Skip exempted lines
+        if _SUPABASE_EXEMPT_MARKER in line:
+            continue
+
+        # Detect .table("X") pattern
+        import re
+        match = re.search(r'\.table\(["\'](\w+)["\']\)', line)
+        if not match:
+            continue
+
+        table_name = match.group(1)
+        if table_name not in TENANT_SCOPED_TABLES:
+            continue
+
+        # Check if this line or nearby lines (within 3 lines) have a tenant filter
+        context = "\n".join(lines[max(0, i-2):min(len(lines), i+3)])
+        has_filter = (
+            'eq("api_key_hash"' in context or
+            'eq("api_key_id"' in context or
+            'eq("key_hash"' in context or
+            ".eq(\"api_key_hash\"" in context or
+            ".eq(\"api_key_id\"" in context or
+            ".eq(\"key_hash\"" in context or
+            _SUPABASE_EXEMPT_MARKER in context
+        )
+
+        if not has_filter:
+            violations.append({
+                "file": str(filepath),
+                "line": i,
+                "table": table_name,
+                "code": line.strip()[:120],
+            })
+
+    return violations
+
+
+def check_supabase():
+    """Run Supabase tenant isolation check. Returns list of violations."""
+    root = Path(__file__).parent.parent
+    files_to_check = [
+        root / "api" / "main.py",
+        *(root / "api" / "routers").glob("*.py"),
+    ]
+
+    all_violations = []
+    for filepath in files_to_check:
+        if filepath.exists():
+            all_violations.extend(_check_supabase_tenant(filepath))
+
+    return all_violations
+
+
+def main_supabase():
+    """Entry point for Supabase-only check."""
+    violations = check_supabase()
+    if not violations:
+        print("supabase-tenant-check: PASS (no violations found)")
+        return
+
+    print(f"supabase-tenant-check: WARN ({len(violations)} violations)")
+    print()
+    for v in violations:
+        print(f"  {v['file']}:{v['line']} — table '{v['table']}' accessed without tenant filter")
+        print(f"    {v['code']}")
+    print()
+    print("Add .eq('api_key_hash', kh) or .eq('api_key_id', kh) to fix.")
+    print("Or add '# CI_TENANT_SAFE: <reason>' to exempt.")
+
+
 if __name__ == "__main__":
     main()
+    print()
+    main_supabase()
