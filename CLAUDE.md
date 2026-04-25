@@ -248,6 +248,7 @@ web: PYTHONPATH=/app python3 -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
 - `ATTESTATION_SECRET` — **required in production** (HMAC proof hashes)
 - `PASSPORT_SIGNING_KEY_V1` — **required in production** (Memory Passports)
 - `UNSUB_HMAC_SECRET` — **required in production** (email unsubscribe tokens)
+- `SGRAAL_METRICS_TOKEN` — Bearer token for `/metrics` endpoint. Without this set, `/metrics` returns 401. Set in Railway dashboard (production and staging have separate tokens — never share between environments)
 - `SGRAAL_SKIP_DNS_CHECK=1` — skip DNS in tests (webhook SSRF validation)
 - `SGRAAL_TEST_MODE=1` — enable test API keys (NEVER in production)
 
