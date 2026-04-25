@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 import math
 
 @dataclass
@@ -17,7 +17,7 @@ class MemoryEntry:
     prompt_embedding: Optional[list[float]] = field(default=None, repr=False)  # embedding of memory content
     healing_counter: int = 0   # number of times this entry has been healed
     reference_count: int = 1   # how often this entry is referenced
-    source: Optional[str] = None          # origin: "user_stated", "api_response", etc.
+    source: Optional[Any] = None           # str or dict (PA entries use {"declared_origin": ..., "actual_origin": ...})
     has_backup_source: bool = True        # whether a backup source exists
     action_context: str = "reversible"    # "irreversible", "reversible", "advisory"
 

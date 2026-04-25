@@ -878,7 +878,7 @@ class MemoryEntryRequest(BaseModel):
     prompt_embedding: Optional[list[float]] = None
     healing_counter: int = 0
     reference_count: int = 1
-    source: Optional[str] = None
+    source: Optional[Any] = None  # str or dict (PA entries use {"declared_origin": ..., "actual_origin": ...})
     has_backup_source: bool = True
     action_context: str = "reversible"
     # MemCube v2 optional fields (backward compatible)
