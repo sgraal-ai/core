@@ -176,7 +176,7 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,723 passing (as of 2026-04-25)
+- pytest: 2,728 passing (as of 2026-04-25)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
 - Round 12: 48/60 exact match (live API, confirmed 2026-04-25), 24/24 hard BLOCK, PS 20/20, CC 11/20, PA 17/20. Run: `python3 tests/corpus/run_r12.py` (live) or `--local`.
 - R2 F1: 1.0000 (must not regress)
