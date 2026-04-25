@@ -170,7 +170,7 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,695 passing (as of 2026-04-23)
+- pytest: 2,700 passing (as of 2026-04-25)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
 - Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate
 - R2 F1: 1.0000 (must not regress)
@@ -256,6 +256,12 @@ Public endpoints: IP-based 60 req/min via `_check_public_rate_limit()`.
 
 ### SSRF protection
 `_validate_webhook_url()` blocks http://, private IPs, loopback, link-local, cloud metadata, .local/.internal hostnames. DNS cache prevents rebinding.
+
+### Daily snapshot keys
+Tenant-scoped: `snapshot:{key_hash}:{agent_id}:{date}`. Previously used global `snapshot:{agent_id}:{date}` — cross-tenant leak fixed in `ef85f63`.
+
+### Auth timing channel
+Invalid API key responses include a 50ms timing floor to prevent key-existence probing. Without this, valid keys (~1ms via memory cache) vs invalid keys (~200ms via full lookup) created a 200x timing channel.
 
 ### Redis TTL policy
 All `redis_set` calls must include explicit TTL. No indefinite keys.
