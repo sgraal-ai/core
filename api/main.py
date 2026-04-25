@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 import stripe
 import requests as http_requests
 import resend
-from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx, redis_delete, _get_session as _get_redis_session
+from api.redis_state import RedisBackedDict, redis_get, redis_set, redis_setnx, redis_delete, redis_available, _get_session as _get_redis_session
 
 
 from concurrent.futures import ThreadPoolExecutor
@@ -10488,9 +10488,15 @@ def explain(req: ExplainRequest, key_record: dict = Depends(verify_api_key)):
     }
 
 
+_METRICS_TOKEN = os.getenv("SGRAAL_METRICS_TOKEN", "")
+
 @app.get("/metrics")
-def metrics(accept: Optional[str] = None):
-    """Prometheus-format metrics export. Also accepts ?format=json."""
+def metrics(request: Request, accept: Optional[str] = None):
+    """Prometheus-format metrics export. Requires SGRAAL_METRICS_TOKEN if set."""
+    if _METRICS_TOKEN:
+        auth = request.headers.get("authorization", "")
+        if auth != f"Bearer {_METRICS_TOKEN}":
+            raise HTTPException(status_code=401, detail="Invalid or missing metrics token")
     if accept == "json":
         return _metrics.to_json()
     from fastapi.responses import PlainTextResponse
@@ -11129,6 +11135,10 @@ def unsubscribe(email: str = Query(...), token: str = Query(...)):
 import time as _time
 
 class _Metrics:
+    # Histogram buckets for latency and omega
+    _LATENCY_BUCKETS = [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]
+    _OMEGA_BUCKETS = [0, 25, 50, 75, 100]
+
     def __init__(self):
         self.preflight_total = 0
         self.heal_total = 0
@@ -11136,6 +11146,11 @@ class _Metrics:
         self.omega_sum = 0.0
         self.response_times: list[float] = []  # seconds
         self.redis_latency_ms: float = 0.0
+        self.latency_hist = {b: 0 for b in self._LATENCY_BUCKETS}
+        self.latency_hist_inf = 0
+        self.omega_hist = {b: 0 for b in self._OMEGA_BUCKETS}
+        self.omega_hist_inf = 0
+        self.active_tenants: set = set()
 
     def record_preflight(self, decision: str, omega: float, duration: float):
         self.preflight_total += 1
@@ -11145,6 +11160,24 @@ class _Metrics:
         # Keep last 1000 response times for p95
         if len(self.response_times) > 1000:
             self.response_times = self.response_times[-1000:]
+        # Histogram: latency
+        placed = False
+        for b in self._LATENCY_BUCKETS:
+            if duration <= b:
+                self.latency_hist[b] += 1
+                placed = True
+                break
+        if not placed:
+            self.latency_hist_inf += 1
+        # Histogram: omega
+        placed = False
+        for b in self._OMEGA_BUCKETS:
+            if omega <= b:
+                self.omega_hist[b] += 1
+                placed = True
+                break
+        if not placed:
+            self.omega_hist_inf += 1
 
     def record_heal(self):
         self.heal_total += 1
@@ -11187,6 +11220,38 @@ class _Metrics:
             "# HELP sgraal_redis_latency_ms Redis latency in milliseconds",
             "# TYPE sgraal_redis_latency_ms gauge",
             f"sgraal_redis_latency_ms {self.redis_latency_ms}",
+            "",
+            "# HELP sgraal_preflight_latency_seconds Preflight latency histogram",
+            "# TYPE sgraal_preflight_latency_seconds histogram",
+        ]
+        _cum = 0
+        for b in self._LATENCY_BUCKETS:
+            _cum += self.latency_hist[b]
+            lines.append(f'sgraal_preflight_latency_seconds_bucket{{le="{b}"}} {_cum}')
+        _cum += self.latency_hist_inf
+        lines.append(f'sgraal_preflight_latency_seconds_bucket{{le="+Inf"}} {_cum}')
+        lines.append(f"sgraal_preflight_latency_seconds_count {self.preflight_total}")
+        lines += [
+            "",
+            "# HELP sgraal_omega Omega score histogram",
+            "# TYPE sgraal_omega histogram",
+        ]
+        _cum = 0
+        for b in self._OMEGA_BUCKETS:
+            _cum += self.omega_hist[b]
+            lines.append(f'sgraal_omega_bucket{{le="{b}"}} {_cum}')
+        _cum += self.omega_hist_inf
+        lines.append(f'sgraal_omega_bucket{{le="+Inf"}} {_cum}')
+        lines.append(f"sgraal_omega_count {self.preflight_total}")
+        lines += [
+            "",
+            "# HELP sgraal_active_tenants Number of distinct tenants seen",
+            "# TYPE sgraal_active_tenants gauge",
+            f"sgraal_active_tenants {len(self.active_tenants)}",
+            "",
+            "# HELP sgraal_redis_health Redis availability (1=up, 0=down)",
+            "# TYPE sgraal_redis_health gauge",
+            f"sgraal_redis_health {1 if redis_available() else 0}",
         ]
         return "\n".join(lines) + "\n"
 
@@ -11198,6 +11263,7 @@ class _Metrics:
             "avg_omega": self.avg_omega(),
             "p95_response_time_ms": self.p95_response_time_ms(),
             "redis_latency_ms": self.redis_latency_ms,
+            "active_tenants": len(self.active_tenants),
         }
 
 
@@ -14939,6 +15005,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     # the FINAL post-override decision is only known after _finalize_decision() below.
     _duration = _time.monotonic() - _t_start
     _metrics.record_preflight(result.recommended_action, omega_out, _duration)
+    _metrics.active_tenants.add(_kh)
     # #83 Named Pattern Detection
     try:
         _patterns = []
