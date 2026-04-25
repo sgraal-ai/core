@@ -1745,6 +1745,16 @@ def certify_verify(req: CertifyVerifyRequest, key_record: dict = Depends(verify_
     if not _hmac_verify.compare_digest(_expected, _got):
         return {"valid": False, "reason": "HMAC mismatch — credential tampered or tenant mismatch", "omega": cs.get("omega"), "issued_at": issued_at, "expired": False}
 
+    # Revocation check (#797)
+    _cred_id = cs.get("id") or proof.get("proofValue", "")[:32]
+    try:
+        _revoked_set = redis_get(f"revoked_vcs:{_kh}")
+        if isinstance(_revoked_set, list) and _cred_id in _revoked_set:
+            return {"valid": False, "reason": "Credential revoked", "omega": cs.get("omega"),
+                    "issued_at": issued_at, "expired": False, "revoked": True}
+    except Exception:
+        pass  # Redis down — skip revocation check (fail open)
+
     # Expiry check
     try:
         _issued = datetime.fromisoformat(issued_at.replace("Z", "+00:00"))
@@ -1777,6 +1787,37 @@ def certify_verify_get_not_supported():
         status_code=405,
         detail="Use POST /v1/certify/verify with certificate in JSON body",
     )
+
+
+# ---- #797 Certificate Revocation ----
+
+class RevokeRequest(BaseModel):
+    reason: str = "unspecified"
+
+@app.post("/v1/credentials/{credential_id}/revoke")
+def revoke_credential(credential_id: str, req: RevokeRequest, tenant: TenantContext = Depends(get_tenant_context)):
+    """Revoke a Sgraal Memory Credential by ID."""
+    _revoke_key = f"revoked_vcs:{tenant.key_hash}"
+    try:
+        existing = redis_get(_revoke_key)
+        revoked_list = existing if isinstance(existing, list) else []
+        if credential_id not in revoked_list:
+            revoked_list.append(credential_id)
+        redis_set(_revoke_key, revoked_list, ttl=2592000)  # 30 days
+    except Exception:
+        raise HTTPException(status_code=503, detail="Redis unavailable — revocation requires Redis")
+    return {"credential_id": credential_id, "revoked": True, "reason": req.reason,
+            "revoked_at": datetime.now(timezone.utc).isoformat()}
+
+@app.get("/v1/credentials/revocation-list")
+def get_revocation_list(tenant: TenantContext = Depends(get_tenant_context)):
+    """Return current revocation list for the tenant."""
+    try:
+        revoked = redis_get(f"revoked_vcs:{tenant.key_hash}")
+    except Exception:
+        revoked = []
+    entries = revoked if isinstance(revoked, list) else []
+    return {"credential_ids": entries[:100], "count": len(entries), "truncated": len(entries) > 100}
 
 
 # ---- Plugin system (registry-only) ----
