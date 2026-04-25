@@ -804,6 +804,34 @@ _DEMO_BLOCKED_PATHS = {
 _DEMO_BLOCKED_PREFIXES = ("/v1/team",)
 
 
+def _check_ip_allowlist(key_hash: str, client_ip: str) -> bool:
+    """Check if client_ip is allowed by the key's IP allowlist.
+
+    Returns True if allowed (or no allowlist set). Raises HTTPException 403 if blocked.
+    """
+    try:
+        allowlist = redis_get(f"ip_allowlist:{key_hash}")
+    except Exception:
+        return True  # Redis down — fail open (don't block legitimate requests)
+    if not allowlist or not isinstance(allowlist, list):
+        return True  # No allowlist set — allow all
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return True  # Unparseable IP — fail open
+    for cidr in allowlist:
+        try:
+            if addr in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            continue  # Skip malformed CIDR entries
+    raise HTTPException(
+        status_code=403,
+        detail={"error": "ip_not_allowed", "client_ip": client_ip},
+    )
+
+
 def verify_api_key(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
@@ -839,6 +867,7 @@ def verify_api_key(
     try:
         cached = redis_get(cache_key)
         if cached and isinstance(cached, dict) and cached.get("valid"):
+            _check_ip_allowlist(key_hash, request.client.host if request.client else "unknown")
             return {"key_hash": key_hash, "customer_id": cached["user_id"], "tier": cached["plan"], "calls_this_month": 0}
     except Exception:
         pass  # Redis down — fall through to Supabase
@@ -857,6 +886,7 @@ def verify_api_key(
                 redis_set(cache_key, {"valid": True, "user_id": result.data[0].get("customer_id", ""), "plan": result.data[0].get("tier", "free")}, ttl=300)
             except Exception:
                 pass
+            _check_ip_allowlist(key_hash, request.client.host if request.client else "unknown")
             return result.data[0]
 
     # Constant-time delay on invalid keys to prevent timing-based key-existence probing.
@@ -5352,6 +5382,42 @@ def rotate_dev_key(key_id: str, key_record: dict = Depends(verify_api_key)):
     new_key = f"sg_dev_{secrets.token_urlsafe(32)}"
     expires = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
     return {"new_api_key": new_key, "old_key_expires_at": expires, "grace_period_seconds": 60}
+
+
+# ---- #796 IP Allowlisting ----
+
+class IPAllowlistRequest(BaseModel):
+    cidrs: list[str]
+
+@app.post("/v1/keys/{key_id}/allowlist")
+def set_ip_allowlist(key_id: str, req: IPAllowlistRequest, tenant: TenantContext = Depends(get_tenant_context)):
+    """Set IP allowlist for the authenticated API key. CIDRs validated via ipaddress.ip_network()."""
+    import ipaddress
+    validated = []
+    for cidr in req.cidrs:
+        try:
+            ipaddress.ip_network(cidr, strict=False)
+            validated.append(cidr)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid CIDR: {cidr}")
+    redis_set(f"ip_allowlist:{tenant.key_hash}", validated, ttl=2592000)  # 30 days
+    return {"key_id": key_id, "cidrs": validated, "count": len(validated)}
+
+@app.get("/v1/keys/{key_id}/allowlist")
+def get_ip_allowlist(key_id: str, tenant: TenantContext = Depends(get_tenant_context)):
+    """Return current IP allowlist for the authenticated API key."""
+    allowlist = redis_get(f"ip_allowlist:{tenant.key_hash}")
+    return {"key_id": key_id, "cidrs": allowlist if isinstance(allowlist, list) else [], "enabled": bool(allowlist)}
+
+@app.delete("/v1/keys/{key_id}/allowlist")
+def clear_ip_allowlist(key_id: str, tenant: TenantContext = Depends(get_tenant_context)):
+    """Clear IP allowlist — allow all IPs."""
+    try:
+        from api.redis_state import redis_delete
+        redis_delete(f"ip_allowlist:{tenant.key_hash}")
+    except Exception:
+        pass
+    return {"key_id": key_id, "cidrs": [], "enabled": False}
 
 
 # ---- #53 Memory Access Tokens ----

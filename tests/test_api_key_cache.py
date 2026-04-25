@@ -28,6 +28,7 @@ def _make_request(path: str = "/v1/preflight"):
     """Mock Request object for verify_api_key (needs request.url.path for demo scope check)."""
     req = MagicMock()
     req.url.path = path
+    req.client.host = "127.0.0.1"
     return req
 
 
@@ -44,7 +45,9 @@ def test_cache_miss_then_supabase_hit_caches(mock_supa, mock_rget, mock_rset):
     result = verify_api_key(_make_request(), _make_credentials())
 
     assert result["customer_id"] == "cus_123"
-    mock_rget.assert_called_once_with(CACHE_KEY)
+    # redis_get called twice: once for API key cache, once for IP allowlist check
+    assert mock_rget.call_count == 2
+    assert mock_rget.call_args_list[0].args == (CACHE_KEY,)
     mock_rset.assert_called_once_with(CACHE_KEY, CACHED_VALUE, ttl=300)
 
 
@@ -59,7 +62,8 @@ def test_cache_hit_skips_supabase(mock_supa, mock_rget, mock_rset):
 
     assert result["customer_id"] == "cus_123"
     assert result["tier"] == "pro"
-    mock_rget.assert_called_once_with(CACHE_KEY)
+    # redis_get called twice: once for API key cache hit, once for IP allowlist
+    assert mock_rget.call_count == 2
     mock_supa.table.assert_not_called()
     mock_rset.assert_not_called()
 
