@@ -15577,6 +15577,16 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         if _nat_cur in _nat_sev_map:
             _set_action(_nat_sev_map[_nat_cur], "detection_naturalness", "FABRICATED escalation")
 
+    # Phase 2 (#783): Self-authored suppression flag
+    # If ALL entries are self-authored (server-derived), suppress SUSPICIOUS escalation
+    # from individual detection layers. MANIPULATED is NEVER suppressed.
+    # NOTE: action_type_escalation is NOT suppressed — SUSPICIOUS + destructive/irreversible
+    # is still high-risk even for self-authored entries (CC-005 regression prevention).
+    _all_self_authored = (
+        _self_authored_results and
+        all(sa.get("derived_is_self_authored") is True for sa in _self_authored_results)
+    )
+
     # Timestamp integrity override — post-reconciliation
     # Corroboration gate: SUSPICIOUS alone → no escalation (fleet_age_collapse on
     # multi-entry controls fires without semantic significance). Requires another
@@ -15597,7 +15607,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         # NOTE: sync_bleed deliberately excluded — sync_bleed's gate checks timestamp,
         # so including it here would create mutual corroboration (two weak signals
         # validating each other without independent confirmation).
-        if _ts_other_layers:
+        if _ts_other_layers and not _all_self_authored:
             _ts_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
             _ts_cur = response["recommended_action"]
             if _ts_cur in _ts_sev_map:
@@ -15607,7 +15617,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     _id_drift = response.get("identity_drift", "CLEAN")
     if _id_drift == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_identity", "MANIPULATED flag")
-    elif _id_drift == "SUSPICIOUS":
+    elif _id_drift == "SUSPICIOUS" and not _all_self_authored:
         _id_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _id_cur = response["recommended_action"]
         if _id_cur in _id_sev_map:
@@ -15617,7 +15627,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     _cc_collapse = response.get("consensus_collapse", "CLEAN")
     if _cc_collapse == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_consensus", "MANIPULATED flag")
-    elif _cc_collapse == "SUSPICIOUS":
+    elif _cc_collapse == "SUSPICIOUS" and not _all_self_authored:
         _cc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _cc_cur = response["recommended_action"]
         if _cc_cur in _cc_sev_map:
@@ -15627,7 +15637,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     _pc_integrity = response.get("provenance_chain_integrity", "CLEAN")
     if _pc_integrity == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_provenance", "MANIPULATED flag")
-    elif _pc_integrity == "SUSPICIOUS":
+    elif _pc_integrity == "SUSPICIOUS" and not _all_self_authored:
         _pc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _pc_cur = response["recommended_action"]
         if _pc_cur in _pc_sev_map:
@@ -15653,7 +15663,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         if _sb_other_layers:
             if _sb_level == "MANIPULATED":
                 _set_action(DecisionAction.BLOCK, "detection_sync_bleed", "MANIPULATED flag (corroborated)")
-            else:
+            elif not _all_self_authored:
                 _sb_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
                 _sb_cur = response["recommended_action"]
                 if _sb_cur in _sb_sev_map:
@@ -15663,7 +15673,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     _cc_level = response.get("confidence_calibration_check", "CLEAN")
     if _cc_level == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_confidence_calibration", "MANIPULATED flag")
-    elif _cc_level == "SUSPICIOUS":
+    elif _cc_level == "SUSPICIOUS" and not _all_self_authored:
         _cc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _cc_cur = response["recommended_action"]
         if _cc_cur in _cc_sev_map:

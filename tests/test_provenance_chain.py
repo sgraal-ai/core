@@ -90,10 +90,12 @@ class TestPreflightIntegration:
         assert resp["recommended_action"] == "BLOCK"
 
     def test_suspicious_escalates(self):
-        """Short chain + high downstream → escalates."""
+        """Short chain + high downstream → escalates (external provenance)."""
         entry = _e(provenance_chain=["agent-01"], downstream=12,
                    trust=0.95, conflict=0.01)
-        resp = _preflight([entry], domain="general", action_type="informational")
+        # Add a second entry with deep chain to prevent self-authored suppression
+        entry2 = _e(id="m2", provenance_chain=["agent-01", "agent-02", "agent-03"], downstream=2)
+        resp = _preflight([entry, entry2], domain="general", action_type="informational")
         assert resp["provenance_chain_integrity"] == "SUSPICIOUS"
         assert resp["recommended_action"] in ("WARN", "ASK_USER", "BLOCK")
 

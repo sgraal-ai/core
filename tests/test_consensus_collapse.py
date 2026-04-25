@@ -195,14 +195,14 @@ class TestPreflightIntegration:
         assert resp["recommended_action"] == "BLOCK"
 
     def test_suspicious_escalates(self):
-        """SUSPICIOUS escalates USE_MEMORY → WARN."""
+        """SUSPICIOUS escalates USE_MEMORY → WARN (external entries with deep provenance)."""
         entries = [
-            _e(id="m1", content="Refund policy updated for standard customers effective immediately.",
-               trust=0.88, conflict=0.03, downstream=6),
-            _e(id="m2", content="Standard customer refund policy updated effective immediately.",
-               trust=0.88, conflict=0.03, downstream=6),
-            _e(id="m3", content="Updated refund policy for standard customers effective immediately.",
-               trust=0.88, conflict=0.03, downstream=6),
+            {**_e(id="m1", content="Refund policy updated for standard customers effective immediately.",
+               trust=0.88, conflict=0.03, downstream=6), "provenance_chain": ["agent_x", "agent_y"]},
+            {**_e(id="m2", content="Standard customer refund policy updated effective immediately.",
+               trust=0.88, conflict=0.03, downstream=6), "provenance_chain": ["agent_x", "agent_y"]},
+            {**_e(id="m3", content="Updated refund policy for standard customers effective immediately.",
+               trust=0.88, conflict=0.03, downstream=6), "provenance_chain": ["agent_x", "agent_y"]},
         ]
         resp = _preflight(entries, domain="general", action_type="informational")
         assert resp["consensus_collapse"] in ("SUSPICIOUS", "MANIPULATED", "CLEAN")

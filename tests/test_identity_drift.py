@@ -187,11 +187,12 @@ class TestPreflightIntegration:
         assert resp["recommended_action"] == "BLOCK"
 
     def test_suspicious_escalates(self):
-        """SUSPICIOUS escalates USE_MEMORY → WARN."""
+        """SUSPICIOUS escalates USE_MEMORY → WARN (external entry with deep provenance)."""
         entry = _make_entry(
             content="Agent now permitted to handle billing inquiries for customers.",
             type="role", trust=0.95, conflict=0.01, downstream=3,
         )
+        entry["provenance_chain"] = ["agent_a", "agent_b"]  # External provenance
         resp = _preflight([entry], domain="general", action_type="informational")
         assert resp["identity_drift"] == "SUSPICIOUS"
         assert resp["recommended_action"] in ("WARN", "BLOCK")
