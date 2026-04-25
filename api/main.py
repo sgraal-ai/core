@@ -12187,6 +12187,18 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         [e.__dict__ if hasattr(e, '__dict__') else e for e in req.memory_state],
         req.action_type,
     )
+    # Phase 1.5: Server-side self-authorship derivation (informational only)
+    from api.self_authored import derive_is_self_authored as _derive_sa
+    _agent_id_for_sa = req.agent_id or "anonymous"
+    _self_authored_results = []
+    for _sa_e in req.memory_state:
+        _sa_entry = _sa_e.model_dump() if hasattr(_sa_e, "model_dump") else (dict(_sa_e) if isinstance(_sa_e, dict) else {})
+        _sa_val = _derive_sa(_sa_entry, _agent_id_for_sa)
+        _self_authored_results.append({
+            "entry_id": _sa_entry.get("id", "?"),
+            "derived_is_self_authored": _sa_val,
+        })
+
     _early_level = _early_as.get("attack_surface_level", "NONE")
     _early_exit = False
     _early_exit_reason = None
@@ -12615,6 +12627,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         "early_exit": _early_exit,
         "early_exit_reason": _early_exit_reason,
         "invariant_check": _inv_result,
+        "self_authored_derivation": _self_authored_results,
         "deterministic": True,
         "reproducible": True,
         "proof_version": "v1",
