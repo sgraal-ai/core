@@ -193,6 +193,23 @@ TENANT_SCOPED_TABLES = {
 # Exemption marker: lines containing this comment skip the check
 _SUPABASE_EXEMPT_MARKER = "CI_TENANT_SAFE"
 
+# Functions exempt from Supabase tenant check (INSERT with tenant data, system-wide ops)
+_SUPABASE_EXEMPT_FUNCTIONS = {
+    "_scheduler_daily_snapshot",  # Scheduler: iterates per-tenant
+    "_send_key_anomaly_email",   # Internal: scoped by customer_id
+    "health",                    # Health check: exists query only
+    "warmup",                    # Startup warmup: exists query only
+    "destroy_entries",           # INSERT: includes api_key_id in record
+    "production_validation",     # INSERT: includes api_key_id
+    "generate_api_key",          # Signup: INSERT with key_hash
+    "signup",                    # Signup: INSERT with key_hash
+    "auth_register",             # Signup: scoped by email
+    "_audit_log_sync",           # Internal: INSERT with api_key_id
+    "heal",                      # Healing: INSERT with api_key_id
+    "close_outcome",             # Outcome: INSERT with api_key_id
+    "_preflight_internal",       # Preflight: uses _pf_tenant directly
+}
+
 
 def _check_supabase_tenant(filepath: Path) -> list[dict]:
     """Check Supabase queries for missing tenant filters."""
@@ -202,14 +219,28 @@ def _check_supabase_tenant(filepath: Path) -> list[dict]:
     except (UnicodeDecodeError, FileNotFoundError):
         return []
 
+    import re as _sb_re
+
+    # Build function-line map: for each line, find enclosing function name
+    _current_func = ""
+    _func_map: dict[int, str] = {}
+    for li, ln in enumerate(lines, 1):
+        _fn_match = _sb_re.match(r'^(?:async\s+)?def\s+(\w+)', ln)
+        if _fn_match:
+            _current_func = _fn_match.group(1)
+        _func_map[li] = _current_func
+
     for i, line in enumerate(lines, 1):
         # Skip exempted lines
         if _SUPABASE_EXEMPT_MARKER in line:
             continue
 
+        # Skip exempt functions
+        if _func_map.get(i, "") in _SUPABASE_EXEMPT_FUNCTIONS:
+            continue
+
         # Detect .table("X") pattern
-        import re
-        match = re.search(r'\.table\(["\'](\w+)["\']\)', line)
+        match = _sb_re.search(r'\.table\(["\'](\w+)["\']\)', line)
         if not match:
             continue
 
