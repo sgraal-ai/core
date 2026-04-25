@@ -172,9 +172,9 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,706 passing (as of 2026-04-25)
+- pytest: 2,708 passing (as of 2026-04-25)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
-- Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate
+- Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate. Diagnosis: 10/17 mismatches are self-authored data (shallow provenance, no external attack) — see `research/r12_mismatch_diagnosis_2026_04_25.md`. Roadmap: #783 `written_by_current_agent` field could resolve up to 8.
 - R2 F1: 1.0000 (must not regress)
 
 ### Session audit summary (2026-04-22/23):
