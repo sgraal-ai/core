@@ -83,7 +83,8 @@ def _preprocess_entries(memory_state: list) -> list:
                  "sync_source_id": getattr(e, "sync_source_id", None),
                  "source_declared_origin": getattr(e, "source_declared_origin", None),
                  "source_actual_origin": getattr(e, "source_actual_origin", None),
-                 "model_confidence": getattr(e, "model_confidence", None)}
+                 "model_confidence": getattr(e, "model_confidence", None),
+                 "written_by_current_agent": getattr(e, "written_by_current_agent", None)}
         content = d.get("content", "")
         content_lower = content.lower()
         tokens = set(w for w in content_lower.split() if len(w) >= 4 and w not in _STOPWORDS)
@@ -104,6 +105,7 @@ def _preprocess_entries(memory_state: list) -> list:
             "source_declared_origin": d.get("source_declared_origin"),
             "source_actual_origin": d.get("source_actual_origin"),
             "model_confidence": d.get("model_confidence"),
+            "written_by_current_agent": d.get("written_by_current_agent"),
         })
     return result
 

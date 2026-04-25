@@ -898,6 +898,8 @@ class MemoryEntryRequest(BaseModel):
     source_declared_origin: Optional[str] = None  # declared provenance origin (PA detector)
     source_actual_origin: Optional[str] = None    # actual provenance origin (PA detector)
     model_confidence: Optional[float] = None      # 0.0-1.0 self-reported confidence (CC detector)
+    # MemCube v4.1 — self-authorship indicator (#783)
+    written_by_current_agent: Optional[bool] = None  # True = agent wrote this entry itself; None = unknown
 
     @field_validator("sync_state")
     @classmethod
