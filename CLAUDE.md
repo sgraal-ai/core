@@ -172,9 +172,9 @@ cd web-static && vercel --prod
 ## Testing
 
 ### Baseline — do not drop below:
-- pytest: 2,713 passing (as of 2026-04-25)
+- pytest: 2,723 passing (as of 2026-04-25)
 - Corpus: 1,190+ adversarial cases (Rounds 1-11)
-- Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate. Diagnosis: 10/17 mismatches are self-authored data — see `research/r12_mismatch_diagnosis_2026_04_25.md`. **#783 Phase 1 DONE**: `written_by_current_agent: Optional[bool]` field added to MemCube v4.1 (schema only, no detection change). Phase 2 (detection adaptation using the field, target ~51/60) is next session.
+- Round 12: 43/60 exact match, 24/24 hard BLOCK, 20% control FP rate. Diagnosis: 10/17 mismatches are self-authored data — see `research/r12_mismatch_diagnosis_2026_04_25.md`. **#783 Phase 1 DONE**: `written_by_current_agent: Optional[bool]` field added to MemCube v4.1. **Phase 1.5 DONE**: server-side `_derive_is_self_authored()` in `api/self_authored.py` — computes self-authorship from provenance metadata (chain depth, source type, origin mismatch, sync_source). Validation: 8/10 R12 self-authored detected, 0/7 R3 false positives, 7/7 external correctly rejected. 2 cases (PS-011, PS-013) have sync metadata and were correctly excluded — need separate sync-aware detection logic in future sprint. Phase 2 (detection adaptation, target ~51/60) is next session.
 - R2 F1: 1.0000 (must not regress)
 
 ### Session audit summary (2026-04-22/23):
