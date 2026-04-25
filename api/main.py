@@ -15587,6 +15587,33 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         all(sa.get("derived_is_self_authored") is True for sa in _self_authored_results)
     )
 
+    # #822: Sync-aware detection suppression
+    # When entries have sync metadata showing a legitimate rolling update (stale entries
+    # don't outnumber current), provenance and sync_bleed SUSPICIOUS signals are expected
+    # artifacts of the version mismatch — not attack indicators. Suppress escalation for:
+    # - sync_bleed SUSPICIOUS (always suppressed when sync is legitimate)
+    # - provenance_chain SUSPICIOUS (only when the sole flag is trust_evolution_anomaly,
+    #   a weak signal from trust variation across fleet agents)
+    # Also, sync version mismatch with stale entries provides soft corroboration for
+    # timestamp_integrity, allowing fleet_age_collapse to escalate when warranted.
+    # NOTE: action_type_escalation is NOT suppressed (CC-005 regression prevention).
+    _sync_signals = response.get("sync_signals", {})
+    _sync_has_metadata = bool(_sync_signals.get("version_count", 0) >= 1)
+    _sync_stale_outnumbers = _sync_signals.get("stale_outnumbers_fresh", False)
+    _sync_legitimate = _sync_has_metadata and not _sync_stale_outnumbers
+    _sync_version_mismatch = (
+        _sync_signals.get("version_count", 0) >= 2 and
+        _sync_signals.get("stale_fraction", 0) > 0
+    )
+    # Provenance suppression only when the sole flag is trust_evolution_anomaly
+    # (trust variation across agents is expected in multi-agent rolling syncs)
+    _pc_flags = response.get("provenance_chain_flags", [])
+    _sync_suppress_pc = (
+        _sync_legitimate and
+        len(_pc_flags) == 1 and
+        _pc_flags[0] == "trust_evolution_anomaly:suspicious"
+    )
+
     # Timestamp integrity override — post-reconciliation
     # Corroboration gate: SUSPICIOUS alone → no escalation (fleet_age_collapse on
     # multi-entry controls fires without semantic significance). Requires another
@@ -15607,7 +15634,10 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         # NOTE: sync_bleed deliberately excluded — sync_bleed's gate checks timestamp,
         # so including it here would create mutual corroboration (two weak signals
         # validating each other without independent confirmation).
-        if _ts_other_layers and not _all_self_authored:
+        # #822: sync_version_mismatch provides soft corroboration — entries with
+        # genuinely different sync versions and stale entries indicate the version
+        # divergence is real, not a fleet_age_collapse false positive.
+        if (_ts_other_layers or _sync_version_mismatch) and not _all_self_authored:
             _ts_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
             _ts_cur = response["recommended_action"]
             if _ts_cur in _ts_sev_map:
@@ -15637,7 +15667,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     _pc_integrity = response.get("provenance_chain_integrity", "CLEAN")
     if _pc_integrity == "MANIPULATED":
         _set_action(DecisionAction.BLOCK, "detection_provenance", "MANIPULATED flag")
-    elif _pc_integrity == "SUSPICIOUS" and not _all_self_authored:
+    elif _pc_integrity == "SUSPICIOUS" and not _all_self_authored and not _sync_suppress_pc:
         _pc_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
         _pc_cur = response["recommended_action"]
         if _pc_cur in _pc_sev_map:
@@ -15663,7 +15693,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         if _sb_other_layers:
             if _sb_level == "MANIPULATED":
                 _set_action(DecisionAction.BLOCK, "detection_sync_bleed", "MANIPULATED flag (corroborated)")
-            elif not _all_self_authored:
+            elif not _all_self_authored and not _sync_legitimate:
                 _sb_sev_map = {"USE_MEMORY": "WARN", "WARN": "ASK_USER"}
                 _sb_cur = response["recommended_action"]
                 if _sb_cur in _sb_sev_map:
