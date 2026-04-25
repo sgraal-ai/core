@@ -838,6 +838,12 @@ def verify_api_key(
                 pass
             return result.data[0]
 
+    # Constant-time delay on invalid keys to prevent timing-based key-existence probing.
+    # Valid keys return via early paths (memory cache ~0ms, Redis ~2ms, Supabase ~50ms).
+    # Without this delay, an attacker can distinguish "key exists" from "key doesn't exist"
+    # by measuring response time (~200x difference).
+    import time as _auth_time
+    _auth_time.sleep(0.05)  # 50ms floor — makes timing analysis impractical
     raise HTTPException(status_code=401, detail="Invalid API key")
 
 
