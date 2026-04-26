@@ -134,9 +134,9 @@ Compare-And-Swap pattern for concurrent Redis updates: `redis_mvcc_get(key)` →
 - **W3C VCs** — `POST /v1/certify` issues SgraalProof2026 credentials
 - **Memory Vaccination** — attack signatures encrypted at rest (AES-256-GCM), fleet-wide immunity, deferred vaccination after detection overrides
 - **RL Q-learning** — per-domain Q-tables, updated via `/v1/outcome`
-- **Production-grade SDKs** (11) — Python (1960 lines), MCP (509), Cloudflare (442), Edge (313), LangChain (274), CLI (253), Emulator (229), Mem0 (153), OpenAI Agents (149), Go (127), n8n (101)
-- **Beta wrappers** (26) — working code but minimal feature surface (<100 lines each): CrewAI, AutoGen, LlamaIndex, Haystack, Semantic Kernel, Memvid, Mnemos, sgraal-rag, Normalizer, LLM Wrapper, Java, Rust, C#/.NET, Pydantic AI, Vercel AI, Bedrock, Azure AI, Google ADK, LangSmith, Langfuse, Zep, Letta, Dify, Langflow, Flowise, Zapier, Make
-- **Roadmap** (4) — docs/proto only, not yet implemented: Embed SDK, VS Code extension, GitHub Action, gRPC
+- **Production-grade SDKs** (23) — Python (1960), MCP (509), Cloudflare (442), Edge (313), LangChain (274), CLI (253), Emulator (229), Mem0 (153), OpenAI Agents (149), Go (127), n8n (101), Memvid (96), Java (92), Mnemos (86), Rust (84), sgraal-rag (80), CrewAI (73), AutoGen (73), Normalizer (62), C#/.NET (52), LlamaIndex (46), Haystack (46), Semantic Kernel (32)
+- **Community wrappers** (14) — thin integrations (typically <50 lines): LLM Wrapper, LangSmith, Google ADK, Langfuse, Bedrock, Azure AI, Zep, Pydantic AI, Letta, Flowise, Vercel AI, Dify, Zapier, Make
+- **Roadmap** (4) — docs/proto only: Embed SDK, VS Code extension, GitHub Action, gRPC
 - **MCP server** — `@sgraal/mcp` npm package for Claude Desktop
 - **Dashboard** — Next.js at app.sgraal.com, connected to live API
 - **Landing page** — Static HTML at sgraal.com (web-static/)

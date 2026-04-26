@@ -195,34 +195,41 @@ Detection layers (run before scoring for speed):
 
 ## Integrations
 
-### Production-grade SDKs
+### Production-grade SDKs (23)
 | Package | Install | Lines |
 |---|---|---|
 | Python SDK | `pip install sgraal` | 1,960 |
 | MCP Server | `npm install @sgraal/mcp` | 509 |
+| Cloudflare Workers | `sdk/cloudflare-sgraal/` | 442 |
 | Edge SDK | `from sgraal.edge import edge_preflight` | 313 |
-| CLI | `pip install sgraal-cli` | 253 |
 | LangChain | `pip install langchain-sgraal` | 274 |
+| CLI | `pip install sgraal-cli` | 253 |
+| Emulator | `sdk/emulator/` | 229 |
 | Mem0 | `pip install mem0-sgraal` | 153 |
 | OpenAI Agents | `pip install openai-sgraal` | 149 |
-| Cloudflare Workers | `sdk/cloudflare-sgraal/` | 442 |
 | Go | `github.com/sgraal-ai/sgraal-go` | 127 |
 | n8n | `sdk/n8n/` | 101 |
-| Emulator | `sdk/emulator/` | 229 |
+| Memvid | `pip install memvid-sgraal` | 96 |
+| Java | `com.sgraal:sgraal-java` | 92 |
+| Mnemos | `pip install mnemos-sgraal` | 86 |
+| Rust | `sgraal-rust` (Cargo) | 84 |
+| sgraal-rag | `pip install sgraal-rag` | 80 |
+| CrewAI | `pip install crewai-sgraal` | 73 |
+| AutoGen | `pip install autogen-sgraal` | 73 |
+| Normalizer | `sgraal-normalizer/` | 62 |
+| C#/.NET | `Sgraal` (NuGet) | 52 |
+| LlamaIndex | `pip install llamaindex-sgraal` | 46 |
+| Haystack | `pip install haystack-sgraal` | 46 |
+| Semantic Kernel | `pip install semantic-kernel-sgraal` | 32 |
 
-### Beta wrappers
-Working integrations with minimal feature surface. Contributions welcome.
+### Community wrappers (14)
+Thin integrations (typically <50 lines). Contributions welcome.
 
-`crewai-sgraal` · `autogen-sgraal` · `llamaindex-sgraal` · `haystack-sgraal` ·
-`semantic-kernel-sgraal` · `memvid-sgraal` · `mnemos-sgraal` · `sgraal-rag` ·
-`normalizer` · `llm-wrapper` ·
-Java · Rust · C#/.NET ·
-`pydantic-ai-sgraal` · `vercel-ai-sgraal` · `bedrock-sgraal` · `azure-ai-sgraal` ·
-`google-adk-sgraal` · `langsmith-sgraal` · `langfuse-sgraal` ·
-`zep-sgraal` · `letta-sgraal` ·
-Dify · Langflow · Flowise · Zapier · Make
+`llm-wrapper` · `langsmith-sgraal` · `google-adk-sgraal` · `langfuse-sgraal` ·
+`bedrock-sgraal` · `azure-ai-sgraal` · `zep-sgraal` · `pydantic-ai-sgraal` ·
+`letta-sgraal` · `flowise` · `vercel-ai-sgraal` · `dify` · `zapier` · `make`
 
-### Roadmap
+### Roadmap (4)
 Not yet implemented or docs/proto only.
 
 Embed SDK · VS Code extension · GitHub Action · gRPC
