@@ -870,6 +870,23 @@ def _check_ip_allowlist(key_hash: str, client_ip: str) -> bool:
     )
 
 
+def _check_key_expiry(key_hash: str) -> None:
+    """Check if key is past its rotation grace period. Raises 401 if expired."""
+    try:
+        expiry = redis_get(f"key_expires:{key_hash[:16]}")
+        if expiry and isinstance(expiry, dict):
+            expires_at = expiry.get("expires_at", "")
+            if expires_at:
+                exp_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) > exp_dt:
+                    raise HTTPException(status_code=401,
+                                        detail="API key expired after rotation. Use the new key.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # Redis down — fail open
+
+
 def verify_api_key(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
@@ -905,6 +922,7 @@ def verify_api_key(
     try:
         cached = redis_get(cache_key)
         if cached and isinstance(cached, dict) and cached.get("valid"):
+            _check_key_expiry(key_hash)
             _check_ip_allowlist(key_hash, request.client.host if request.client else "unknown")
             return {"key_hash": key_hash, "customer_id": cached["user_id"], "tier": cached["plan"], "calls_this_month": 0}
     except Exception:
@@ -924,6 +942,7 @@ def verify_api_key(
                 redis_set(cache_key, {"valid": True, "user_id": result.data[0].get("customer_id", ""), "plan": result.data[0].get("tier", "free")}, ttl=300)
             except Exception:
                 pass
+            _check_key_expiry(key_hash)
             _check_ip_allowlist(key_hash, request.client.host if request.client else "unknown")
             return result.data[0]
 
@@ -5469,12 +5488,58 @@ def revoke_dev_key(key_id: str, key_record: dict = Depends(verify_api_key)):
     _audit_log("key_revoked", str(uuid.uuid4()), key_record, "REVOKED", 0, {"key_id": key_id})
     return {"revoked": key_id}
 
+_ROTATE_GRACE_SECONDS = 86400  # 24h grace period for old key
+
 @app.post("/v1/api-keys/{key_id}/rotate")
 def rotate_dev_key(key_id: str, key_record: dict = Depends(verify_api_key)):
+    """Rotate an API key: activate new key immediately, old key gets 24h grace period."""
     _check_rate_limit(key_record)
-    new_key = f"sg_dev_{secrets.token_urlsafe(32)}"
-    expires = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
-    return {"new_api_key": new_key, "old_key_expires_at": expires, "grace_period_seconds": 60}
+    _kh = _safe_key_hash(key_record)
+    now = datetime.now(timezone.utc)
+    expires_at = (now + timedelta(seconds=_ROTATE_GRACE_SECONDS)).isoformat()
+
+    # Generate and activate new key
+    new_key = _generate_api_key()
+    new_hash = _hash_key(new_key)
+    _dev_keys[new_hash] = {"name": f"Rotated from {key_id}", "hash": new_hash, "active": True,
+                           "created_at": now.isoformat(), "parent_key_hash": _kh}
+    # Prime Redis cache for immediate usability
+    _gen_tier = key_record.get("tier", "free")
+    _gen_cid = key_record.get("customer_id", f"rot_{new_hash[:12]}")
+    try:
+        redis_set(f"api_key_valid:{new_hash[:16]}", {"valid": True, "user_id": _gen_cid, "plan": _gen_tier}, ttl=300)
+    except Exception:
+        pass
+
+    # Mark old key with grace period expiry
+    try:
+        redis_set(f"key_expires:{key_id}", {"expires_at": expires_at, "replaced_by": new_hash[:16]},
+                  ttl=_ROTATE_GRACE_SECONDS + 3600)  # TTL slightly longer than grace
+    except Exception:
+        pass
+
+    # If rotating again within grace, invalidate the oldest key immediately
+    for kh, v in list(_dev_keys.items()):
+        if kh[:16] == key_id and v.get("expires_at"):
+            v["active"] = False
+            try:
+                redis_delete(f"api_key_valid:{key_id}")
+                redis_delete(f"key_expires:{key_id}")
+            except Exception:
+                pass
+
+    # Set grace period on current old key
+    for kh, v in _dev_keys.items():
+        if kh[:16] == key_id and v.get("active", True):
+            v["expires_at"] = expires_at
+            break
+
+    _audit_log("key_rotated", str(uuid.uuid4()), key_record, "ROTATED", 0,
+               {"old_key_id": key_id, "new_key_id": new_hash[:16], "grace_period_seconds": _ROTATE_GRACE_SECONDS})
+
+    trunc = new_key[:12] + "..." + new_key[-4:]
+    return {"new_api_key": new_key, "key_truncated": trunc, "new_key_id": new_hash[:16],
+            "old_key_expires_at": expires_at, "grace_period_seconds": _ROTATE_GRACE_SECONDS}
 
 
 # ---- #796 IP Allowlisting ----

@@ -8828,7 +8828,7 @@ class TestDeveloperAPIKeys:
     def test_grace_period(self):
         r = client.post("/v1/api-keys?name=grace", headers=AUTH)
         rot = client.post(f"/v1/api-keys/{r.json()['id']}/rotate", headers=AUTH)
-        assert rot.json()["grace_period_seconds"] == 60
+        assert rot.json()["grace_period_seconds"] == 86400  # 24h grace period
     def test_key_prefix(self):
         r = client.post("/v1/api-keys", headers=AUTH)
         assert r.json()["api_key"].startswith("sg_dev_")

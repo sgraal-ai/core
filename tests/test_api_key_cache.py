@@ -45,8 +45,8 @@ def test_cache_miss_then_supabase_hit_caches(mock_supa, mock_rget, mock_rset):
     result = verify_api_key(_make_request(), _make_credentials())
 
     assert result["customer_id"] == "cus_123"
-    # redis_get called twice: once for API key cache, once for IP allowlist check
-    assert mock_rget.call_count == 2
+    # redis_get called 3 times: API key cache, key expiry check, IP allowlist check
+    assert mock_rget.call_count == 3
     assert mock_rget.call_args_list[0].args == (CACHE_KEY,)
     mock_rset.assert_called_once_with(CACHE_KEY, CACHED_VALUE, ttl=300)
 
@@ -62,8 +62,8 @@ def test_cache_hit_skips_supabase(mock_supa, mock_rget, mock_rset):
 
     assert result["customer_id"] == "cus_123"
     assert result["tier"] == "pro"
-    # redis_get called twice: once for API key cache hit, once for IP allowlist
-    assert mock_rget.call_count == 2
+    # redis_get called 3 times: API key cache hit, key expiry, IP allowlist
+    assert mock_rget.call_count == 3
     mock_supa.table.assert_not_called()
     mock_rset.assert_not_called()
 
