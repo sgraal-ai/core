@@ -425,6 +425,21 @@ if _ENV != "development":
 app.add_middleware(CORSMiddleware, allow_origins=_ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 
+_ADMIN_TOKEN = os.getenv("SGRAAL_ADMIN_TOKEN", "")
+
+@app.middleware("http")
+async def endpoint_tracking_middleware(request, call_next):
+    """Track last-called timestamp per endpoint path for inventory audit (#834)."""
+    response = await call_next(request)
+    # Best-effort, async — don't block the response
+    _path = request.url.path
+    if _path.startswith("/v1/") and response.status_code < 500:
+        try:
+            redis_set(f"endpoint_last_called:{_path}", {"ts": _time.time(), "status": response.status_code}, ttl=7776000)  # 90 days
+        except Exception:
+            pass
+    return response
+
 @app.middleware("http")
 async def sgraal_headers_middleware(request, call_next):
     """Copy _headers from JSON response body into actual HTTP response headers.
@@ -1512,6 +1527,43 @@ def get_stripe_dead_letter(key_record: dict = Depends(verify_api_key)):
     except Exception:
         items = []
     return {"items": items[-50:], "count": len(items), "truncated": len(items) > 50}
+
+
+@app.get("/v1/admin/endpoint-inventory")
+def get_endpoint_inventory(request: Request):
+    """List all endpoints with last-called timestamps. Requires SGRAAL_ADMIN_TOKEN."""
+    if not _ADMIN_TOKEN:
+        raise HTTPException(status_code=404, detail="Not found")
+    auth = request.headers.get("authorization", "")
+    if auth != f"Bearer {_ADMIN_TOKEN}":
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    now = _time.time()
+    routes = []
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        if not path or not path.startswith("/v1/"):
+            continue
+        methods = getattr(route, "methods", set())
+        try:
+            data = redis_get(f"endpoint_last_called:{path}")
+            ts = data.get("ts", 0) if isinstance(data, dict) else 0
+        except Exception:
+            ts = 0
+        age_days = round((now - ts) / 86400, 1) if ts > 0 else None
+        status = "active"
+        if age_days is None:
+            status = "never_called"
+        elif age_days > 90:
+            status = "likely_dead"
+        elif age_days > 30:
+            status = "candidate_for_deprecation"
+        routes.append({"path": path, "methods": sorted(methods) if methods else [],
+                       "last_called_age_days": age_days, "status": status})
+    routes.sort(key=lambda r: r.get("last_called_age_days") or 999999, reverse=True)
+    return {"endpoints": routes, "total": len(routes),
+            "likely_dead": sum(1 for r in routes if r["status"] == "likely_dead"),
+            "candidate_for_deprecation": sum(1 for r in routes if r["status"] == "candidate_for_deprecation"),
+            "never_called": sum(1 for r in routes if r["status"] == "never_called")}
 
 
 def _rl_persistence_status() -> dict:
