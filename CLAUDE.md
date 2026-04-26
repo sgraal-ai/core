@@ -197,6 +197,15 @@ cd web-static && vercel --prod
 - **Sprint 62 features**: s_relevance analysis, behavioral-profile, mvmem, recover pipeline
 - **0 regressions**: all baselines preserved throughout
 
+### #873 SDK reference audit (2026-04-26):
+- **12 commits** in core, **3 commits** in web-static. Production deploy verified.
+- **Final tier classification:**
+  - Production-grade (23): Python, MCP, Cloudflare, Edge, LangChain, CLI, Emulator, Mem0, OpenAI Agents, Go, n8n, Memvid, Java, Mnemos, Rust, sgraal-rag, CrewAI, AutoGen, Normalizer, C#/.NET, LlamaIndex, Haystack, Semantic Kernel
+  - Community wrappers (14): typically <50 lines — LLM Wrapper, LangSmith, Google ADK, Langfuse, Bedrock, Azure AI, Zep, Pydantic AI, Letta, Flowise, Vercel AI, Dify, Zapier, Make
+  - Roadmap (4): Embed SDK, VS Code, GitHub Action, gRPC
+- **Vaporware removed** (5 zero-code badges): AutoGPT, BabyAGI, Pinecone, Weaviate, Milvus.
+- **Consistency verified** across landing page, docs.html, README.md, CLAUDE.md, investor pitch.
+
 ### Scoring weight note:
 - `s_recovery` has **negative weight** (-0.10) — intentional
 - Weights normalized by `sum(abs(applied_weights))` so omega ∈ [0, 100]
