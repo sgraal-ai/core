@@ -4,6 +4,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import RedirectResponse, PlainTextResponse
 from pydantic import BaseModel, field_validator
 from typing import Any, Literal, Optional
+import statistics as _statistics
+from api.invariants import check_invariants as _check_inv
+from api.self_authored import derive_is_self_authored as _derive_sa
+from scoring_engine.omega_mem import WEIGHTS as _BASE_WEIGHTS, C_ACTION, C_DOMAIN
 from scoring_engine.constants import (  # #4: canonical decision enum
     DecisionAction,
     LANDAUER_CONSTANT_JOULES_PER_BIT,
@@ -12076,7 +12080,6 @@ def close_outcome(req: OutcomeRequest, key_record: dict = Depends(verify_api_key
     # 7. Shadow calibration: adjust core scoring weights from outcome
     _weight_calibrated = False
     try:
-        from scoring_engine.omega_mem import WEIGHTS as _BASE_WEIGHTS
         _cal_lr = 0.001  # small learning rate
         _kh_cal = _safe_key_hash(key_record)
         _domain_cal = outcome.get("domain", "general")
@@ -12199,7 +12202,6 @@ def get_repair_effectiveness(key_record: dict = Depends(verify_api_key), limit: 
 @app.get("/v1/weights/current")
 def get_current_weights(key_record: dict = Depends(verify_api_key), domain: str = "general"):
     """Return current calibrated weights vs baseline, with drift."""
-    from scoring_engine.omega_mem import WEIGHTS as _BASE_WEIGHTS
     _kh = _safe_key_hash(key_record)
     _cal_key = f"calibrated_weights:{_kh}:{domain}"
     _cal_stored = _load_store(_cal_key, None)
@@ -12331,7 +12333,7 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         A typo like "Block" or "block" raises ValueError at the call site
         instead of silently producing an invalid response.
         """
-        from scoring_engine.constants import DecisionAction
+
         # Validate — will raise ValueError for typos like "Block", "block", "BLCK"
         DecisionAction(action)
         response["recommended_action"] = action
@@ -12599,13 +12601,11 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         {"consensus_collapse": _early_levels[2]},
     )
     # Explicit 4-invariant validation — fast-path on structural impossibilities
-    from api.invariants import check_invariants as _check_inv
     _inv_result = _check_inv(
         [e.__dict__ if hasattr(e, '__dict__') else e for e in req.memory_state],
         req.action_type,
     )
     # Phase 1.5: Server-side self-authorship derivation (informational only)
-    from api.self_authored import derive_is_self_authored as _derive_sa
     _agent_id_for_sa = req.agent_id or "anonymous"
     _self_authored_results = []
     for _sa_e in req.memory_state:
@@ -12623,7 +12623,6 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _scoring_skipped = True
         _early_exit = True
         _early_exit_reason = f"Invariant {_inv_result['violated_invariant']} clear violation"
-        from scoring_engine.omega_mem import PreflightResult
         result = PreflightResult(omega_mem_final=100.0, recommended_action="BLOCK", assurance_score=0.0,
                              explainability_note=f"Invariant fast-path: {_early_exit_reason}",
                              component_breakdown={}, repair_plan=[], healing_counter=0)
@@ -12632,7 +12631,6 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _scoring_skipped = True
         _early_exit = True
         _early_exit_reason = f"MANIPULATED detection at {_early_level} level ({_manip_count} MANIPULATED + {_susp_count} SUSPICIOUS)"
-        from scoring_engine.omega_mem import PreflightResult
         result = PreflightResult(omega_mem_final=100.0, recommended_action="BLOCK", assurance_score=0.0,
                              explainability_note=f"Detection short circuit: {_early_exit_reason}",
                              component_breakdown={}, repair_plan=[], healing_counter=0)
@@ -12641,7 +12639,6 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
         _scoring_skipped = True
         _early_exit = True
         _early_exit_reason = f"MANIPULATED detection on {req.action_type} action"
-        from scoring_engine.omega_mem import PreflightResult
         result = PreflightResult(omega_mem_final=100.0, recommended_action="BLOCK", assurance_score=0.0,
                              explainability_note=f"Detection short circuit: {_early_exit_reason}",
                              component_breakdown={}, repair_plan=[], healing_counter=0)
@@ -15440,7 +15437,6 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
 
     # FIX 1: Component breakdown reconciliation — recompute omega from mutated breakdown
     try:
-        from scoring_engine.omega_mem import WEIGHTS as _BASE_WEIGHTS, C_ACTION, C_DOMAIN
         _final_cb = response.get("component_breakdown", {})
         _used_weights = req.custom_weights if req.custom_weights else _BASE_WEIGHTS
         _omega_recomputed = sum(_used_weights.get(k, _BASE_WEIGHTS.get(k, 0)) * v for k, v in _final_cb.items() if k in _used_weights or k in _BASE_WEIGHTS)
