@@ -5542,6 +5542,60 @@ def rotate_dev_key(key_id: str, key_record: dict = Depends(verify_api_key)):
             "old_key_expires_at": expires_at, "grace_period_seconds": _ROTATE_GRACE_SECONDS}
 
 
+# ---- #831 Stolen API key detection ----
+
+def _check_key_anomaly(key_hash: str, client_ip: str, request_hour_utc: int) -> None:
+    """Lightweight anomaly detection on API key usage patterns.
+
+    Tracks per-key baseline (country, hour histogram, domains) in Redis.
+    On 2+ anomaly signals, logs a warning. Alert-only, never blocks.
+    """
+    baseline_key = f"key_baseline:{key_hash}"
+    try:
+        baseline = redis_get(baseline_key)
+    except Exception:
+        return  # Redis down — skip
+    if not baseline or not isinstance(baseline, dict):
+        # No baseline yet — establish one
+        redis_set(baseline_key, {
+            "last_ip": client_ip,
+            "hour_histogram": [0] * 24,
+            "first_seen": _time.time(),
+            "request_count": 0,
+        }, ttl=604800)  # 7 days
+        return
+
+    # Update baseline
+    request_count = baseline.get("request_count", 0) + 1
+    hour_hist = baseline.get("hour_histogram", [0] * 24)
+    if len(hour_hist) == 24 and 0 <= request_hour_utc < 24:
+        hour_hist[request_hour_utc] += 1
+
+    anomaly_signals = 0
+
+    # Signal 1: IP changed from last seen
+    last_ip = baseline.get("last_ip", "")
+    if last_ip and client_ip != last_ip and request_count > 10:
+        anomaly_signals += 1
+
+    # Signal 2: Request hour outside typical range (peak ± 4h)
+    if request_count > 20 and sum(hour_hist) > 0:
+        peak_hour = hour_hist.index(max(hour_hist))
+        distance = min(abs(request_hour_utc - peak_hour), 24 - abs(request_hour_utc - peak_hour))
+        if distance > 4:
+            anomaly_signals += 1
+
+    # Update stored baseline
+    baseline["last_ip"] = client_ip
+    baseline["hour_histogram"] = hour_hist
+    baseline["request_count"] = request_count
+    redis_set(baseline_key, baseline, ttl=604800)
+
+    if anomaly_signals >= 2:
+        logger.warning("Key anomaly detected: key_hash=%s, signals=%d, ip=%s, hour=%d",
+                       key_hash[:12], anomaly_signals, client_ip, request_hour_utc)
+
+
 # ---- #796 IP Allowlisting ----
 
 class IPAllowlistRequest(BaseModel):
@@ -15123,6 +15177,11 @@ def _preflight_internal(req: PreflightRequest, key_record: dict, client_ip: str 
     _duration = _time.monotonic() - _t_start
     _metrics.record_preflight(result.recommended_action, omega_out, _duration)
     _metrics.active_tenants.add(_kh)
+    # #831 Anomaly detection (async, best-effort)
+    try:
+        _check_key_anomaly(_kh, client_ip, datetime.now(timezone.utc).hour)
+    except Exception:
+        pass
     # #83 Named Pattern Detection
     try:
         _patterns = []
