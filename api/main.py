@@ -11520,6 +11520,39 @@ def _dispatch_security_event(event_type: str, details: dict, key_hash: str):
     _dispatch_security_event_impl(event_type, details, key_hash, webhooks=_webhooks)
 
 
+class AuditLogExtra(BaseModel):
+    """Typed schema for audit_log.extra JSONB field (#841).
+
+    New writes are validated. Existing rows remain as-is (no migration).
+    """
+    # Decision context
+    omega: Optional[float] = None
+    decision: Optional[str] = None
+    detection_layers_fired: Optional[list[str]] = None
+    # Request context
+    client_ip: Optional[str] = None
+    user_agent: Optional[str] = None
+    request_id: Optional[str] = None
+    # Performance
+    latency_ms: Optional[float] = None
+    # Free-form for backward compat
+    custom: Optional[dict[str, Any]] = None
+
+    model_config = {"extra": "allow"}  # backward compat: unknown fields accepted
+
+
+def _validate_audit_extra(extra: dict) -> dict:
+    """Validate and normalize audit_log.extra. Returns cleaned dict."""
+    if not extra:
+        return {}
+    try:
+        validated = AuditLogExtra(**extra)
+        return validated.model_dump(exclude_none=True)
+    except Exception:
+        # Backward compat: if validation fails, wrap in custom field
+        return {"custom": extra}
+
+
 def _audit_log_sync(event_type: str, request_id: str, key_record: dict, decision: str, omega: float, extra: dict = None):
     """Synchronous Supabase audit write with retry. Called from a thread pool."""
     _sb = supabase_service_client or supabase_client
@@ -11533,7 +11566,7 @@ def _audit_log_sync(event_type: str, request_id: str, key_record: dict, decision
         "omega_mem_final": omega,
     }
     if extra:
-        record.update(extra)
+        record.update(_validate_audit_extra(extra))
     last_err = None
     for attempt in range(3):
         try:
