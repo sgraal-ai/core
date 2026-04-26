@@ -193,32 +193,39 @@ Detection layers (run before scoring for speed):
 
 ---
 
-## Integrations (43)
+## Integrations
 
-### SDKs
-| Language | Package |
-|---|---|
-| Python | `pip install sgraal` |
-| Node.js | `npm install @sgraal/mcp` |
-| Go | `github.com/sgraal-ai/sgraal-go` |
-| Java | `com.sgraal:sgraal-java:0.1.0` |
-| Rust | `sgraal-rust` (Cargo) |
-| C# / .NET | `Sgraal` (NuGet) |
-| CLI | `pip install sgraal-cli` |
+### Production-grade SDKs
+| Package | Install | Lines |
+|---|---|---|
+| Python SDK | `pip install sgraal` | 1,960 |
+| MCP Server | `npm install @sgraal/mcp` | 509 |
+| Edge SDK | `from sgraal.edge import edge_preflight` | 313 |
+| CLI | `pip install sgraal-cli` | 253 |
+| LangChain | `pip install langchain-sgraal` | 274 |
+| Mem0 | `pip install mem0-sgraal` | 153 |
+| OpenAI Agents | `pip install openai-sgraal` | 149 |
+| Cloudflare Workers | `sdk/cloudflare-sgraal/` | 442 |
+| Go | `github.com/sgraal-ai/sgraal-go` | 127 |
+| n8n | `sdk/n8n/` | 101 |
+| Emulator | `sdk/emulator/` | 229 |
 
-### AI Frameworks
-`langchain-sgraal` · `llamaindex-sgraal` · `crewai-sgraal` · `autogen-sgraal`
-`mem0-sgraal` · `openai-sgraal` · `vercel-ai-sgraal` · `pydantic-ai-sgraal`
-`semantic-kernel-sgraal` · `haystack-sgraal` · `langsmith-sgraal` · `langfuse-sgraal`
-`bedrock-sgraal` · `azure-ai-sgraal` · `google-adk-sgraal` · `sgraal-rag`
-`zep-sgraal` · `letta-sgraal` · `mnemos-sgraal` · `memvid-sgraal`
+### Beta wrappers
+Working integrations with minimal feature surface. Contributions welcome.
 
-### Workflow & DevTools
-`n8n-nodes-sgraal` · GitHub Action · VS Code extension · gRPC (port 50051)
-Dify · Langflow · Flowise · sgraal-cli · Sgraal Emulator
+`crewai-sgraal` · `autogen-sgraal` · `llamaindex-sgraal` · `haystack-sgraal` ·
+`semantic-kernel-sgraal` · `memvid-sgraal` · `mnemos-sgraal` · `sgraal-rag` ·
+`normalizer` · `llm-wrapper` ·
+Java · Rust · C#/.NET ·
+`pydantic-ai-sgraal` · `vercel-ai-sgraal` · `bedrock-sgraal` · `azure-ai-sgraal` ·
+`google-adk-sgraal` · `langsmith-sgraal` · `langfuse-sgraal` ·
+`zep-sgraal` · `letta-sgraal` ·
+Dify · Langflow · Flowise · Zapier · Make
 
-### MCP
-`@sgraal/mcp` — Claude Desktop, Cursor, Windsurf
+### Roadmap
+Not yet implemented or docs/proto only.
+
+Embed SDK · VS Code extension · GitHub Action · gRPC
 
 ---
 
