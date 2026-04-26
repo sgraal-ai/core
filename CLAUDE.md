@@ -134,8 +134,9 @@ Compare-And-Swap pattern for concurrent Redis updates: `redis_mvcc_get(key)` →
 - **W3C VCs** — `POST /v1/certify` issues SgraalProof2026 credentials
 - **Memory Vaccination** — attack signatures encrypted at rest (AES-256-GCM), fleet-wide immunity, deferred vaccination after detection overrides
 - **RL Q-learning** — per-domain Q-tables, updated via `/v1/outcome`
-- **Bridge SDKs** (23 verified) — Python, Go, Java, Rust, C#, MCP, Mem0, LangChain, LlamaIndex, CrewAI, AutoGen, Semantic Kernel, Haystack, OpenAI, Cloudflare, n8n, Dify, Langflow, Flowise, Zapier, Make, Edge, CLI
-- **Claimed but not implemented** (10) — embed SDK, LLM wrapper, normalizer, pydantic-ai, vercel-ai, bedrock, azure-ai, google-adk, langsmith, langfuse. Referenced in backlog/docs but no code in repo.
+- **Production-grade SDKs** (11) — Python (1960 lines), MCP (509), Cloudflare (442), Edge (313), LangChain (274), CLI (253), Emulator (229), Mem0 (153), OpenAI Agents (149), Go (127), n8n (101)
+- **Beta wrappers** (26) — working code but minimal feature surface (<100 lines each): CrewAI, AutoGen, LlamaIndex, Haystack, Semantic Kernel, Memvid, Mnemos, sgraal-rag, Normalizer, LLM Wrapper, Java, Rust, C#/.NET, Pydantic AI, Vercel AI, Bedrock, Azure AI, Google ADK, LangSmith, Langfuse, Zep, Letta, Dify, Langflow, Flowise, Zapier, Make
+- **Roadmap** (4) — docs/proto only, not yet implemented: Embed SDK, VS Code extension, GitHub Action, gRPC
 - **MCP server** — `@sgraal/mcp` npm package for Claude Desktop
 - **Dashboard** — Next.js at app.sgraal.com, connected to live API
 - **Landing page** — Static HTML at sgraal.com (web-static/)
